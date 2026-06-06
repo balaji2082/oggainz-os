@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Subscriptions · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Subscriptions</h1>
+  <span class="spacer"></span>
+  <a class="btn btn-primary btn-sm" href="{{ url_for('subscription_new') }}">+ New</a>
+</div>
+
+<div class="row" style="margin-bottom:12px; gap:8px">
+  <a class="chip {{ 'chip-active' if not status else 'chip-line' }}" href="{{ url_for('subscriptions') }}">All {{ counts.values()|sum }}</a>
+  <a class="chip {{ 'chip-active' if status=='Active' else 'chip-line' }}" href="{{ url_for('subscriptions', status='Active') }}">Active {{ counts.get('Active',0) + counts.get('Ending Soon',0) }}</a>
+  <a class="chip {{ 'chip-ending' if status=='Ending Soon' else 'chip-line' }}" href="{{ url_for('subscriptions', status='Ending Soon') }}">Ending Soon {{ counts.get('Ending Soon',0) }}</a>
+  <a class="chip {{ 'chip-completed' if status=='Completed' else 'chip-line' }}" href="{{ url_for('subscriptions', status='Completed') }}">Completed {{ counts.get('Completed',0) }}</a>
+  {% if counts.get('Paused',0) %}<a class="chip {{ 'chip-paused' if status=='Paused' else 'chip-line' }}" href="{{ url_for('subscriptions', status='Paused') }}">Paused {{ counts.get('Paused',0) }}</a>{% endif %}
+  <a class="chip {{ 'chip-unpaid' if status=='Unpaid' else 'chip-line' }}" href="{{ url_for('subscriptions', status='Unpaid') }}">Unpaid {{ counts_unpaid }}</a>
+</div>
+
+<form class="search" method="get" style="margin-bottom:14px">
+  {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+  <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+  <input name="q" value="{{ q }}" placeholder="Search name, plan or ID…" onchange="this.form.submit()">
+</form>
+
+<div class="list">
+  {% for r in rows %}
+  <a class="litem" href="{{ url_for('subscription_detail', sid=r.id) }}">
+    <div class="avatar">{{ r.customer_name[:1] if r.customer_name }}</div>
+    <div class="grow">
+      <div class="t">{{ r.customer_name }}
+        {% if r.status=='Active' %}<span class="chip chip-active">Active</span>
+        {% elif r.status=='Ending Soon' %}<span class="chip chip-ending">⚠ Ending Soon</span>
+        {% elif r.status=='Paused' %}<span class="chip chip-paused">Paused</span>
+        {% else %}<span class="chip chip-completed">Completed</span>{% endif %}
+        {% if r.payment_status!='Paid' %}<span class="chip chip-unpaid">{{ r.payment_status }}</span>{% endif %}
+      </div>
+      <div class="s">{{ r.id }} · {{ r.plan_name }} · {{ r.duration }}</div>
+      <div class="prog" style="margin-top:7px">
+        <i class="done" style="width:{{ (100*(r.delivered_count or 0)/(r.total_meals_scheduled or 1))|round(0,'floor') }}%"></i>
+      </div>
+      <div class="s" style="margin-top:4px">{{ r.delivered_count or 0 }}/{{ r.total_meals_scheduled }} delivered
+        · {{ r.remaining_meals or 0 }} left{% if r.skipped_count %} <span class="pill-skip" title="meals skipped — these carry forward">{{ r.skipped_count }} skipped</span>{% endif %}</div>
+    </div>
+    <div class="right"><b>{{ r.total_amount|inr }}</b></div>
+  </a>
+  {% else %}
+  <div class="empty"><div class="big">📦</div>No subscriptions found.</div>
+  {% endfor %}
+</div>
+{% endblock %}

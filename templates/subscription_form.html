@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if sub else 'New' }} subscription · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('subscriptions') if not sub else url_for('subscription_detail', sid=sub.id) }}">‹ Cancel</a>
+  <h1 style="margin:0 0 0 6px">{{ 'Edit subscription' if sub else 'New subscription' }}</h1>
+</div>
+
+<form method="post" class="card">
+  <div class="form-grid">
+    {% if not sub %}
+    <div class="full">
+      <label>Customer</label>
+      <select name="customer_id" required>
+        <option value="">— choose existing customer —</option>
+        {% for c in customers %}<option value="{{ c.id }}">{{ c.name }} ({{ c.id }})</option>{% endfor %}
+      </select>
+      <div class="small muted" style="margin-top:6px">New customer? <a href="{{ url_for('customer_new') }}" style="color:var(--lime)">Add one first ›</a></div>
+    </div>
+    {% endif %}
+
+    <div class="full">
+      <label>Plan</label>
+      <input name="plan_name" list="plans" value="{{ sub.plan_name if sub }}" required
+             placeholder="e.g. Elite Meal Pack, Custom Meal Pack…">
+      <datalist id="plans">{% for p in plans %}<option value="{{ p.name }}">{% endfor %}</datalist>
+    </div>
+
+    <div>
+      <label>Duration</label>
+      <select name="duration" onchange="if(!this.form.total_meals_scheduled.dataset.touched)this.form.total_meals_scheduled.value=(this.value=='Weekly'?5:20)">
+        {% for d in ['Monthly','Weekly','Custom'] %}
+        <option {{ 'selected' if (sub.duration if sub else 'Monthly')==d }}>{{ d }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>Total meals scheduled</label>
+      <input name="total_meals_scheduled" type="number" min="1"
+             value="{{ sub.total_meals_scheduled if sub else 20 }}"
+             oninput="this.dataset.touched=1">
+    </div>
+
+    <div>
+      <label>Slot</label>
+      <select name="slot">{% for sl in ['Lunch','Dinner'] %}
+        <option {{ 'selected' if (sub.slot if sub else 'Lunch')==sl }}>{{ sl }}</option>{% endfor %}</select>
+    </div>
+    <div>
+      <label>Preferred timing</label>
+      <input name="preferred_timing" value="{{ sub.preferred_timing if sub }}" placeholder="11:00 - 12:30pm">
+    </div>
+
+    <div>
+      <label>Start date</label>
+      <input name="start_date" type="date" value="{{ sub.start_date if sub else today }}">
+    </div>
+    <div>
+      <label>Subscription price (₹)</label>
+      <input name="subscription_price" type="number" step="1" value="{{ sub.subscription_price if sub else '' }}">
+    </div>
+
+    <div>
+      <label>Delivery fee (₹)</label>
+      <input name="delivery_fee" type="number" step="1" value="{{ sub.delivery_fee if sub else 0 }}">
+    </div>
+    <div>
+      <label>Amount received (₹)</label>
+      <input name="amount_received" type="number" step="1" value="{{ sub.amount_received if sub else '' }}">
+    </div>
+
+    <div class="full">
+      <label>Notes / customisations</label>
+      <textarea name="notes" placeholder="e.g. Chicken[100g] + Legumes, 1 scrambled egg, no honey…">{{ sub.notes if sub }}</textarea>
+    </div>
+  </div>
+  <div class="form-actions">
+    <button class="btn btn-primary">{{ 'Save changes' if sub else 'Create subscription' }}</button>
+  </div>
+</form>
+{% endblock %}

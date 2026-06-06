@@ -1,0 +1,13 @@
+{
+  "name": "OG Gainz Command Center",
+  "short_name": "OG Gainz",
+  "description": "Subscriptions, meals & revenue for OG Gainz",
+  "start_url": "/today",
+  "display": "standalone",
+  "background_color": "#004030",
+  "theme_color": "#004030",
+  "icons": [
+    { "src": "/static/img/favicon.png", "sizes": "128x128", "type": "image/png" },
+    { "src": "/static/img/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

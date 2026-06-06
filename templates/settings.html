@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Settings · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Settings</h1></div>
+
+<!-- Working days -->
+<div class="card">
+  <h3>Working days</h3>
+  <p class="small muted">Days the kitchen normally runs. Untick Saturday to keep it off by default —
+    you can still open individual Saturdays below or from the Today screen.</p>
+  <form method="post" action="{{ url_for('settings_weekdays') }}">
+    <div class="row" style="gap:8px; margin:6px 0 12px">
+      {% for num, label in weekdays %}
+      <label class="daychip">
+        <input type="checkbox" name="weekday" value="{{ num }}" {{ 'checked' if (num|int) in op_days }}>
+        <span>{{ label }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    <button class="btn btn-ghost btn-sm">Save working days</button>
+  </form>
+</div>
+
+<!-- Kitchen on/off calendar -->
+<div class="card">
+  <h3>Kitchen on/off for specific dates</h3>
+  <p class="small muted">Open a one-off Saturday, or close a normal day for a holiday. Overrides win over the
+    working-days rule above.</p>
+  <form method="post" action="{{ url_for('day_toggle') }}" class="row" style="align-items:flex-end; gap:10px">
+    <div><label>Date</label><input name="d" type="date" value="{{ today }}" required></div>
+    <div style="flex:1"><label>Reason</label><input name="reason" placeholder="e.g. Special Saturday / Pongal"></div>
+    <button class="btn btn-success btn-sm" name="action" value="open">Open</button>
+    <button class="btn btn-ghost btn-sm" name="action" value="close">Close</button>
+  </form>
+  {% if overrides %}
+  <div class="hr"></div>
+  <div class="list">
+    {% for o in overrides %}
+    <div class="litem" style="box-shadow:none">
+      <div class="grow">
+        <div class="t">{{ o.date|fdate('%a, %d %b %Y') }}
+          {% if o.is_open %}<span class="chip chip-active">Kitchen ON</span>{% else %}<span class="chip chip-ending">Kitchen OFF</span>{% endif %}</div>
+        {% if o.reason %}<div class="s">{{ o.reason }}</div>{% endif %}
+      </div>
+      <form method="post" action="{{ url_for('day_toggle') }}">
+        <input type="hidden" name="d" value="{{ o.date }}"><input type="hidden" name="action" value="clear">
+        <button class="btn btn-ghost btn-sm">Remove</button></form>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- Data tools -->
+<div class="card">
+  <h3>Data &amp; backups</h3>
+  <p class="small muted">Your data lives in one file (<code>oggainz.db</code>) inside OneDrive — backed up to the
+    cloud automatically. You can also back up and export to Excel anytime.</p>
+  <div class="row" style="gap:8px">
+    <a class="btn btn-forest btn-sm" href="{{ url_for('export') }}">⬇ Export to Excel</a>
+    <form method="post" action="{{ url_for('backup_now') }}"><button class="btn btn-ghost btn-sm">💾 Backup now</button></form>
+    <form method="post" action="{{ url_for('reimport') }}"
+          onsubmit="return confirm('Re-import from NEW TRACKER.xlsx? A backup is taken first, then current data is replaced by the spreadsheet.')">
+      <button class="btn btn-ghost btn-sm">↻ Re-import from Excel</button></form>
+  </div>
+  {% if backups %}<div class="small muted" style="margin-top:10px">Recent backups: {{ backups|join(', ') }}</div>{% endif %}
+</div>
+
+<!-- Automation -->
+<div class="card">
+  <h3>Automation</h3>
+  <form method="post" action="{{ url_for('settings_threshold') }}" class="row" style="align-items:flex-end; gap:10px">
+    <div style="flex:0 0 auto">
+      <label>"Ending soon" when meals left ≤</label>
+      <input name="threshold" type="number" min="1" max="10" value="{{ threshold }}" style="width:90px">
+    </div>
+    <button class="btn btn-ghost btn-sm">Save</button>
+  </form>
+</div>
+
+<!-- Plans -->
+<div class="card">
+  <div class="card-title"><h3>Meal plans &amp; prices</h3></div>
+  <div class="table-wrap"><table>
+    <tr><th>Plan</th><th>Category</th><th class="num">Monthly</th><th class="num">Weekly</th><th class="num">Trial</th><th class="num">Validity</th></tr>
+    {% for p in plans %}
+    <tr>
+      <td><b>{{ p.name }}</b></td><td>{{ p.category }}</td>
+      <td class="num">{{ p.price_monthly|inr if p.price_monthly else '—' }}</td>
+      <td class="num">{{ p.price_weekly|inr if p.price_weekly else '—' }}</td>
+      <td class="num">{{ p.price_trial|inr if p.price_trial else '—' }}</td>
+      <td class="num">{{ p.validity_days or '—' }}d</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  <details style="margin-top:12px">
+    <summary class="btn btn-ghost btn-sm" style="display:inline-flex">+ Add / edit a plan</summary>
+    <form method="post" action="{{ url_for('settings_plan') }}" class="form-grid" style="margin-top:12px">
+      <div class="full"><label>Plan name</label><input name="name" required></div>
+      <div><label>Category</label><input name="category" placeholder="Regular / Standalone / Custom"></div>
+      <div><label>Validity (days)</label><input name="validity_days" type="number"></div>
+      <div><label>Monthly ₹</label><input name="price_monthly" type="number"></div>
+      <div><label>Weekly ₹</label><input name="price_weekly" type="number"></div>
+      <div><label>Trial ₹</label><input name="price_trial" type="number"></div>
+      <div class="full form-actions"><button class="btn btn-primary btn-sm">Save plan</button></div>
+    </form>
+  </details>
+</div>
+{% endblock %}

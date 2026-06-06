@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{ cust.name }} · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('customers') }}">‹ Back</a><span class="spacer"></span>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('customer_edit', cid=cust.id) }}">Edit</a>
+</div>
+
+<div class="card">
+  <div class="card-title">
+    <div class="avatar">{{ cust.name[:1] }}</div>
+    <div><h2 style="margin:0">{{ cust.name }}</h2><div class="small muted">{{ cust.id }}</div></div>
+    <span class="spacer"></span>
+    {% if cust.phone %}<a class="btn btn-success btn-sm" href="{{ cust.phone|wa }}" target="_blank">💬 WhatsApp</a>{% endif %}
+  </div>
+  <div class="kvs">
+    {% if cust.phone %}<div class="k">Phone</div><div><a href="tel:{{ cust.phone }}">{{ cust.phone }}</a></div>{% endif %}
+    {% if cust.locality %}<div class="k">Locality</div><div>{{ cust.locality }}</div>{% endif %}
+    {% if cust.address %}<div class="k">Address</div><div>{{ cust.address }}</div>{% endif %}
+    {% if cust.notes %}<div class="k">Notes</div><div>{{ cust.notes }}</div>{% endif %}
+    <div class="k">Lifetime paid</div><div><b>{{ spent|inr }}</b></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title"><h3>Subscriptions</h3><span class="spacer"></span>
+    <a class="btn btn-primary btn-sm" href="{{ url_for('subscription_new') }}">+ New</a></div>
+  <div class="list">
+    {% for s in subs %}
+    <a class="litem" href="{{ url_for('subscription_detail', sid=s.id) }}">
+      <div class="grow">
+        <div class="t">{{ s.plan_name }}
+          {% if s.status=='Active' %}<span class="chip chip-active">Active</span>
+          {% elif s.status=='Ending Soon' %}<span class="chip chip-ending">⚠ Ending</span>
+          {% elif s.status=='Paused' %}<span class="chip chip-paused">Paused</span>
+          {% else %}<span class="chip chip-completed">Completed</span>{% endif %}</div>
+        <div class="s">{{ s.id }} · {{ s.start_date|fdate('%d %b %Y') }} · {{ s.delivered_count or 0 }}/{{ s.total_meals_scheduled }} meals</div>
+      </div>
+      <div class="right"><b>{{ s.total_amount|inr }}</b></div>
+    </a>
+    {% else %}<div class="muted">No subscriptions yet.</div>{% endfor %}
+  </div>
+</div>
+{% endblock %}

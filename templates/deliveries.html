@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Meal Tracker · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Meal Tracker</h1></div>
+
+<div class="daynav">
+  <a class="navbtn" href="{{ url_for('deliveries', d=prev_d, view=view) }}">‹</a>
+  <div class="d">{{ day_label }}{% if d == today %} <span class="chip chip-active">Today</span>{% endif %}</div>
+  <a class="navbtn" href="{{ url_for('deliveries', d=next_d, view=view) }}">›</a>
+  <div class="spacer"></div>
+  <input type="date" value="{{ d }}" style="width:auto"
+         onchange="location.href='{{ url_for('deliveries') }}?view={{ view }}&d='+this.value">
+  {% if d != today %}<a class="btn btn-forest btn-sm" href="{{ url_for('deliveries', view=view) }}">⟲ Today</a>{% endif %}
+</div>
+
+{{ m.kitchen_control(d, operating, override, 'deliveries') }}
+{{ m.view_toggle('deliveries', d, view) }}
+
+<div class="card">
+  {% set lunch = [] %}{% set dinner = [] %}
+  {% for r in rows %}{% if (r.meal_type or 'Lunch') == 'Dinner' %}{% set _ = dinner.append(r) %}{% else %}{% set _ = lunch.append(r) %}{% endif %}{% endfor %}
+
+  {% if rows %}
+    {% if view in ['all','lunch'] and lunch %}
+      {% if view == 'all' %}<h3 class="sect">☀ Lunch <span class="muted small">({{ lunch|length }})</span></h3>{% endif %}
+      <div class="dlist" style="margin-bottom:14px">{% for r in lunch %}{{ m.drow(r) }}{% endfor %}</div>
+    {% endif %}
+    {% if view in ['all','dinner'] and dinner %}
+      {% if view == 'all' %}<h3 class="sect">🌙 Dinner <span class="muted small">({{ dinner|length }})</span></h3>{% endif %}
+      <div class="dlist">{% for r in dinner %}{{ m.drow(r) }}{% endfor %}</div>
+    {% endif %}
+    {% if (view=='lunch' and not lunch) or (view=='dinner' and not dinner) %}
+      <div class="empty">No {{ view }} orders for this day.</div>
+    {% endif %}
+  {% else %}
+  <div class="empty"><div class="big">🍽️</div>No records for this day.</div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if cust else 'New' }} customer · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('customers') if not cust else url_for('customer_detail', cid=cust.id) }}">‹ Cancel</a>
+  <h1 style="margin:0 0 0 6px">{{ 'Edit customer' if cust else 'New customer' }}</h1>
+</div>
+<form method="post" class="card">
+  <div class="form-grid">
+    <div class="full"><label>Name</label>
+      <input name="name" value="{{ cust.name if cust }}" required autofocus></div>
+    <div><label>Phone (WhatsApp)</label>
+      <input name="phone" value="{{ cust.phone if cust }}" placeholder="10-digit number"></div>
+    <div><label>Locality</label>
+      <input name="locality" value="{{ cust.locality if cust }}" placeholder="Perumbakkam"></div>
+    <div class="full"><label>Address</label>
+      <textarea name="address" placeholder="Flat / building / landmark">{{ cust.address if cust }}</textarea></div>
+    <div class="full"><label>Notes / preferences</label>
+      <textarea name="notes" placeholder="Diet preferences, allergies, timing notes…">{{ cust.notes if cust }}</textarea></div>
+  </div>
+  <div class="form-actions"><button class="btn btn-primary">{{ 'Save changes' if cust else 'Add customer' }}</button></div>
+</form>
+{% endblock %}

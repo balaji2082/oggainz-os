@@ -1,0 +1,58 @@
+{% macro drow(r) %}
+<div class="drow {{ 'is-delivered' if r.status=='Delivered' }}{{ 'is-skipped' if r.status=='Skipped' }}"
+     data-status="{{ r.status }}">
+  <div class="who">
+    <b>{{ r.name }}</b>
+    {% if r.trial_ref %}<span class="chip chip-trial">TRIAL</span>{% endif %}
+    <span class="chip chip-{{ (r.meal_type or 'lunch')|lower }}">{{ r.meal_type or '—' }}</span>
+    <div class="meta">
+      {{ r.plan_name or r.trial_order or '' }}{% if r.preferred_timing %} · {{ r.preferred_timing }}{% endif %}
+      {% if r.locality %} · 📍 {{ r.locality }}{% endif %}
+      {% if r.sub_notes %} · {{ r.sub_notes }}{% endif %}
+    </div>
+  </div>
+  <div class="acts">
+    {% if r.phone %}<a class="iconbtn" href="{{ r.phone|wa }}" target="_blank" title="WhatsApp">💬</a>{% endif %}
+    <button class="iconbtn skip {{ 'on' if r.status=='Skipped' }}" title="Skip"
+            onclick="mark(this, {{ r.id }}, 'Skipped')">✕</button>
+    <button class="iconbtn deliver {{ 'on' if r.status=='Delivered' }}" title="Delivered"
+            onclick="mark(this, {{ r.id }}, 'Delivered')">✓</button>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro kitchen_control(d, operating, override, endpoint) %}
+{% if not operating %}
+<div class="alert alert-warn">
+  <span>🍳</span>
+  <span>Kitchen is <b>off</b> this day{% if override == false %} (you closed it){% else %} (weekend / holiday){% endif %}.</span>
+  <span class="spacer"></span>
+  <form method="post" action="{{ url_for('day_toggle') }}" style="margin:0">
+    <input type="hidden" name="d" value="{{ d }}"><input type="hidden" name="action" value="open">
+    <button class="btn btn-success btn-sm">Open kitchen for this day</button></form>
+  {% if override is not none %}
+  <form method="post" action="{{ url_for('day_toggle') }}" style="margin:0">
+    <input type="hidden" name="d" value="{{ d }}"><input type="hidden" name="action" value="clear">
+    <button class="btn btn-ghost btn-sm">Reset</button></form>{% endif %}
+</div>
+{% else %}
+<div class="small muted" style="display:flex; align-items:center; gap:8px; margin-bottom:10px">
+  <span>🍳 Kitchen open this day{% if override == true %} (you opened it){% endif %}.</span>
+  <form method="post" action="{{ url_for('day_toggle') }}" style="margin:0">
+    <input type="hidden" name="d" value="{{ d }}"><input type="hidden" name="action" value="close">
+    <button class="btn btn-ghost btn-sm">Close for this day</button></form>
+  {% if override is not none %}
+  <form method="post" action="{{ url_for('day_toggle') }}" style="margin:0">
+    <input type="hidden" name="d" value="{{ d }}"><input type="hidden" name="action" value="clear">
+    <button class="btn btn-ghost btn-sm">Reset to normal</button></form>{% endif %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro view_toggle(endpoint, d, view) %}
+<div class="row" style="gap:6px; margin-bottom:12px">
+  <a class="chip {{ 'chip-active' if view=='all' else 'chip-line' }}" href="{{ url_for(endpoint, d=d, view='all') }}">All</a>
+  <a class="chip {{ 'chip-lunch' if view=='lunch' else 'chip-line' }}" href="{{ url_for(endpoint, d=d, view='lunch') }}">☀ Lunch</a>
+  <a class="chip {{ 'chip-dinner' if view=='dinner' else 'chip-line' }}" href="{{ url_for(endpoint, d=d, view='dinner') }}">🌙 Dinner</a>
+</div>
+{% endmacro %}

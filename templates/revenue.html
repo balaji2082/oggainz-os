@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Revenue · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Revenue</h1><span class="spacer"></span>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('export') }}">⬇ Export Excel</a></div>
+
+<div class="tiles" style="margin-bottom:14px">
+  <div class="tile dark"><div class="k">Overall revenue</div><div class="v">{{ stats.overall|inr }}</div></div>
+  <div class="tile accent"><div class="k">Received</div><div class="v">{{ stats.received|inr }}</div></div>
+  <div class="tile"><div class="k">Pending</div><div class="v" style="color:var(--orange)">{{ stats.pending_amt|inr }}</div></div>
+  <div class="tile"><div class="k">Trial sales</div><div class="v">{{ stats.trial_sales|inr }}</div></div>
+</div>
+
+<div class="row" style="gap:6px; margin-bottom:12px">
+  <a class="chip {{ 'chip-active' if period=='month' else 'chip-line' }}" href="{{ url_for('revenue', period='month') }}">Monthly</a>
+  <a class="chip {{ 'chip-active' if period=='week' else 'chip-line' }}" href="{{ url_for('revenue', period='week') }}">Weekly</a>
+</div>
+
+{% if period == 'week' %}
+<div class="card">
+  <h3>Weekly breakdown <span class="small muted">(last {{ weeks|length }} weeks)</span></h3>
+  {% set maxv = (weeks|map(attribute='overall')|max) or 1 %}
+  <div style="display:flex; align-items:flex-end; gap:10px; height:160px; padding:10px 4px 0; overflow-x:auto">
+    {% for w in weeks %}
+    <div style="flex:0 0 44px; display:flex; flex-direction:column; align-items:center; gap:5px; height:100%; justify-content:flex-end">
+      <div style="width:60%; background:linear-gradient(180deg,var(--lime-l),var(--pine)); border-radius:6px 6px 0 0;
+                  height:{{ (100*w.overall/maxv)|round(0,'floor') }}%; min-height:3px"></div>
+      <div class="small muted" style="font-size:.62rem">{{ w.week_start|fdate('%d %b') }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="table-wrap"><table>
+    <tr><th>Week of</th><th class="num">Subs</th><th class="num">Sub ₹</th><th class="num">Trials</th>
+        <th class="num">Trial ₹</th><th class="num">Delivered</th><th class="num">Total ₹</th></tr>
+    {% for w in weeks|reverse %}
+    <tr>
+      <td><b>{{ w.week_start|fdate('%d %b %Y') }}</b></td>
+      <td class="num">{{ w.subs }}</td><td class="num">{{ w.sub_sales|inr }}</td>
+      <td class="num">{{ w.trials }}</td><td class="num">{{ w.trial_sales|inr }}</td>
+      <td class="num">{{ w.delivered }}</td><td class="num"><b>{{ w.overall|inr }}</b></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</div>
+
+{% else %}
+{% set maxv = (months|map(attribute='overall')|max) or 1 %}
+<div class="card">
+  <h3>Monthly revenue</h3>
+  <div style="display:flex; align-items:flex-end; gap:18px; height:200px; padding:10px 4px 0">
+    {% for m in months %}
+    <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; justify-content:flex-end">
+      <div class="small" style="font-weight:800; color:var(--forest)">{{ m.overall|inr }}</div>
+      <div style="width:64%; max-width:60px; background:linear-gradient(180deg,var(--lime-l),var(--pine));
+                  border-radius:8px 8px 0 0; height:{{ (100*m.overall/maxv)|round(0,'floor') }}%; min-height:4px"></div>
+      <div class="small muted">{{ m.month }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <h3>Month details</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Month</th><th class="num">Subs ₹</th><th class="num">Trials ₹</th><th class="num">Overall ₹</th>
+        <th class="num">Sold</th><th class="num">Delivered</th><th class="num">Growth</th></tr>
+    {% for m in months %}
+    <tr>
+      <td><b>{{ m.month }}</b></td>
+      <td class="num">{{ m.sub_sales|inr }}</td>
+      <td class="num">{{ m.trial_sales|inr }}</td>
+      <td class="num"><b>{{ m.overall|inr }}</b></td>
+      <td class="num">{{ m.subs_sold }}</td>
+      <td class="num">{{ m.delivered }}</td>
+      <td class="num">{% if m.growth is none %}—{% else %}
+        <span style="color:{{ 'var(--lime)' if m.growth>=0 else 'var(--danger)' }}">
+        {{ '+' if m.growth>=0 }}{{ (m.growth*100)|round(1) }}%</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</div>
+
+<div class="card">
+  <h3>By plan</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Plan</th><th class="num">Subs</th><th class="num">Sales ₹</th></tr>
+    {% for p in by_plan %}
+    <tr><td>{{ p.plan_name }}</td><td class="num">{{ p.n }}</td><td class="num">{{ p.amt|inr }}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endif %}
+{% endblock %}

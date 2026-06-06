@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#004030">
+  <title>Sign in · OG Gainz Command Center</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100svh;display:flex;align-items:center;justify-content:center;
+      padding:24px;background:#004030;
+      background:radial-gradient(120% 120% at 50% 0%, #0A6B3F 0%, #004030 45%, #002B20 100%);
+      font-family:'Roboto','Segoe UI',-apple-system,system-ui,'Helvetica Neue',Arial,sans-serif;
+      color:#15241d}
+    .card{width:100%;max-width:360px;background:#F8F5EC;border-radius:20px;
+      box-shadow:0 18px 50px rgba(0,20,14,.45);padding:30px 26px 26px;text-align:center}
+    .logo{height:46px;margin-bottom:6px}
+    .sub{margin:0 0 22px;color:#6b7d75;font-size:.9rem;letter-spacing:.04em;text-transform:uppercase}
+    label{display:block;text-align:left;font-size:.82rem;font-weight:700;color:#15241d;
+      margin:0 2px 7px}
+    input[type=password]{width:100%;padding:14px 15px;font-size:1.05rem;border:1.5px solid #d8e2db;
+      border-radius:12px;background:#fff;color:#15241d;font-family:inherit;outline:none}
+    input[type=password]:focus{border-color:#1FA84A;box-shadow:0 0 0 3px rgba(31,168,74,.18)}
+    button{width:100%;margin-top:16px;padding:14px;font-size:1.05rem;font-weight:700;
+      border:none;border-radius:12px;background:#1FA84A;color:#04231a;cursor:pointer;
+      font-family:inherit;transition:.15s}
+    button:hover{background:#52C975}
+    .err{margin:14px 0 0;padding:11px 13px;border-radius:11px;background:#fbeae8;color:#b13325;
+      font-size:.88rem;font-weight:600}
+    .foot{margin-top:18px;font-size:.74rem;color:#9aa8a1}
+  </style>
+</head>
+<body>
+  <form class="card" method="post" autocomplete="off">
+    <img class="logo" src="{{ url_for('static', filename='img/logo-forest.svg') }}" alt="OG Gainz">
+    <p class="sub">Command Center</p>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autofocus required
+           inputmode="text" autocapitalize="off" autocomplete="current-password">
+    <button type="submit">Sign in</button>
+    {% if error %}<p class="err">{{ error }}</p>{% endif %}
+    <p class="foot">Private — OG Gainz staff only</p>
+  </form>
+</body>
+</html>

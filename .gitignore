@@ -1,0 +1,10 @@
+# Local data + generated artifacts (kept on your PC / OneDrive, not in git)
+oggainz.db
+oggainz.db-wal
+oggainz.db-shm
+backups/
+exports/
+_import_source/
+.venv/
+__pycache__/
+*.pyc

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if trial else 'New' }} trial · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('trials') }}">‹ Cancel</a>
+  <h1 style="margin:0 0 0 6px">{{ 'Edit trial' if trial else 'New trial order' }}</h1>
+</div>
+<form method="post" class="card">
+  <div class="form-grid">
+    <div><label>Booking date</label><input name="date" type="date" value="{{ trial.date if trial else today }}"></div>
+    <div><label>Name</label><input name="name" value="{{ trial.name if trial }}" required {{ '' if trial else 'autofocus' }}></div>
+    <div><label>Contact number</label><input name="phone" value="{{ trial.phone if trial }}" placeholder="10-digit number"></div>
+    <div><label>Amount (₹)</label><input name="amount" type="number" step="1" value="{{ trial.amount if trial else 0 }}"></div>
+    <div class="full"><label>Order</label><input name="order_text" value="{{ trial.order_text if trial }}" placeholder="Elite Meal Pack trial…"></div>
+
+    <div><label>Payment status</label>
+      <select name="payment_status">
+        {% for p in ['Paid','Unpaid'] %}<option {{ 'selected' if trial and trial.payment_status==p }}>{{ p }}</option>{% endfor %}
+      </select></div>
+    <div><label>Conversion status</label>
+      <input name="conversion" value="{{ trial.conversion if trial }}" placeholder="Converted / blank"></div>
+
+    <div class="full hr-label"><b>Schedule the trial meal</b> <span class="muted small">(it will appear in that day's orders to prep)</span></div>
+    <div><label>Delivery date</label><input name="delivery_date" type="date" value="{{ trial.delivery_date if trial }}"></div>
+    <div><label>Meal slot</label>
+      <select name="meal_type">{% for sl in ['Lunch','Dinner'] %}<option {{ 'selected' if trial and trial.meal_type==sl }}>{{ sl }}</option>{% endfor %}</select></div>
+    <div><label>Delivery status</label>
+      <select name="delivery_status">{% for st in ['Pending','Delivered','Skipped'] %}<option {{ 'selected' if trial and trial.delivery_status==st }}>{{ st }}</option>{% endfor %}</select></div>
+
+    <div class="full"><label>Address</label><textarea name="address">{{ trial.address if trial }}</textarea></div>
+    <div class="full"><label>Notes</label><textarea name="notes" placeholder="Preferences, feedback, follow-up…">{{ trial.notes if trial }}</textarea></div>
+  </div>
+  <div class="form-actions"><button class="btn btn-primary">{{ 'Save changes' if trial else 'Add trial' }}</button></div>
+</form>
+{% endblock %}

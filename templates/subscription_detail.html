@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}{{ sub.customer_name }} · {{ sub.id }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('subscriptions') }}">‹ Back</a>
+  <span class="spacer"></span>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('subscription_edit', sid=sub.id) }}">Edit</a>
+</div>
+
+<div class="card">
+  <div class="card-title">
+    <div class="avatar">{{ sub.customer_name[:1] }}</div>
+    <div>
+      <h2 style="margin:0">{{ sub.customer_name }}</h2>
+      <div class="small muted">{{ sub.id }} · {{ sub.plan_name }}</div>
+    </div>
+    <span class="spacer"></span>
+    {% if sub.status=='Active' %}<span class="chip chip-active">Active</span>
+    {% elif sub.status=='Ending Soon' %}<span class="chip chip-ending">⚠ Ending Soon</span>
+    {% elif sub.status=='Paused' %}<span class="chip chip-paused">Paused</span>
+    {% else %}<span class="chip chip-completed">Completed</span>{% endif %}
+  </div>
+
+  <div class="prog" style="margin:6px 0 8px">
+    <i class="done" style="width:{{ (100*(sub.delivered_count or 0)/(sub.total_meals_scheduled or 1))|round(0,'floor') }}%"></i>
+    <i class="skip" style="width:{{ (100*(sub.skipped_count or 0)/(sub.total_meals_scheduled or 1))|round(0,'floor') }}%"></i>
+  </div>
+  <div class="small muted">{{ sub.delivered_count or 0 }}/{{ sub.total_meals_scheduled }} delivered ·
+    <b style="color:var(--forest)">{{ sub.remaining_meals or 0 }} meals left</b>
+    {% if sub.skipped_count %} · {{ sub.skipped_count }} skipped (carried forward){% endif %}</div>
+</div>
+
+<div class="row">
+  <div class="col card">
+    <h3>Subscription</h3>
+    <div class="kvs">
+      <div class="k">Plan</div><div>{{ sub.plan_name }}</div>
+      <div class="k">Duration</div><div>{{ sub.duration }}</div>
+      <div class="k">Slot</div><div>{{ sub.slot }} {% if sub.preferred_timing %}· {{ sub.preferred_timing }}{% endif %}</div>
+      <div class="k">Start</div><div>{{ sub.start_date|fdate('%d %b %Y') }}</div>
+      <div class="k">Last delivery</div><div>{{ sub.last_delivery_date|fdate('%d %b %Y') or '—' }}</div>
+      {% if sub.notes %}<div class="k">Notes</div><div>{{ sub.notes }}</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="col card">
+    <h3>Payment</h3>
+    <div class="kvs">
+      <div class="k">Price</div><div>{{ sub.subscription_price|inr }}</div>
+      <div class="k">Delivery fee</div><div>{{ sub.delivery_fee|inr }}</div>
+      <div class="k">Total</div><div><b>{{ sub.total_amount|inr }}</b></div>
+      <div class="k">Received</div><div>{{ sub.amount_received|inr }}</div>
+      <div class="k">Status</div><div>
+        {% if sub.payment_status=='Paid' %}<span class="chip chip-paid">Paid</span>
+        {% elif sub.payment_status=='Partial' %}<span class="chip chip-partial">Partial</span>
+        {% else %}<span class="chip chip-unpaid">Unpaid</span>{% endif %}</div>
+    </div>
+    {% if sub.payment_status!='Paid' %}
+    <form method="post" action="{{ url_for('subscription_payment', sid=sub.id) }}" style="margin-top:10px">
+      <button class="btn btn-success btn-sm btn-block">Mark fully paid ({{ sub.total_amount|inr }})</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h3>Actions</h3>
+  <div class="row" style="gap:8px">
+    <form method="post" action="{{ url_for('subscription_renew', sid=sub.id) }}">
+      <button class="btn btn-primary btn-sm">🔄 Renew</button></form>
+    {% if sub.status=='Paused' %}
+    <form method="post" action="{{ url_for('subscription_status', sid=sub.id) }}">
+      <input type="hidden" name="to" value="Active"><button class="btn btn-success btn-sm">Resume</button></form>
+    {% elif sub.status!='Completed' %}
+    <form method="post" action="{{ url_for('subscription_status', sid=sub.id) }}">
+      <input type="hidden" name="to" value="Paused"><button class="btn btn-ghost btn-sm">Pause</button></form>
+    {% endif %}
+    {% if sub.status!='Completed' %}
+    <form method="post" action="{{ url_for('subscription_status', sid=sub.id) }}">
+      <input type="hidden" name="to" value="Completed"><button class="btn btn-ghost btn-sm">Mark completed</button></form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title"><h3>Delivery history</h3><span class="spacer"></span>
+    <span class="small muted">{{ dels|length }} records</span></div>
+  <div class="table-wrap"><table>
+    <tr><th>Date</th><th>Meal</th><th>Status</th></tr>
+    {% for d in dels %}
+    <tr><td>{{ d.date|fdate('%d %b') }}</td><td>{{ d.meal_type }}</td>
+      <td>{% if d.status=='Delivered' %}<span class="chip chip-active">Delivered</span>
+        {% elif d.status=='Skipped' %}<span class="chip chip-ending">Skipped</span>
+        {% elif d.status=='Off' %}<span class="chip chip-line">Kitchen off</span>
+        {% else %}<span class="chip chip-line">{{ d.status }}</span>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="3" class="muted">No deliveries yet.</td></tr>{% endfor %}
+  </table></div>
+</div>
+{% endblock %}

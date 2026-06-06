@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Today · OG Gainz{% endblock %}
+{% block content %}
+
+<div class="daynav">
+  <a class="navbtn" href="{{ url_for('today', d=prev_d, view=view) }}" title="Previous day">‹</a>
+  <div class="d">{{ day_label }}{% if d == today %} <span class="chip chip-active">Today</span>{% endif %}</div>
+  <a class="navbtn" href="{{ url_for('today', d=next_d, view=view) }}" title="Next day">›</a>
+  <div class="spacer"></div>
+  <input type="date" value="{{ d }}" style="width:auto"
+         onchange="location.href='{{ url_for('today') }}?view={{ view }}&d='+this.value">
+  {% if d != today %}<a class="btn btn-forest btn-sm" href="{{ url_for('today', view=view) }}">⟲ Today</a>{% endif %}
+</div>
+
+{% if ending %}
+<div class="alert alert-warn">
+  <span>⚠️</span>
+  <span><b>{{ ending|length }}</b> ending soon —
+    {% for e in ending %}{{ e.customer_name }} ({{ e.remaining_meals }} left){{ ', ' if not loop.last }}{% endfor %}</span>
+  <span class="spacer"></span>
+  <a class="btn btn-sm btn-ghost" href="{{ url_for('subscriptions', status='Ending Soon') }}">View</a>
+</div>
+{% endif %}
+{% if unpaid %}
+<div class="alert alert-danger">
+  <span>💳</span><span><b>{{ unpaid|length }}</b> unpaid — {{ g_stats.unpaid_amt|inr }} to collect</span>
+  <span class="spacer"></span>
+  <a class="btn btn-sm btn-ghost" href="{{ url_for('subscriptions', status='Unpaid') }}">View</a>
+</div>
+{% endif %}
+
+{{ m.kitchen_control(d, s.operating, override, 'today') }}
+
+<div class="tiles" style="margin-bottom:14px">
+  <div class="tile dark"><div class="k">Meals today</div><div class="v">{{ s.total }}</div></div>
+  <div class="tile accent"><div class="k">Delivered</div><div class="v" id="cnt-done">{{ s.done }}</div></div>
+  <div class="tile"><div class="k">Pending</div><div class="v" id="cnt-pending">{{ s.pending }}</div></div>
+  <div class="tile"><div class="k">Skipped</div><div class="v" id="cnt-skipped">{{ s.skipped }}</div></div>
+</div>
+
+{% if s.cook %}
+<div class="card tight">
+  <div class="card-title"><h3>🍱 Cook list</h3><span class="spacer"></span>
+    <span class="small muted">what to prep</span></div>
+  {% for plan, meal, n in s.cook %}
+    <span class="cook-pill"><b>{{ n }}</b> {{ plan or '—' }} <span class="chip chip-{{ meal|lower }}">{{ meal }}</span></span>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-title"><h2>Deliveries</h2><span class="spacer"></span>
+    <a class="btn btn-sm btn-ghost" href="{{ url_for('deliveries', d=d) }}">Full view</a></div>
+
+  {{ m.view_toggle('today', d, view) }}
+
+  {% set lunch = [] %}{% set dinner = [] %}
+  {% for r in s.rows %}{% if (r.meal_type or 'Lunch') == 'Dinner' %}{% set _ = dinner.append(r) %}{% else %}{% set _ = lunch.append(r) %}{% endif %}{% endfor %}
+
+  {% if s.rows %}
+    {% if view in ['all','lunch'] and lunch %}
+      {% if view == 'all' %}<h3 class="sect">☀ Lunch <span class="muted small">({{ lunch|length }})</span></h3>{% endif %}
+      <div class="dlist" style="margin-bottom:14px">{% for r in lunch %}{{ m.drow(r) }}{% endfor %}</div>
+    {% endif %}
+    {% if view in ['all','dinner'] and dinner %}
+      {% if view == 'all' %}<h3 class="sect">🌙 Dinner <span class="muted small">({{ dinner|length }})</span></h3>{% endif %}
+      <div class="dlist">{% for r in dinner %}{{ m.drow(r) }}{% endfor %}</div>
+    {% endif %}
+    {% if (view=='lunch' and not lunch) or (view=='dinner' and not dinner) %}
+      <div class="empty">No {{ view }} orders for this day.</div>
+    {% endif %}
+  {% else %}
+  <div class="empty"><div class="big">🍽️</div>No deliveries scheduled for this day.</div>
+  {% endif %}
+</div>
+
+{% endblock %}
