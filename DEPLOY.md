@@ -1,65 +1,48 @@
 # Put OG Gainz Command Center on your phone (anywhere, no laptop)
 
 This puts your app on a free always-on server (**PythonAnywhere**) so you can open it from
-your phone on mobile data, with the laptop off. Follow it top to bottom — I'll be with you
-for every step. You only type/click what's shown in **bold** or in `code boxes`.
+your phone on mobile data, with the laptop off. Your values are already filled in below.
 
-**What you'll end up with:** a private web address like `https://oggainz.pythonanywhere.com`
-that asks for a password, then shows your Command Center — added to your phone home screen
-like a normal app.
+- **Your web address (after setup):** `https://oggainz.pythonanywhere.com`
+- **GitHub repo (app code):** `https://github.com/balaji2082/oggainz-os`
+- **PythonAnywhere user:** `oggainz`
 
-> You do this **once**. After that, any change I make reaches your phone with one command.
-
----
-
-## Before we start — the 2 free accounts
-
-1. **GitHub** — a private online folder for the app *code only* (never your customer data).
-2. **PythonAnywhere** — the always-on computer that runs the app.
-
-Neither needs a credit card. I'll tell you exactly when to make each.
+You do this **once**. After that, any change I make reaches your phone with one command.
 
 ---
 
-## Step 1 — GitHub (I do most of this)
+## Step 1 — GitHub ✅ (done — I push the code for you)
 
-1. Go to **https://github.com/signup** and make an account (use your email).
-2. Tell me your GitHub **username**. I'll create a **private** repository called
-   `og-gainz-os` and push the app code into it from your laptop.
-3. When I'm done I'll give you the repo's web address (looks like
-   `https://github.com/YOURNAME/og-gainz-os`).
-
-✅ Your `Finance/`, business, and personal files are **not** in this repo — only the app.
-✅ Your customer database is **not** uploaded here either (we move it separately in Step 6).
+Account made and repo created. I add the upload address and push the app code from your laptop.
+Your customer data (`oggainz.db`) and personal/Finance files are **not** included.
 
 ---
 
-## Step 2 — Make your PythonAnywhere account
+## Step 2 — PythonAnywhere account ✅ (done)
 
-1. Go to **https://www.pythonanywhere.com/registration/register/beginner/**
-2. Sign up (free "Beginner" plan, no card). Pick a username — this becomes part of your web
-   address, so pick something clean like **`oggainz`** → `oggainz.pythonanywhere.com`.
-3. Confirm your email and log in. You'll land on the **Dashboard**.
+You're signed in as `oggainz`.
 
 ---
 
 ## Step 3 — Download the app onto the server
 
-1. On the top menu click **Consoles** → under "Start a new console" click **Bash**.
+1. Top menu → **Consoles** → under "Start a new console" click **Bash**.
    (A black command window opens — this is normal.)
-2. Type this line and press **Enter** (replace `YOURNAME` with your GitHub username):
+2. Type this and press **Enter**:
 
    ```
-   git clone https://github.com/YOURNAME/og-gainz-os.git
+   git clone https://github.com/balaji2082/oggainz-os.git
    ```
 
-   Because the repo is private, it will ask for your GitHub **username** and a **password**.
-   GitHub no longer accepts your normal password here — it needs a **"token"**. I'll walk you
-   through making one (GitHub → Settings → Developer settings → Personal access tokens →
-   *Generate new token (classic)* → tick **repo** → copy it). Paste the token when it asks for
-   the password. *(Nothing shows while you paste — that's normal. Press Enter.)*
+   Because the repo is **private**, it asks for your GitHub **username** (`balaji2082`) and a
+   **password** — but GitHub needs a **"token"** here, not your real password. Make one:
+   GitHub → click your avatar → **Settings** → (left, very bottom) **Developer settings** →
+   **Personal access tokens** → **Tokens (classic)** → **Generate new token (classic)** →
+   give it a name, tick the **`repo`** box → **Generate** → **copy** it.
+   Paste that token when the console asks for the password. *(Nothing appears while you paste —
+   that's normal — then press Enter.)*  I'll be right here for this.
 
-3. You now have a folder called `og-gainz-os`. ✅
+3. You now have a folder called `oggainz-os`. ✅
 
 ---
 
@@ -69,7 +52,7 @@ In the same Bash window, run these two lines (one at a time, Enter after each):
 
 ```
 mkvirtualenv ogenv --python=/usr/bin/python3.10
-pip install -r og-gainz-os/requirements.txt
+pip install -r oggainz-os/requirements.txt
 ```
 
 The first makes a clean little workspace; the second installs Flask + openpyxl. Wait for each
@@ -87,11 +70,11 @@ to finish. ✅
    ```
    ogenv
    ```
-   then the tick to save.
+   then click the tick to save.
 
    **(b) WSGI file** — find "WSGI configuration file" and click the blue link
-   (looks like `/var/www/oggainz_pythonanywhere_com_wsgi.py`). It opens an editor.
-   **Delete everything** in it and paste the block below.
+   (`/var/www/oggainz_pythonanywhere_com_wsgi.py`). It opens an editor.
+   **Delete everything** in it and paste exactly this:
 
    ```python
    import os
@@ -102,8 +85,7 @@ to finish. ✅
    os.environ["OG_PASSWORD"]   = "CHANGE-ME-pick-a-password"
    os.environ["OG_SECRET_KEY"] = "ee853b58130af877e2141a140f134d0fa4f394ff32ea437277b9fc09bee03ea7"
 
-   # ---- make the app importable (replace YOURUSER with your PythonAnywhere username) ----
-   project_home = "/home/YOURUSER/og-gainz-os"
+   project_home = "/home/oggainz/oggainz-os"
    if project_home not in sys.path:
        sys.path.insert(0, project_home)
 
@@ -111,8 +93,7 @@ to finish. ✅
    ```
 
    - Change `CHANGE-ME-pick-a-password` to your real password (keep the quotes).
-   - Change `YOURUSER` to your PythonAnywhere username (e.g. `oggainz`).
-   - Leave the long `OG_SECRET_KEY` exactly as-is.
+   - Leave everything else exactly as-is.
    - Click the green **Save** button (top right of the editor).
 
 ---
@@ -122,10 +103,10 @@ to finish. ✅
 Your customers/subscriptions live in a file called **`oggainz.db`** on your laptop. We copy it up.
 
 1. Top menu → **Files**.
-2. Open the **`og-gainz-os`** folder.
+2. Open the **`oggainz-os`** folder.
 3. Click **Upload a file** and choose `oggainz.db` from
    `…\Desktop\AI-Workspace\OG-Gainz-OS\oggainz.db` on your laptop.
-   *(I'll point you to the exact file. If it asks to overwrite, say yes.)*
+   *(If it asks to overwrite, say yes.)*
 
 ✅ All your real data is now on the server.
 
@@ -134,25 +115,25 @@ Your customers/subscriptions live in a file called **`oggainz.db`** on your lapt
 ## Step 7 — Go live & add to your phone
 
 1. Back to **Web** → click the big green **Reload** button.
-2. Open your address on your phone: **`https://YOURUSER.pythonanywhere.com`**
-   → you should see the **password screen** → type your password → you're in. 🎉
+2. On your phone open: **`https://oggainz.pythonanywhere.com`**
+   → password screen → type your password → you're in. 🎉
 3. **Add to home screen** so it feels like a real app:
    - **iPhone (Safari):** Share button → *Add to Home Screen*.
    - **Android (Chrome):** ⋮ menu → *Add to Home screen* / *Install app*.
 
 **Final test:** turn **WiFi off** on your phone (so you're on mobile data), open the app, mark
-a delivery, refresh — the change sticks. That proves it works anywhere and is saving correctly.
+a delivery, refresh — the change sticks. That proves it works anywhere and saves correctly.
 
 ---
 
 ## Updating the app later (the easy part)
 
-When you want a change, tell me. I edit and push it to GitHub. Then you:
+When you want a change, tell me. I push it to GitHub. Then you:
 
 1. **Consoles** → open a **Bash** console.
 2. Run:
    ```
-   cd og-gainz-os && git pull
+   cd oggainz-os && git pull
    ```
 3. **Web** → **Reload**. Done — the change is live on your phone.
 
@@ -161,10 +142,8 @@ When you want a change, tell me. I edit and push it to GitHub. Then you:
 ## If something looks wrong
 
 - **"Something went wrong" / error page:** Web tab → scroll to **Error log** → click it →
-  copy the last few red lines and send them to me. (Usually a small typo in the WSGI file —
-  e.g. `YOURUSER` not replaced, or a missing quote.)
-- **Password not asked / wrong password:** re-open the WSGI file, check `OG_PASSWORD`, Save,
-  Reload.
+  copy the last few red lines and send them to me. (Usually a small typo in the WSGI file.)
+- **Password not asked / wrong password:** re-open the WSGI file, check `OG_PASSWORD`, Save, Reload.
 - **Page won't load at all:** make sure you clicked the green **Reload** after every change.
 
 > Free-tier note: PythonAnywhere emails you every ~3 months to click one link to keep the
