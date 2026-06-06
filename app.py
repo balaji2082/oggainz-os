@@ -5,6 +5,7 @@ Run:  python app.py        (then open the URL it prints; works on PC + phone)
 """
 
 import os
+import time
 import socket
 from datetime import date, datetime, timedelta
 
@@ -13,6 +14,15 @@ from flask import (Flask, render_template, request, redirect, url_for,
 
 import db
 import core
+
+# Run all date logic in the user's timezone (IST) even when the app is hosted on a
+# server whose clock is UTC (e.g. PythonAnywhere). Without this, "today" on the server
+# can be a different calendar day than in India, so day-based counts and lists go wrong.
+# tzset() is POSIX-only; on Windows (local dev) there is no tzset and the machine clock
+# is already IST, so we leave it untouched there.
+if hasattr(time, "tzset"):
+    os.environ["TZ"] = "Asia/Kolkata"
+    time.tzset()
 
 app = Flask(__name__)
 # Secret key signs the login cookie. On the public server it is supplied via the

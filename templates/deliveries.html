@@ -17,7 +17,7 @@
 {{ m.kitchen_control(d, operating, override, 'deliveries') }}
 {{ m.view_toggle('deliveries', d, view) }}
 
-<div class="card">
+<div class="card" data-day="{{ d }}">
   {% set lunch = [] %}{% set dinner = [] %}
   {% for r in rows %}{% if (r.meal_type or 'Lunch') == 'Dinner' %}{% set _ = dinner.append(r) %}{% else %}{% set _ = lunch.append(r) %}{% endif %}{% endfor %}
 

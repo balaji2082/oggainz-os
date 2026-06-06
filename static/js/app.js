@@ -25,8 +25,12 @@ async function mark(btn, deliveryId, status) {
   // toggle off if already in that status -> set Pending
   let target = status;
   if (row.dataset.status === status) target = 'Pending';
+  // Tell the server which day this page is showing, so the live counters recalculate
+  // that exact day (not the server's own "today", which may be a different date).
+  const dayEl = btn.closest('[data-day]');
+  const dayQs = dayEl && dayEl.dataset.day ? ('?d=' + encodeURIComponent(dayEl.dataset.day)) : '';
   try {
-    const res = await fetch(`/api/delivery/${deliveryId}/mark`, {
+    const res = await fetch(`/api/delivery/${deliveryId}/mark` + dayQs, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'status=' + encodeURIComponent(target)
