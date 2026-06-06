@@ -169,7 +169,8 @@ def inject_globals():
     c.close()
     return {"g_stats": stats, "active_page": request.endpoint,
             "today": date.today().strftime("%Y-%m-%d"),
-            "login_active": bool(APP_PASSWORD), "authed": session.get("authed")}
+            "login_active": bool(APP_PASSWORD), "authed": session.get("authed"),
+            "deployed": bool(APP_PASSWORD)}
 
 
 # ---------------------------------------------------------------------------
@@ -676,6 +677,13 @@ def backup_now():
 
 @app.route("/reimport", methods=["POST"])
 def reimport():
+    # Re-import wipes the DB and rebuilds it from the laptop's NEW TRACKER.xlsx. That
+    # spreadsheet does not exist on the online server, and the live app is now the source
+    # of truth — so this is laptop-only. Refuse on the deployed app no matter what.
+    if APP_PASSWORD:
+        flash("Re-import only runs on your laptop (where the Excel file lives). "
+              "Your online data is the live copy and was not touched.", "ok")
+        return redirect(url_for("settings"))
     import importer, backup
     backup.make_backup()                 # safety net before overwrite
     importer.run_import()

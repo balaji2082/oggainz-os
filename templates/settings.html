@@ -59,10 +59,13 @@
   <div class="row" style="gap:8px">
     <a class="btn btn-forest btn-sm" href="{{ url_for('export') }}">⬇ Export to Excel</a>
     <form method="post" action="{{ url_for('backup_now') }}"><button class="btn btn-ghost btn-sm">💾 Backup now</button></form>
+    {% if not deployed %}
     <form method="post" action="{{ url_for('reimport') }}"
           onsubmit="return confirm('Re-import from NEW TRACKER.xlsx? A backup is taken first, then current data is replaced by the spreadsheet.')">
       <button class="btn btn-ghost btn-sm">↻ Re-import from Excel</button></form>
+    {% endif %}
   </div>
+  {% if deployed %}<div class="small muted" style="margin-top:8px">↻ <b>Re-import from Excel</b> is hidden here on purpose — this online app holds your live data. (That button only exists on the laptop version, where the spreadsheet lives.)</div>{% endif %}
   {% if backups %}<div class="small muted" style="margin-top:10px">Recent backups: {{ backups|join(', ') }}</div>{% endif %}
 </div>
 
