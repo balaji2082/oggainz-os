@@ -4,67 +4,133 @@
 <div class="page-head"><h1>Revenue</h1><span class="spacer"></span>
   <a class="btn btn-ghost btn-sm" href="{{ url_for('export') }}">⬇ Export Excel</a></div>
 
-<div class="tiles" style="margin-bottom:14px">
+<!-- Headline tiles -->
+<div class="tiles tiles-4" style="margin-bottom:14px">
   <div class="tile dark"><div class="k">Overall revenue</div><div class="v">{{ stats.overall|inr }}</div></div>
   <div class="tile accent"><div class="k">Received</div><div class="v">{{ stats.received|inr }}</div></div>
-  <div class="tile"><div class="k">Pending</div><div class="v" style="color:var(--orange)">{{ stats.pending_amt|inr }}</div></div>
+  <div class="tile"><div class="k">To collect</div><div class="v" style="color:var(--orange)">{{ stats.pending_amt|inr }}</div></div>
   <div class="tile"><div class="k">Trial sales</div><div class="v">{{ stats.trial_sales|inr }}</div></div>
 </div>
 
-<div class="row" style="gap:6px; margin-bottom:12px">
-  <a class="chip {{ 'chip-active' if period=='month' else 'chip-line' }}" href="{{ url_for('revenue', period='month') }}">Monthly</a>
-  <a class="chip {{ 'chip-active' if period=='week' else 'chip-line' }}" href="{{ url_for('revenue', period='week') }}">Weekly</a>
+<!-- Collection rate + this-month snapshot -->
+<div class="card insight-card">
+  <div class="donut" style="--pct:{{ collected|round(0,'floor')|int }}">
+    <div class="donut-hole"><b>{{ collected|round(0,'floor')|int }}%</b><span>collected</span></div>
+  </div>
+  <div class="insight-body">
+    <h3 style="margin:0 0 8px">Money health</h3>
+    <div class="legend"><span class="dot dot-lime"></span> Received <b>{{ stats.received|inr }}</b></div>
+    <div class="legend"><span class="dot dot-sage"></span> Still to collect <b>{{ stats.pending_amt|inr }}</b></div>
+    {% if cur %}
+    <div class="hr"></div>
+    <div class="small muted" style="margin-bottom:2px">This month ({{ this_month }})</div>
+    <div class="row" style="gap:18px; align-items:baseline">
+      <div><span class="big-num">{{ cur.overall|inr }}</span></div>
+      {% if cur.growth is not none %}
+      <div class="growth {{ 'up' if cur.growth>=0 else 'down' }}">
+        {{ '▲' if cur.growth>=0 else '▼' }} {{ (cur.growth*100)|round(0,'floor')|int|abs }}% vs last month</div>
+      {% endif %}
+    </div>
+    <div class="small muted">{{ cur.subs_sold }} subs sold · {{ cur.delivered }} meals delivered</div>
+    {% endif %}
+  </div>
 </div>
 
-{% if period == 'week' %}
+<!-- Period switch -->
+<div class="seg" role="tablist">
+  <a class="seg-btn {{ 'on' if period=='day' }}"   href="{{ url_for('revenue', period='day') }}">Day-wise</a>
+  <a class="seg-btn {{ 'on' if period=='week' }}"  href="{{ url_for('revenue', period='week') }}">Weekly</a>
+  <a class="seg-btn {{ 'on' if period=='month' }}" href="{{ url_for('revenue', period='month') }}">Monthly</a>
+</div>
+
+{% if period == 'day' %}
+{# ---------------- DAY-WISE ---------------- #}
+{% set recent = (days|selectattr('overall')|list)[-14:] %}
+{% set maxv = (recent|map(attribute='overall')|max) or 1 %}
 <div class="card">
-  <h3>Weekly breakdown <span class="small muted">(last {{ weeks|length }} weeks)</span></h3>
-  {% set maxv = (weeks|map(attribute='overall')|max) or 1 %}
-  <div style="display:flex; align-items:flex-end; gap:10px; height:160px; padding:10px 4px 0; overflow-x:auto">
+  <div class="card-title"><h3>Daily sales</h3><span class="spacer"></span>
+    <span class="small muted">last {{ recent|length }} active days</span></div>
+  <div class="bars">
+    {% for x in recent %}
+    <div class="bar-col">
+      <div class="bar-val">{{ (x.overall/1000)|round(1) }}k</div>
+      <div class="bar" style="height:{{ (100*x.overall/maxv)|round(0,'floor') }}%"></div>
+      <div class="bar-lbl">{{ x.day|fdate('%d %b') }}</div>
+    </div>
+    {% else %}<div class="empty small">No daily sales yet.</div>{% endfor %}
+  </div>
+</div>
+<div class="card">
+  <div class="card-title"><h3>Day-by-day</h3></div>
+  <div class="table-wrap"><table class="rev-table">
+    <tr><th>Date</th><th class="num">Subs ₹</th><th class="num">Trials ₹</th>
+        <th class="num">Total ₹</th><th class="num">Delivered</th></tr>
+    {% for x in days|reverse %}
+    <tr>
+      <td><b>{{ x.day|fdate('%a, %d %b') }}</b></td>
+      <td class="num">{{ x.sub_sales|inr }}{% if x.subs %} <span class="muted">·{{ x.subs }}</span>{% endif %}</td>
+      <td class="num">{{ x.trial_sales|inr }}{% if x.trials %} <span class="muted">·{{ x.trials }}</span>{% endif %}</td>
+      <td class="num"><b>{{ x.overall|inr }}</b></td>
+      <td class="num">{{ x.delivered }}</td>
+    </tr>
+    {% else %}<tr><td colspan="5" class="muted">No sales recorded yet.</td></tr>{% endfor %}
+  </table></div>
+</div>
+
+{% elif period == 'week' %}
+{# ---------------- WEEKLY ---------------- #}
+{% set maxv = (weeks|map(attribute='overall')|max) or 1 %}
+<div class="card">
+  <div class="card-title"><h3>Weekly sales</h3><span class="spacer"></span>
+    <span class="small muted">last {{ weeks|length }} weeks</span></div>
+  <div class="bars">
     {% for w in weeks %}
-    <div style="flex:0 0 44px; display:flex; flex-direction:column; align-items:center; gap:5px; height:100%; justify-content:flex-end">
-      <div style="width:60%; background:linear-gradient(180deg,var(--lime-l),var(--pine)); border-radius:6px 6px 0 0;
-                  height:{{ (100*w.overall/maxv)|round(0,'floor') }}%; min-height:3px"></div>
-      <div class="small muted" style="font-size:.62rem">{{ w.week_start|fdate('%d %b') }}</div>
+    <div class="bar-col">
+      <div class="bar-val">{{ (w.overall/1000)|round(1) }}k</div>
+      <div class="bar" style="height:{{ (100*w.overall/maxv)|round(0,'floor') }}%"></div>
+      <div class="bar-lbl">{{ w.week_start|fdate('%d %b') }}</div>
     </div>
     {% endfor %}
   </div>
-  <div class="table-wrap"><table>
-    <tr><th>Week of</th><th class="num">Subs</th><th class="num">Sub ₹</th><th class="num">Trials</th>
-        <th class="num">Trial ₹</th><th class="num">Delivered</th><th class="num">Total ₹</th></tr>
+</div>
+<div class="card">
+  <div class="card-title"><h3>Week-by-week</h3></div>
+  <div class="table-wrap"><table class="rev-table">
+    <tr><th>Week of</th><th class="num">Subs ₹</th><th class="num">Trials ₹</th>
+        <th class="num">Total ₹</th><th class="num">Delivered</th></tr>
     {% for w in weeks|reverse %}
     <tr>
       <td><b>{{ w.week_start|fdate('%d %b %Y') }}</b></td>
-      <td class="num">{{ w.subs }}</td><td class="num">{{ w.sub_sales|inr }}</td>
-      <td class="num">{{ w.trials }}</td><td class="num">{{ w.trial_sales|inr }}</td>
-      <td class="num">{{ w.delivered }}</td><td class="num"><b>{{ w.overall|inr }}</b></td>
+      <td class="num">{{ w.sub_sales|inr }}{% if w.subs %} <span class="muted">·{{ w.subs }}</span>{% endif %}</td>
+      <td class="num">{{ w.trial_sales|inr }}{% if w.trials %} <span class="muted">·{{ w.trials }}</span>{% endif %}</td>
+      <td class="num"><b>{{ w.overall|inr }}</b></td>
+      <td class="num">{{ w.delivered }}</td>
     </tr>
     {% endfor %}
   </table></div>
 </div>
 
 {% else %}
+{# ---------------- MONTHLY ---------------- #}
 {% set maxv = (months|map(attribute='overall')|max) or 1 %}
 <div class="card">
-  <h3>Monthly revenue</h3>
-  <div style="display:flex; align-items:flex-end; gap:18px; height:200px; padding:10px 4px 0">
+  <div class="card-title"><h3>Monthly revenue</h3></div>
+  <div class="bars bars-tall">
     {% for m in months %}
-    <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; justify-content:flex-end">
-      <div class="small" style="font-weight:800; color:var(--forest)">{{ m.overall|inr }}</div>
-      <div style="width:64%; max-width:60px; background:linear-gradient(180deg,var(--lime-l),var(--pine));
-                  border-radius:8px 8px 0 0; height:{{ (100*m.overall/maxv)|round(0,'floor') }}%; min-height:4px"></div>
-      <div class="small muted">{{ m.month }}</div>
+    <div class="bar-col">
+      <div class="bar-val strong">{{ m.overall|inr }}</div>
+      <div class="bar" style="height:{{ (100*m.overall/maxv)|round(0,'floor') }}%"></div>
+      <div class="bar-lbl">{{ m.month }}</div>
     </div>
     {% endfor %}
   </div>
 </div>
-
 <div class="card">
-  <h3>Month details</h3>
-  <div class="table-wrap"><table>
-    <tr><th>Month</th><th class="num">Subs ₹</th><th class="num">Trials ₹</th><th class="num">Overall ₹</th>
+  <div class="card-title"><h3>Month-by-month</h3></div>
+  <div class="table-wrap"><table class="rev-table">
+    <tr><th>Month</th><th class="num">Subs ₹</th><th class="num">Trials ₹</th><th class="num">Total ₹</th>
         <th class="num">Sold</th><th class="num">Delivered</th><th class="num">Growth</th></tr>
-    {% for m in months %}
+    {% for m in months|reverse %}
     <tr>
       <td><b>{{ m.month }}</b></td>
       <td class="num">{{ m.sub_sales|inr }}</td>
@@ -74,20 +140,31 @@
       <td class="num">{{ m.delivered }}</td>
       <td class="num">{% if m.growth is none %}—{% else %}
         <span style="color:{{ 'var(--lime)' if m.growth>=0 else 'var(--danger)' }}">
-        {{ '+' if m.growth>=0 }}{{ (m.growth*100)|round(1) }}%</span>{% endif %}</td>
+        {{ '+' if m.growth>=0 }}{{ (m.growth*100)|round(0,'floor')|int }}%</span>{% endif %}</td>
     </tr>
     {% endfor %}
   </table></div>
 </div>
-
-<div class="card">
-  <h3>By plan</h3>
-  <div class="table-wrap"><table>
-    <tr><th>Plan</th><th class="num">Subs</th><th class="num">Sales ₹</th></tr>
-    {% for p in by_plan %}
-    <tr><td>{{ p.plan_name }}</td><td class="num">{{ p.n }}</td><td class="num">{{ p.amt|inr }}</td></tr>
-    {% endfor %}
-  </table></div>
-</div>
 {% endif %}
+
+<!-- Plan breakdown (always shown) -->
+<div class="card">
+  <div class="card-title"><h3>Sales by plan</h3></div>
+  {% set pmax = (by_plan|map(attribute='amt')|max) or 1 %}
+  <div class="planbars">
+    {% for p in by_plan %}
+    <div class="planbar">
+      <div class="planbar-top"><span class="pname">{{ p.plan_name or '—' }}</span>
+        <span class="muted small">{{ p.n }} sub{{ 's' if p.n!=1 }}</span>
+        <span class="spacer"></span><b>{{ p.amt|inr }}</b></div>
+      <div class="planbar-track">
+        <i class="planbar-fill" style="width:{{ (100*p.amt/pmax)|round(0,'floor') }}%"></i>
+        <i class="planbar-recv" style="width:{{ (100*(p.recv or 0)/pmax)|round(0,'floor') }}%"></i>
+      </div>
+    </div>
+    {% else %}<div class="empty small">No plan sales yet.</div>{% endfor %}
+  </div>
+  <div class="legend small" style="margin-top:10px">
+    <span class="dot dot-sage"></span> billed &nbsp; <span class="dot dot-lime"></span> received</div>
+</div>
 {% endblock %}

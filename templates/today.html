@@ -13,26 +13,44 @@
   {% if d != today %}<a class="btn btn-forest btn-sm" href="{{ url_for('today', view=view) }}">⟲ Today</a>{% endif %}
 </div>
 
-{% if ending %}
-<div class="alert alert-warn">
-  <span>⚠️</span>
-  <span><b>{{ ending|length }}</b> ending soon —
-    {% for e in ending %}{{ e.customer_name }} ({{ e.remaining_meals }} left){{ ', ' if not loop.last }}{% endfor %}</span>
-  <span class="spacer"></span>
-  <a class="btn btn-sm btn-ghost" href="{{ url_for('subscriptions', status='Ending Soon') }}">View</a>
-</div>
-{% endif %}
-{% if unpaid %}
-<div class="alert alert-danger">
-  <span>💳</span><span><b>{{ unpaid|length }}</b> unpaid — {{ g_stats.unpaid_amt|inr }} to collect</span>
-  <span class="spacer"></span>
-  <a class="btn btn-sm btn-ghost" href="{{ url_for('subscriptions', status='Unpaid') }}">View</a>
+{% if ending or unpaid %}
+<div class="alertbar">
+  {% if unpaid %}
+  <details class="disc disc-danger">
+    <summary><span class="ico">💳</span><span class="lbl">{{ unpaid|length }} to collect</span>
+      <span class="amt">{{ g_stats.unpaid_amt|inr }}</span><span class="chev">›</span></summary>
+    <div class="disc-body">
+      <ul class="disc-list">
+        {% for u in unpaid %}
+        <li><a href="{{ url_for('subscription_detail', sid=u.id) }}">{{ u.customer_name }}</a>
+          <span class="spacer"></span><b>{{ (u.total_amount - (u.amount_received or 0))|inr }}</b></li>
+        {% endfor %}
+      </ul>
+      <a class="btn btn-sm btn-ghost btn-block" href="{{ url_for('subscriptions', status='Unpaid') }}">View all unpaid</a>
+    </div>
+  </details>
+  {% endif %}
+  {% if ending %}
+  <details class="disc disc-warn">
+    <summary><span class="ico">⚠️</span><span class="lbl">{{ ending|length }} ending soon</span>
+      <span class="chev">›</span></summary>
+    <div class="disc-body">
+      <ul class="disc-list">
+        {% for e in ending %}
+        <li><a href="{{ url_for('subscription_detail', sid=e.id) }}">{{ e.customer_name }}</a>
+          <span class="spacer"></span><b>{{ e.remaining_meals }} left</b></li>
+        {% endfor %}
+      </ul>
+      <a class="btn btn-sm btn-ghost btn-block" href="{{ url_for('subscriptions', status='Ending Soon') }}">View all ending soon</a>
+    </div>
+  </details>
+  {% endif %}
 </div>
 {% endif %}
 
 {{ m.kitchen_control(d, s.operating, override, 'today') }}
 
-<div class="tiles" style="margin-bottom:14px">
+<div class="tiles tiles-4" style="margin-bottom:14px">
   <div class="tile dark"><div class="k">Meals today</div><div class="v">{{ s.total }}</div></div>
   <div class="tile accent"><div class="k">Delivered</div><div class="v" id="cnt-done">{{ s.done }}</div></div>
   <div class="tile"><div class="k">Pending</div><div class="v" id="cnt-pending">{{ s.pending }}</div></div>
@@ -40,13 +58,28 @@
 </div>
 
 {% if s.cook %}
-<div class="card tight">
-  <div class="card-title"><h3>🍱 Cook list</h3><span class="spacer"></span>
-    <span class="small muted">what to prep</span></div>
-  {% for plan, meal, n in s.cook %}
-    <span class="cook-pill"><b>{{ n }}</b> {{ plan or '—' }} <span class="chip chip-{{ meal|lower }}">{{ meal }}</span></span>
-  {% endfor %}
-</div>
+<details class="disc disc-prep">
+  <summary><span class="ico">🍱</span><span class="lbl">Prep list</span>
+    <span class="amt">{{ s.cook_total }} meals</span><span class="chev">›</span></summary>
+  <div class="disc-body">
+    {% if s.cook_lunch %}
+    <div class="prep-group">
+      <h4 class="prep-h">☀ Lunch <span class="muted small">· {{ s.lunch_total }}</span></h4>
+      <ul class="prep-list">
+        {% for plan, n in s.cook_lunch %}<li><span class="qty">{{ n }}×</span> {{ plan or '—' }}</li>{% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if s.cook_dinner %}
+    <div class="prep-group">
+      <h4 class="prep-h">🌙 Dinner <span class="muted small">· {{ s.dinner_total }}</span></h4>
+      <ul class="prep-list">
+        {% for plan, n in s.cook_dinner %}<li><span class="qty">{{ n }}×</span> {{ plan or '—' }}</li>{% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+</details>
 {% endif %}
 
 <div class="card" data-day="{{ d }}">

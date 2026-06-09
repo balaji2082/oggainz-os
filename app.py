@@ -150,6 +150,11 @@ def next_id(c, table, prefix, width=3):
     return f"{prefix}{mx + 1:0{width}d}"
 
 
+def _wants_json():
+    """True when the caller is our fetch() helper (so we answer JSON, not a redirect)."""
+    return request.headers.get("X-Requested-With") == "fetch"
+
+
 def today_iso():
     # Allow ?d=YYYY-MM-DD override for browsing other days
     d = request.args.get("d")
@@ -358,17 +363,28 @@ def subscription_edit(sid):
         fee = float(f.get("delivery_fee") or 0)
         received = float(f.get("amount_received") or 0)
         total = price + fee
+        # Allow re-pointing the subscription to a different customer (fixes a wrong
+        # registration). When changed, keep customer_id + the denormalised name in sync.
+        cust_id = f.get("customer_id") or sub["customer_id"]
+        cust = c.execute("SELECT id,name FROM customers WHERE id=?", (cust_id,)).fetchone()
         c.execute(
-            """UPDATE subscriptions SET plan_name=?, duration=?, notes=?, slot=?,
-                 preferred_timing=?, start_date=?, subscription_price=?, delivery_fee=?,
-                 total_amount=?, amount_received=?, payment_status=?, total_meals_scheduled=?
-               WHERE id=?""",
-            (f.get("plan_name"), f.get("duration"), f.get("notes"), f.get("slot"),
+            """UPDATE subscriptions SET customer_id=?, customer_name=?, plan_name=?, duration=?,
+                 notes=?, slot=?, preferred_timing=?, start_date=?, subscription_price=?,
+                 delivery_fee=?, total_amount=?, amount_received=?, payment_status=?,
+                 total_meals_scheduled=? WHERE id=?""",
+            (cust["id"] if cust else sub["customer_id"],
+             cust["name"] if cust else sub["customer_name"],
+             f.get("plan_name"), f.get("duration"), f.get("notes"), f.get("slot"),
              f.get("preferred_timing"), f.get("start_date") or None, price, fee, total, received,
              "Paid" if received >= total and total > 0 else ("Partial" if received > 0 else "Unpaid"),
              int(f.get("total_meals_scheduled") or sub["total_meals_scheduled"] or 20), sid))
         c.commit()
         core.recompute_subscription(c, sid)
+        # Keep the denormalised name on any future delivery rows correct too.
+        c.execute("UPDATE deliveries SET name=?, customer_id=? WHERE subscription_id=?",
+                  (cust["name"] if cust else sub["customer_name"],
+                   cust["id"] if cust else sub["customer_id"], sid))
+        c.commit()
         c.close()
         flash(f"Subscription {sid} updated.", "ok")
         return redirect(url_for("subscription_detail", sid=sid))
@@ -432,6 +448,26 @@ def subscription_renew(sid):
     c.close()
     flash(f"Renewed {sid} → new subscription {nid}.", "ok")
     return redirect(url_for("subscription_detail", sid=nid))
+
+
+@app.route("/subscriptions/<sid>/delete", methods=["POST"])
+def subscription_delete(sid):
+    """Delete a subscription (e.g. created by mistake) and renumber the rest so the
+    IDs stay gap-free. A safety backup is taken first so nothing is ever truly lost."""
+    c = conn()
+    sub = c.execute("SELECT customer_name FROM subscriptions WHERE id=?", (sid,)).fetchone()
+    if not sub:
+        c.close(); abort(404)
+    try:
+        import backup
+        backup.make_backup(quiet=True)
+    except Exception:
+        pass                                  # never block a delete on backup trouble
+    name = sub["customer_name"]
+    core.delete_subscription(c, sid)
+    c.close()
+    flash(f"Deleted subscription for {name}. Remaining subscriptions renumbered.", "ok")
+    return redirect(url_for("subscriptions"))
 
 
 # ---------------------------------------------------------------------------
@@ -573,22 +609,64 @@ def trial_edit(tid):
     return render_template("trial_form.html", trial=trial, today=date.today().strftime("%Y-%m-%d"))
 
 
+@app.route("/trials/<tid>/pay", methods=["POST"])
+def trial_pay(tid):
+    """One-tap payment toggle (Paid <-> Unpaid) straight from the trials list."""
+    c = conn()
+    t = c.execute("SELECT payment_status FROM trial_orders WHERE id=?", (tid,)).fetchone()
+    if not t:
+        c.close(); abort(404)
+    new = "Unpaid" if (t["payment_status"] == "Paid") else "Paid"
+    c.execute("UPDATE trial_orders SET payment_status=? WHERE id=?", (new, tid))
+    c.commit(); c.close()
+    if _wants_json():
+        return jsonify({"ok": True, "payment_status": new})
+    flash(f"Trial {tid} marked {new}.", "ok")
+    return redirect(request.referrer or url_for("trials"))
+
+
+@app.route("/trials/<tid>/deliver", methods=["POST"])
+def trial_deliver(tid):
+    """One-tap delivery toggle (Delivered <-> Pending); keeps the day's order row in sync."""
+    c = conn()
+    t = c.execute("SELECT delivery_status FROM trial_orders WHERE id=?", (tid,)).fetchone()
+    if not t:
+        c.close(); abort(404)
+    new = "Pending" if (t["delivery_status"] == "Delivered") else "Delivered"
+    c.execute("UPDATE trial_orders SET delivery_status=? WHERE id=?", (new, tid))
+    c.commit()
+    core.sync_trial_delivery(c, tid)          # mirror onto the deliveries / prep list
+    c.close()
+    if _wants_json():
+        return jsonify({"ok": True, "delivery_status": new})
+    flash(f"Trial {tid} marked {new}.", "ok")
+    return redirect(request.referrer or url_for("trials"))
+
+
 # ---------------------------------------------------------------------------
 # Revenue / dashboard
 # ---------------------------------------------------------------------------
 @app.route("/revenue")
 def revenue():
     c = conn()
-    period = request.args.get("period", "month")     # month | week
+    period = request.args.get("period", "month")     # day | week | month
     months = core.monthly_breakdown(c)
     weeks = core.weekly_breakdown(c)
+    days = core.daily_breakdown(c)
     stats = core.headline_stats(c)
     by_plan = c.execute(
-        "SELECT plan_name, COUNT(*) n, COALESCE(SUM(total_amount),0) amt "
+        "SELECT plan_name, COUNT(*) n, COALESCE(SUM(total_amount),0) amt, "
+        "       COALESCE(SUM(amount_received),0) recv "
         "FROM subscriptions GROUP BY plan_name ORDER BY amt DESC").fetchall()
+    # Collection rate for the donut: how much of all billed money is actually in.
+    collected = (stats["received"] / stats["sales"] * 100) if stats["sales"] else 0
+    # This-month snapshot so the headline reflects current performance, not all-time only.
+    this_month = core.month_label_iso()
+    cur = next((m for m in months if m["month"] == this_month), None)
     c.close()
-    return render_template("revenue.html", months=months, weeks=weeks, stats=stats,
-                           by_plan=by_plan, period=period)
+    return render_template("revenue.html", months=months, weeks=weeks, days=days,
+                           stats=stats, by_plan=by_plan, period=period,
+                           collected=collected, cur=cur, this_month=this_month)
 
 
 # ---------------------------------------------------------------------------

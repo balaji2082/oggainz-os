@@ -240,16 +240,22 @@ def today_summary(conn, day_iso):
     done = sum(1 for r in rows if r["status"] == "Delivered")
     skipped = sum(1 for r in rows if r["status"] == "Skipped")
     pending = sum(1 for r in rows if r["status"] == "Pending")
-    # cook counts by plan + meal type
+    # cook counts by plan + meal type, also grouped by slot for a structured prep list
     cook = {}
     for r in rows:
         if r["status"] in ("Delivered", "Pending"):
             key = (r["plan_name"] or "—", r["meal_type"] or "—")
             cook[key] = cook.get(key, 0) + 1
+    cook_flat = sorted(([p, m, n] for (p, m), n in cook.items()), key=lambda x: -x[2])
+    cook_lunch = sorted(([p, n] for (p, m), n in cook.items() if m != "Dinner"), key=lambda x: -x[1])
+    cook_dinner = sorted(([p, n] for (p, m), n in cook.items() if m == "Dinner"), key=lambda x: -x[1])
     return {
         "rows": rows, "total": total, "done": done, "skipped": skipped,
         "pending": pending, "operating": is_operating_day(conn, day_iso),
-        "cook": sorted(([p, m, n] for (p, m), n in cook.items()), key=lambda x: -x[2]),
+        "cook": cook_flat, "cook_lunch": cook_lunch, "cook_dinner": cook_dinner,
+        "cook_total": sum(n for _, _, n in cook_flat),
+        "lunch_total": sum(n for _, n in cook_lunch),
+        "dinner_total": sum(n for _, n in cook_dinner),
     }
 
 
@@ -382,6 +388,95 @@ def weekly_breakdown(conn, limit=10):
         d["overall"] = d["sub_sales"] + d["trial_sales"]
         out.append(d)
     return out[-limit:]
+
+
+def daily_breakdown(conn, limit=30):
+    """
+    Last `limit` operating-relevant days: subscription sales (by start date),
+    trial sales (by booking date) and meals delivered (by delivery date).
+    One row per day that had any activity, newest last (for charting).
+    """
+    from collections import defaultdict
+
+    days = defaultdict(lambda: {"sub_sales": 0, "subs": 0, "trial_sales": 0,
+                                "trials": 0, "delivered": 0})
+    for r in conn.execute("SELECT start_date d, total_amount a FROM subscriptions "
+                          "WHERE start_date IS NOT NULL").fetchall():
+        k = str(r["d"])[:10]
+        days[k]["sub_sales"] += r["a"] or 0
+        days[k]["subs"] += 1
+    for r in conn.execute("SELECT date d, amount a FROM trial_orders WHERE date IS NOT NULL").fetchall():
+        k = str(r["d"])[:10]
+        days[k]["trial_sales"] += r["a"] or 0
+        days[k]["trials"] += 1
+    for r in conn.execute("SELECT date d FROM deliveries WHERE status='Delivered' AND date IS NOT NULL").fetchall():
+        k = str(r["d"])[:10]
+        days[k]["delivered"] += 1
+
+    out = []
+    for k in sorted(days.keys()):
+        d = days[k]
+        d["day"] = k
+        d["overall"] = d["sub_sales"] + d["trial_sales"]
+        out.append(d)
+    return out[-limit:]
+
+
+# ---------------------------------------------------------------------------
+# Delete + renumber subscriptions
+# ---------------------------------------------------------------------------
+def _sub_num(sid):
+    digits = "".join(ch for ch in str(sid) if ch.isdigit())
+    return int(digits) if digits else 0
+
+
+def resequence_subscriptions(conn):
+    """
+    Re-number every subscription so the IDs are a gap-free S001, S002, ... run
+    in their existing numeric order. Lower IDs keep their number; only IDs above
+    a removed/gap position shift down. The matching deliveries.subscription_id
+    values are moved in lock-step so no meal history is ever orphaned.
+
+    Done in two passes through a temporary namespace so source and target IDs can
+    overlap without colliding. Foreign-key checks are turned off only for the
+    rename (re-enabled afterwards) because momentarily a parent/child pair is out
+    of sync mid-rename, which is exactly what the two-pass swap fixes.
+    """
+    ordered = sorted((r["id"] for r in conn.execute("SELECT id FROM subscriptions")),
+                     key=_sub_num)
+    target = {old: f"S{i + 1:03d}" for i, old in enumerate(ordered)}
+    if all(old == new for old, new in target.items()):
+        return 0                                   # already contiguous — nothing to do
+
+    conn.commit()                                  # make sure no transaction is open
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        for i, old in enumerate(ordered):          # pass 1: park everything in temp space
+            tmp = f"__SEQ_{i}"
+            conn.execute("UPDATE deliveries SET subscription_id=? WHERE subscription_id=?", (tmp, old))
+            conn.execute("UPDATE subscriptions SET id=? WHERE id=?", (tmp, old))
+        for i, old in enumerate(ordered):          # pass 2: temp -> final contiguous id
+            tmp, new = f"__SEQ_{i}", target[old]
+            conn.execute("UPDATE deliveries SET subscription_id=? WHERE subscription_id=?", (new, tmp))
+            conn.execute("UPDATE subscriptions SET id=? WHERE id=?", (new, tmp))
+        conn.commit()
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
+    return sum(1 for old, new in target.items() if old != new)
+
+
+def delete_subscription(conn, sid):
+    """
+    Remove a subscription and its delivery rows, then renumber the rest so the IDs
+    stay gap-free. Returns True if something was deleted.
+    """
+    if not conn.execute("SELECT 1 FROM subscriptions WHERE id=?", (sid,)).fetchone():
+        return False
+    conn.execute("DELETE FROM deliveries WHERE subscription_id=?", (sid,))
+    conn.execute("DELETE FROM subscriptions WHERE id=?", (sid,))
+    conn.commit()
+    resequence_subscriptions(conn)
+    return True
 
 
 def trials_by_month(conn):

@@ -4,56 +4,74 @@
 <div class="page-head"><h1>Trial Orders</h1><span class="spacer"></span>
   <a class="btn btn-primary btn-sm" href="{{ url_for('trial_new') }}">+ New</a></div>
 
-<div class="tiles" style="margin-bottom:14px">
+<div class="tiles tiles-3" style="margin-bottom:14px">
   <div class="tile"><div class="k">Trials</div><div class="v">{{ total.n }}</div></div>
   <div class="tile accent"><div class="k">Trial sales</div><div class="v">{{ total.s|inr }}</div></div>
   <div class="tile"><div class="k">Converted</div><div class="v">{{ converted }}</div></div>
 </div>
 
-<div class="card tight">
-  <div class="card-title"><h3>By month</h3></div>
-  <div class="table-wrap"><table>
-    <tr><th>Month</th><th class="num">Trials</th><th class="num">Sales</th><th class="num">Converted</th><th></th></tr>
-    {% for m in by_month %}
-    <tr>
-      <td><b>{{ m.month }}</b></td>
-      <td class="num">{{ m.n }}</td>
-      <td class="num">{{ m.amt|inr }}</td>
-      <td class="num">{{ m.conv }}</td>
-      <td class="right"><a class="chip chip-line" href="{{ url_for('trials', month=m.month) }}">filter</a></td>
-    </tr>
-    {% else %}<tr><td colspan="5" class="muted">No trials yet.</td></tr>{% endfor %}
-  </table></div>
+<details class="disc disc-prep">
+  <summary><span class="ico">📅</span><span class="lbl">By month</span><span class="chev">›</span></summary>
+  <div class="disc-body">
+    <div class="table-wrap"><table class="rev-table">
+      <tr><th>Month</th><th class="num">Trials</th><th class="num">Sales</th><th class="num">Converted</th><th></th></tr>
+      {% for mm in by_month %}
+      <tr>
+        <td><b>{{ mm.month }}</b></td>
+        <td class="num">{{ mm.n }}</td>
+        <td class="num">{{ mm.amt|inr }}</td>
+        <td class="num">{{ mm.conv }}</td>
+        <td class="right"><a class="chip chip-line" href="{{ url_for('trials', month=mm.month) }}">filter</a></td>
+      </tr>
+      {% else %}<tr><td colspan="5" class="muted">No trials yet.</td></tr>{% endfor %}
+    </table></div>
+  </div>
+</details>
+
+<div class="card-title" style="margin-top:4px">
+  <h3>{% if month %}{{ month }} trials{% else %}All trials{% endif %}</h3>
+  <span class="spacer"></span>
+  {% if month %}<a class="btn btn-ghost btn-sm" href="{{ url_for('trials') }}">Show all</a>{% endif %}
 </div>
 
-<div class="card">
-  <div class="card-title">
-    <h3>{% if month %}{{ month }} trials{% else %}All trials{% endif %}</h3>
-    <span class="spacer"></span>
-    {% if month %}<a class="btn btn-ghost btn-sm" href="{{ url_for('trials') }}">Show all</a>{% endif %}
+<div class="tlist">
+  {% for r in rows %}
+  <div class="tcard">
+    <div class="tcard-head">
+      <b class="tname">{{ r.name }}</b>
+      {% if r.conversion %}<span class="chip chip-active">★ {{ r.conversion }}</span>{% endif %}
+      <span class="spacer"></span>
+      <span class="small muted">{{ r.date|fdate('%d %b') }}</span>
+    </div>
+
+    {% if r.order_text or r.notes or r.address %}
+    <div class="tcard-order">{{ r.order_text }}
+      {% if r.notes %}<div class="small muted">{{ r.notes }}</div>{% endif %}
+      {% if r.address %}<div class="small muted">📍 {{ r.address }}</div>{% endif %}
+    </div>
+    {% endif %}
+
+    <div class="tcard-meta">
+      {% if r.phone %}<a class="chip chip-line" href="{{ r.phone|wa }}" target="_blank">💬 {{ r.phone }}</a>{% endif %}
+      <span class="chip chip-line">{{ r.amount|inr if r.amount else '₹0' }}</span>
+      {% if r.delivery_date %}<span class="chip chip-{{ (r.meal_type or 'lunch')|lower }}">{{ r.delivery_date|fdate('%d %b') }} · {{ r.meal_type or 'Lunch' }}</span>{% endif %}
+    </div>
+
+    <div class="tcard-actions">
+      <form method="post" action="{{ url_for('trial_pay', tid=r.id) }}" class="qtoggle" data-kind="pay">
+        <button type="submit" class="qbtn {{ 'on-paid' if r.payment_status=='Paid' }}">
+          {{ '💰 Paid' if r.payment_status=='Paid' else 'Mark paid' }}</button>
+      </form>
+      <form method="post" action="{{ url_for('trial_deliver', tid=r.id) }}" class="qtoggle" data-kind="deliver">
+        <button type="submit" class="qbtn {{ 'on-deliver' if r.delivery_status=='Delivered' }}">
+          {{ '✓ Delivered' if r.delivery_status=='Delivered' else 'Mark delivered' }}</button>
+      </form>
+      <span class="spacer"></span>
+      <a class="btn btn-ghost btn-sm" href="{{ url_for('trial_edit', tid=r.id) }}">Edit</a>
+    </div>
   </div>
-  <div class="table-wrap"><table>
-    <tr><th>Date</th><th>Name</th><th>Order</th><th class="num">Amount</th><th>Payment</th>
-        <th>Delivery</th><th>Converted?</th><th></th></tr>
-    {% for r in rows %}
-    <tr>
-      <td>{{ r.date|fdate('%d %b') }}</td>
-      <td><b>{{ r.name }}</b>{% if r.phone %}<br><a class="small" href="{{ r.phone|wa }}" target="_blank">💬 {{ r.phone }}</a>{% endif %}</td>
-      <td>{{ r.order_text }}{% if r.notes %}<br><span class="small muted">{{ r.notes }}</span>{% endif %}
-          {% if r.address %}<br><span class="small muted">📍 {{ r.address }}</span>{% endif %}</td>
-      <td class="num">{{ r.amount|inr if r.amount else '—' }}</td>
-      <td>{% if r.payment_status=='Paid' %}<span class="chip chip-paid">Paid</span>{% else %}<span class="chip chip-line">{{ r.payment_status or '—' }}</span>{% endif %}</td>
-      <td>
-        {% if r.delivery_date %}<span class="small">{{ r.delivery_date|fdate('%d %b') }} {{ r.meal_type or '' }}</span><br>{% endif %}
-        {% if r.delivery_status=='Delivered' %}<span class="chip chip-active">Delivered</span>
-        {% elif r.delivery_status=='Skipped' %}<span class="chip chip-ending">Skipped</span>
-        {% elif r.delivery_date %}<span class="chip chip-line">Pending</span>
-        {% else %}<span class="muted small">—</span>{% endif %}
-      </td>
-      <td>{% if r.conversion %}<span class="chip chip-active">{{ r.conversion }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
-      <td class="right"><a class="btn btn-ghost btn-sm" href="{{ url_for('trial_edit', tid=r.id) }}">Edit</a></td>
-    </tr>
-    {% else %}<tr><td colspan="8" class="muted">No trials{% if month %} in {{ month }}{% endif %}.</td></tr>{% endfor %}
-  </table></div>
+  {% else %}
+  <div class="empty"><div class="big">🧪</div>No trials{% if month %} in {{ month }}{% endif %} yet.</div>
+  {% endfor %}
 </div>
 {% endblock %}

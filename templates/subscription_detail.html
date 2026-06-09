@@ -66,6 +66,7 @@
 <div class="card">
   <h3>Actions</h3>
   <div class="row" style="gap:8px">
+    <a class="btn btn-ghost btn-sm" href="{{ url_for('subscription_edit', sid=sub.id) }}">✏ Edit details</a>
     <form method="post" action="{{ url_for('subscription_renew', sid=sub.id) }}">
       <button class="btn btn-primary btn-sm">🔄 Renew</button></form>
     {% if sub.status=='Paused' %}
@@ -79,6 +80,14 @@
     <form method="post" action="{{ url_for('subscription_status', sid=sub.id) }}">
       <input type="hidden" name="to" value="Completed"><button class="btn btn-ghost btn-sm">Mark completed</button></form>
     {% endif %}
+  </div>
+
+  <div class="danger-zone">
+    <div class="small muted">Created by mistake? Deleting removes this subscription and its meal
+      history, then renumbers the rest so the IDs stay gap-free.</div>
+    <form method="post" action="{{ url_for('subscription_delete', sid=sub.id) }}"
+          onsubmit="return confirm('Delete this subscription for {{ sub.customer_name|e }} ({{ sub.id }})?\n\nThis removes its delivery history and cannot be undone. A backup is saved first.');">
+      <button class="btn btn-danger btn-sm">🗑 Delete subscription</button></form>
   </div>
 </div>
 

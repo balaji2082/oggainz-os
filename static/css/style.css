@@ -230,3 +230,135 @@ h3.sect{margin:4px 0 10px; padding-bottom:6px; border-bottom:2px solid var(--lin
 /* full-width form section label */
 .form-grid .hr-label{grid-column:1/-1; margin:14px 0 2px; padding-top:12px; border-top:1px solid var(--line);
   color:var(--forest)}
+
+/* ===========================================================================
+   v2 — tiles control, collapsibles, revenue infographics, trial cards, mobile
+   =========================================================================== */
+
+/* ---------- Tile column control ---------- */
+.tiles-3{grid-template-columns:repeat(3,1fr)}
+.tiles-4{grid-template-columns:repeat(4,1fr)}
+
+/* ---------- Collapsible discs (alerts / prep list / by-month) ---------- */
+.alertbar{display:flex; flex-direction:column; gap:10px; margin-bottom:12px}
+.disc{border:1px solid var(--line); border-radius:var(--r-sm); background:#fff; overflow:hidden;
+  margin-bottom:12px; box-shadow:var(--shadow)}
+.disc>summary{list-style:none; cursor:pointer; display:flex; align-items:center; gap:10px;
+  padding:13px 15px; font-weight:700; color:var(--forest); user-select:none; min-height:48px}
+.disc>summary::-webkit-details-marker{display:none}
+.disc>summary .ico{font-size:1.1rem; line-height:1}
+.disc>summary .lbl{flex:1; font-weight:800}
+.disc>summary .amt{font-weight:800}
+.disc>summary .chev{color:var(--muted); font-size:1.2rem; transition:transform .2s; line-height:1}
+.disc[open]>summary .chev{transform:rotate(90deg)}
+.disc[open]>summary{border-bottom:1px solid var(--line)}
+.disc-body{padding:13px 15px}
+.disc-warn{border-color:#f6d9bf}
+.disc-warn>summary{background:#fdeede; color:#9c4a0f}
+.disc-danger{border-color:#f3cfc9}
+.disc-danger>summary{background:#fbeae8; color:#a52e20}
+.disc-prep>summary{background:linear-gradient(135deg,#eef7f0,#e2f1e8)}
+
+.disc-list{list-style:none; margin:0 0 10px; padding:0; display:flex; flex-direction:column}
+.disc-list li{display:flex; align-items:center; gap:8px; padding:9px 2px; border-bottom:1px solid var(--line)}
+.disc-list li:last-child{border-bottom:none}
+.disc-list li a{color:var(--forest); font-weight:700}
+.disc-list .spacer{flex:1}
+
+/* structured prep list */
+.prep-group{margin-bottom:14px}
+.prep-group:last-child{margin-bottom:0}
+.prep-h{margin:0 0 8px; font-size:.95rem; color:var(--forest)}
+.prep-list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:7px}
+.prep-list li{display:flex; align-items:center; gap:11px; padding:10px 12px; background:var(--cream);
+  border:1px solid var(--line); border-radius:10px; font-weight:600; color:var(--ink)}
+.prep-list .qty{background:var(--forest); color:#fff; border-radius:8px; padding:3px 9px; font-weight:800;
+  font-size:.85rem; min-width:38px; text-align:center; flex-shrink:0}
+
+/* ---------- Revenue: insight card + donut ---------- */
+.insight-card{display:flex; gap:20px; align-items:center; flex-wrap:wrap}
+.donut{width:120px; height:120px; border-radius:50%; flex:0 0 auto; display:grid; place-items:center;
+  background:conic-gradient(var(--lime) calc(var(--pct) * 1%), var(--sage) 0)}
+.donut-hole{width:84px; height:84px; border-radius:50%; background:#fff; display:grid; place-items:center;
+  text-align:center; box-shadow:inset 0 0 0 1px rgba(0,40,30,.05)}
+.donut-hole b{font-size:1.55rem; color:var(--forest); line-height:1}
+.donut-hole span{font-size:.6rem; text-transform:uppercase; letter-spacing:.07em; color:var(--muted)}
+.insight-body{flex:1; min-width:210px}
+.legend{display:flex; align-items:center; gap:6px; font-size:.88rem; color:var(--ink); margin-bottom:4px}
+.legend b{margin-left:4px; color:var(--forest)}
+.dot{width:11px; height:11px; border-radius:50%; display:inline-block; vertical-align:middle}
+.dot-lime{background:var(--lime)} .dot-sage{background:#b9e3c6}
+.big-num{font-size:1.55rem; font-weight:800; color:var(--forest)}
+.growth{font-weight:800; font-size:.82rem}
+.growth.up{color:var(--lime)} .growth.down{color:var(--danger)}
+
+/* ---------- Revenue: segmented switch ---------- */
+.seg{display:flex; background:#fff; border:1px solid var(--line); border-radius:999px; padding:4px;
+  margin-bottom:14px; box-shadow:var(--shadow); max-width:440px}
+.seg-btn{flex:1; text-align:center; padding:10px 10px; border-radius:999px; font-weight:700;
+  font-size:.88rem; color:var(--muted); transition:.15s}
+.seg-btn.on{background:var(--forest); color:#fff}
+
+/* ---------- Revenue: bar charts ---------- */
+.bars{display:flex; align-items:flex-end; gap:10px; height:175px; padding:8px 2px 0; overflow-x:auto}
+.bars-tall{height:215px}
+.bar-col{flex:1 0 40px; display:flex; flex-direction:column; align-items:center; gap:5px; height:100%;
+  justify-content:flex-end}
+.bar{width:62%; max-width:50px; border-radius:7px 7px 0 0; min-height:4px;
+  background:linear-gradient(180deg,var(--lime-l),var(--pine)); transition:height .35s}
+.bar-val{font-size:.62rem; font-weight:800; color:var(--forest); white-space:nowrap}
+.bar-val.strong{font-size:.72rem}
+.bar-lbl{font-size:.6rem; color:var(--muted); white-space:nowrap; text-align:center}
+
+.rev-table{font-size:.86rem}
+.rev-table th,.rev-table td{padding:8px 9px}
+.rev-table tr:last-child td{border-bottom:none}
+
+/* ---------- Revenue: plan bars ---------- */
+.planbars{display:flex; flex-direction:column; gap:13px}
+.planbar-top{display:flex; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap}
+.planbar-top .pname{font-weight:700; color:var(--forest)}
+.planbar-track{position:relative; height:13px; background:#eef4f0; border-radius:999px; overflow:hidden}
+.planbar-fill{position:absolute; left:0; top:0; height:100%; background:#b9e3c6; border-radius:999px}
+.planbar-recv{position:absolute; left:0; top:0; height:100%; background:var(--lime); border-radius:999px}
+
+/* ---------- Trials: card layout + quick toggles ---------- */
+.tlist{display:flex; flex-direction:column; gap:12px}
+.tcard{background:#fff; border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow); padding:15px}
+.tcard-head{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.tcard-head .tname{color:var(--forest); font-size:1.04rem}
+.tcard-order{margin:9px 0; font-size:.92rem; color:var(--ink)}
+.tcard-meta{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:13px}
+.tcard-actions{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.tcard-actions form{margin:0}
+.qbtn{border:1.5px solid var(--line); background:#fff; color:var(--forest); border-radius:999px;
+  padding:9px 15px; font-weight:700; font-size:.85rem; font-family:inherit; cursor:pointer; transition:.12s}
+.qbtn:active{transform:scale(.96)}
+.qbtn.on-paid{background:var(--lime); border-color:var(--lime); color:#04231a}
+.qbtn.on-deliver{background:var(--forest); border-color:var(--forest); color:#fff}
+.qbtn[disabled]{opacity:.55}
+
+/* ---------- Subscription danger zone ---------- */
+.danger-zone{margin-top:15px; padding-top:14px; border-top:1px dashed #e7c9c2;
+  display:flex; flex-direction:column; gap:9px; align-items:flex-start}
+
+/* ---------- Mobile polish ---------- */
+@media(max-width:620px){
+  .tiles-4{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:560px){
+  .container{padding:15px 13px}
+  h1{font-size:1.32rem}
+  .card{padding:14px}
+  .tile{padding:13px 13px}
+  .tile .v{font-size:1.45rem}
+  .tile .k{font-size:.66rem}
+  .tiles{gap:10px}
+  .seg-btn{font-size:.82rem; padding:9px 6px}
+  .insight-card{gap:14px; justify-content:center}
+  .donut{width:110px; height:110px}
+  .donut-hole{width:76px; height:76px}
+}
+@media(max-width:380px){
+  .tiles-3{grid-template-columns:repeat(2,1fr)}
+}

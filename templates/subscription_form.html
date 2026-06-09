@@ -8,16 +8,15 @@
 
 <form method="post" class="card">
   <div class="form-grid">
-    {% if not sub %}
     <div class="full">
-      <label>Customer</label>
+      <label>Customer{% if sub %} (whose name this is registered under){% endif %}</label>
       <select name="customer_id" required>
         <option value="">— choose existing customer —</option>
-        {% for c in customers %}<option value="{{ c.id }}">{{ c.name }} ({{ c.id }})</option>{% endfor %}
+        {% for c in customers %}<option value="{{ c.id }}" {{ 'selected' if sub and sub.customer_id==c.id }}>{{ c.name }} ({{ c.id }})</option>{% endfor %}
       </select>
-      <div class="small muted" style="margin-top:6px">New customer? <a href="{{ url_for('customer_new') }}" style="color:var(--lime)">Add one first ›</a></div>
+      <div class="small muted" style="margin-top:6px">
+        {% if sub %}Pick a different customer to move this subscription to them.{% else %}New customer? <a href="{{ url_for('customer_new') }}" style="color:var(--lime)">Add one first ›</a>{% endif %}</div>
     </div>
-    {% endif %}
 
     <div class="full">
       <label>Plan</label>

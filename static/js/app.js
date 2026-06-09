@@ -63,3 +63,38 @@ function updateCounters(d) {
   set('cnt-pending', d.pending);
   set('cnt-skipped', d.skipped);
 }
+
+// --- Trials: one-tap Paid / Delivered toggles (progressive enhancement) ---
+// Each toggle is a real <form> so it still works with JS off; here we intercept
+// it, POST in the background and flip the button in place — no page reload.
+document.addEventListener('submit', async (ev) => {
+  const form = ev.target.closest('.qtoggle');
+  if (!form) return;
+  ev.preventDefault();
+  const btn = form.querySelector('button');
+  const kind = form.dataset.kind;
+  btn.disabled = true;
+  try {
+    const res = await fetch(form.action, {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'fetch' }
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error();
+    if (kind === 'pay') {
+      const paid = data.payment_status === 'Paid';
+      btn.classList.toggle('on-paid', paid);
+      btn.textContent = paid ? '💰 Paid' : 'Mark paid';
+      showToast(paid ? 'Marked paid 💰' : 'Marked unpaid');
+    } else {
+      const done = data.delivery_status === 'Delivered';
+      btn.classList.toggle('on-deliver', done);
+      btn.textContent = done ? '✓ Delivered' : 'Mark delivered';
+      showToast(done ? 'Marked delivered ✓' : 'Reset to pending');
+    }
+  } catch (e) {
+    showToast('Could not save — try again', false);
+  } finally {
+    btn.disabled = false;
+  }
+});
