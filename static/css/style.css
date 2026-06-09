@@ -362,3 +362,112 @@ h3.sect{margin:4px 0 10px; padding-bottom:6px; border-bottom:2px solid var(--lin
 @media(max-width:380px){
   .tiles-3{grid-template-columns:repeat(2,1fr)}
 }
+
+/* ===========================================================================
+   v3 — premium day-wise revenue: column chart, day list, drill-down sheet
+   =========================================================================== */
+
+/* hero tile goes full-width on small screens so big ₹ numbers never crush */
+@media(max-width:560px){
+  .tiles-3{grid-template-columns:1fr 1fr}
+  .tiles-3 .tile-hero{grid-column:1 / -1}
+}
+
+/* ---------- Premium column chart (day / week / month) ---------- */
+.daychart{display:flex; align-items:stretch; gap:8px; height:218px; padding:10px 2px 0;
+  overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none}
+.daychart::-webkit-scrollbar{display:none}
+.daychart-tall{height:248px}
+.daychart .col{flex:1 0 44px; display:flex; flex-direction:column; align-items:center; gap:7px;
+  border:none; background:transparent; font-family:inherit; padding:0; -webkit-tap-highlight-color:transparent}
+.daychart button.col{cursor:pointer}
+.daychart .col-val{font-size:.64rem; font-weight:800; color:var(--forest); white-space:nowrap; letter-spacing:-.01em}
+.daychart .col-bar{flex:1; width:100%; display:flex; align-items:flex-end; justify-content:center;
+  border-radius:10px 10px 6px 6px; background:linear-gradient(180deg,rgba(0,64,48,.05),rgba(0,64,48,0))}
+.daychart .col-bar i{display:block; width:66%; max-width:46px; height:var(--h); min-height:6px;
+  border-radius:9px 9px 4px 4px;
+  background:linear-gradient(180deg,var(--lime-l) 0%,var(--lime) 55%,var(--pine) 100%);
+  box-shadow:0 5px 12px rgba(10,107,63,.28), inset 0 1px 0 rgba(255,255,255,.35);
+  transition:height .45s cubic-bezier(.22,1,.36,1), filter .15s, transform .12s}
+.daychart button.col:hover .col-bar i{filter:brightness(1.06) saturate(1.05)}
+.daychart button.col:active .col-bar i{transform:scaleY(.97)}
+.daychart .col.peak .col-bar i{
+  background:linear-gradient(180deg,#ffb877 0%,var(--orange) 60%,var(--orange-d) 100%);
+  box-shadow:0 6px 14px rgba(233,118,43,.34), inset 0 1px 0 rgba(255,255,255,.4)}
+.daychart .col.peak .col-val{color:var(--orange-d)}
+.daychart .col-lbl{font-size:.6rem; color:var(--muted); white-space:nowrap; font-weight:600}
+
+/* ---------- Tappable day list ---------- */
+.dayrows{display:flex; flex-direction:column; gap:9px}
+.dayrow{display:flex; align-items:center; gap:13px; width:100%; text-align:left;
+  border:1px solid var(--line); border-radius:14px; background:#fff; padding:11px 13px;
+  font-family:inherit; cursor:pointer; transition:.14s; -webkit-tap-highlight-color:transparent}
+.dayrow:hover{box-shadow:0 6px 18px rgba(0,40,30,.09); border-color:#d7e6dd; transform:translateY(-1px)}
+.dayrow:active{transform:translateY(0)}
+.dr-date{flex:0 0 auto; width:48px; height:48px; border-radius:12px; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; line-height:1;
+  background:linear-gradient(135deg,var(--forest),var(--forest-2)); color:#fff}
+.dr-date b{font-size:1.15rem; font-weight:800}
+.dr-date span{font-size:.58rem; text-transform:uppercase; letter-spacing:.08em; color:var(--lime-e); margin-top:2px}
+.dr-mid{flex:1; min-width:0}
+.dr-day{font-weight:800; color:var(--forest); font-size:.98rem}
+.dr-meta{font-size:.78rem; color:var(--muted); display:flex; align-items:center; gap:4px; flex-wrap:wrap; margin-top:2px}
+.dr-pip{width:7px; height:7px; border-radius:50%; display:inline-block; margin-left:4px}
+.dr-pip.sub{background:var(--lime)} .dr-pip.trial{background:#8254c8}
+.dr-amt{flex:0 0 auto; display:flex; align-items:center; gap:3px; color:var(--forest); font-size:1.04rem}
+.dr-amt b{font-weight:800; font-variant-numeric:tabular-nums}
+.dr-amt svg{width:18px; height:18px; color:var(--muted)}
+
+.chip-xs{padding:1px 8px; font-size:.66rem}
+
+/* ---------- Per-day drill-down bottom sheet ---------- */
+body.sheet-open{overflow:hidden}
+.daysheet-wrap{position:fixed; inset:0; z-index:120; display:none}
+.daysheet-wrap.show{display:block}
+.daysheet-scrim{position:absolute; inset:0; background:rgba(4,24,17,.55);
+  -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px); animation:ds-fade .22s ease}
+.daysheet{position:absolute; left:0; right:0; bottom:0; margin:0 auto; width:100%; max-width:540px;
+  background:var(--cream); border-radius:26px 26px 0 0; max-height:90vh; display:flex; flex-direction:column;
+  box-shadow:0 -16px 50px rgba(0,40,30,.4); overflow:hidden; animation:ds-up .34s cubic-bezier(.22,1,.36,1)}
+@keyframes ds-up{from{transform:translateY(100%)}to{transform:none}}
+@keyframes ds-fade{from{opacity:0}to{opacity:1}}
+.ds-grip-wrap{position:absolute; top:0; left:0; right:0; display:flex; justify-content:center;
+  padding-top:9px; z-index:2; pointer-events:none}
+.ds-grip{width:42px; height:5px; border-radius:999px; background:rgba(255,255,255,.6)}
+.ds-head{display:flex; align-items:flex-start; gap:12px; padding:26px 22px 18px; color:#fff;
+  background:linear-gradient(140deg,var(--forest) 0%,var(--forest-2) 100%)}
+.ds-head-main{flex:1; min-width:0}
+.ds-date{font-size:.72rem; text-transform:uppercase; letter-spacing:.1em; color:var(--lime-e); font-weight:700}
+.ds-total{font-size:2.3rem; font-weight:800; line-height:1.05; margin:3px 0 2px; letter-spacing:-.02em}
+.ds-cap{font-size:.82rem; color:#cfe6da}
+.ds-x{flex:0 0 auto; width:38px; height:38px; border-radius:50%; border:none; cursor:pointer;
+  background:rgba(255,255,255,.14); color:#fff; display:flex; align-items:center; justify-content:center}
+.ds-x:active{transform:scale(.92)}
+.ds-x svg{width:18px; height:18px}
+.ds-splits{display:flex; gap:10px; padding:14px 16px 4px}
+.ds-split{flex:1; min-width:0; display:flex; align-items:center; gap:9px; background:#fff;
+  border:1px solid var(--line); border-radius:13px; padding:11px 13px}
+.ds-split>div{flex:1; min-width:0; display:flex; flex-direction:column}
+.ds-split-k{font-size:.68rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:700}
+.ds-split-v{font-size:1.05rem; font-weight:800; color:var(--forest)}
+.ds-split i{font-style:normal; font-weight:800; font-size:.78rem; color:#fff; background:var(--forest);
+  border-radius:999px; min-width:24px; height:24px; padding:0 7px; display:flex; align-items:center; justify-content:center}
+.ds-dot{width:11px; height:11px; border-radius:50%; flex:0 0 auto}
+.ds-dot.sub{background:var(--lime)} .ds-dot.trial{background:#8254c8}
+.ds-list{flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:8px 16px 4px;
+  display:flex; flex-direction:column; gap:8px}
+.ds-item{display:flex; align-items:center; gap:12px; background:#fff; border:1px solid var(--line);
+  border-radius:13px; padding:11px 13px}
+.ds-av{flex:0 0 auto; width:40px; height:40px; border-radius:50%; background:var(--sage); color:var(--forest);
+  display:flex; align-items:center; justify-content:center; font-weight:800; font-size:1rem}
+.ds-av.trial{background:#ece2fb; color:#6b3fb0}
+.ds-info{flex:1; min-width:0}
+.ds-name{font-weight:700; color:var(--forest); font-size:.96rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.ds-sub{display:flex; align-items:center; gap:6px; margin-top:3px; min-width:0}
+.ds-plan{font-size:.76rem; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:48%}
+.ds-price{flex:0 0 auto; font-weight:800; color:var(--forest); font-size:1.04rem; font-variant-numeric:tabular-nums}
+.ds-foot{display:flex; align-items:center; padding:15px 20px; background:#fff; border-top:1px solid var(--line);
+  padding-bottom:calc(15px + env(safe-area-inset-bottom))}
+.ds-foot span{flex:1; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; font-size:.8rem}
+.ds-foot b{font-size:1.6rem; font-weight:800; color:var(--forest); letter-spacing:-.02em}
+@media(max-width:560px){ .ds-total{font-size:2rem} }

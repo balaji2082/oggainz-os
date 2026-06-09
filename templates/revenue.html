@@ -5,11 +5,22 @@
   <a class="btn btn-ghost btn-sm" href="{{ url_for('export') }}">⬇ Export Excel</a></div>
 
 <!-- Headline tiles -->
-<div class="tiles tiles-4" style="margin-bottom:14px">
-  <div class="tile dark"><div class="k">Overall revenue</div><div class="v">{{ stats.overall|inr }}</div></div>
-  <div class="tile accent"><div class="k">Received</div><div class="v">{{ stats.received|inr }}</div></div>
-  <div class="tile"><div class="k">To collect</div><div class="v" style="color:var(--orange)">{{ stats.pending_amt|inr }}</div></div>
-  <div class="tile"><div class="k">Trial sales</div><div class="v">{{ stats.trial_sales|inr }}</div></div>
+<div class="tiles tiles-3" style="margin-bottom:14px">
+  <div class="tile dark tile-hero">
+    <div class="k">Earned revenue</div>
+    <div class="v">{{ earned.overall|inr }}</div>
+    <div class="tap" style="color:var(--lime-e)">{{ earned.delivered }} meals delivered</div>
+  </div>
+  <div class="tile accent">
+    <div class="k">Received</div>
+    <div class="v">{{ stats.received|inr }}</div>
+    <div class="tap" style="color:#eafff1">cash collected</div>
+  </div>
+  <div class="tile">
+    <div class="k">Booked</div>
+    <div class="v">{{ stats.overall|inr }}</div>
+    <div class="tap" style="color:var(--orange)">{{ stats.pending_amt|inr }} to collect</div>
+  </div>
 </div>
 
 <!-- Collection rate + this-month snapshot -->
@@ -23,7 +34,7 @@
     <div class="legend"><span class="dot dot-sage"></span> Still to collect <b>{{ stats.pending_amt|inr }}</b></div>
     {% if cur %}
     <div class="hr"></div>
-    <div class="small muted" style="margin-bottom:2px">This month ({{ this_month }})</div>
+    <div class="small muted" style="margin-bottom:2px">Earned this month ({{ this_month }})</div>
     <div class="row" style="gap:18px; align-items:baseline">
       <div><span class="big-num">{{ cur.overall|inr }}</span></div>
       {% if cur.growth is not none %}
@@ -31,7 +42,7 @@
         {{ '▲' if cur.growth>=0 else '▼' }} {{ (cur.growth*100)|round(0,'floor')|int|abs }}% vs last month</div>
       {% endif %}
     </div>
-    <div class="small muted">{{ cur.subs_sold }} subs sold · {{ cur.delivered }} meals delivered</div>
+    <div class="small muted">{{ cur.delivered }} meals delivered · {{ cur.subs_sold }} subs booked</div>
     {% endif %}
   </div>
 </div>
@@ -44,112 +55,180 @@
 </div>
 
 {% if period == 'day' %}
-{# ---------------- DAY-WISE ---------------- #}
-{% set recent = (days|selectattr('overall')|list)[-14:] %}
+{# ---------------- DAY-WISE (earned = value of meals delivered) ---------------- #}
+{% set recent = days[-14:] %}
 {% set maxv = (recent|map(attribute='overall')|max) or 1 %}
-<div class="card">
-  <div class="card-title"><h3>Daily sales</h3><span class="spacer"></span>
-    <span class="small muted">last {{ recent|length }} active days</span></div>
-  <div class="bars">
+<div class="card chart-card">
+  <div class="card-title">
+    <div><h3>Daily earned sales</h3>
+      <div class="small muted">value of meals delivered each day · tap a bar for the breakdown</div></div>
+  </div>
+  {% if recent %}
+  <div class="daychart">
     {% for x in recent %}
-    <div class="bar-col">
-      <div class="bar-val">{{ (x.overall/1000)|round(1) }}k</div>
-      <div class="bar" style="height:{{ (100*x.overall/maxv)|round(0,'floor') }}%"></div>
-      <div class="bar-lbl">{{ x.day|fdate('%d %b') }}</div>
-    </div>
-    {% else %}<div class="empty small">No daily sales yet.</div>{% endfor %}
+    <button class="col {{ 'peak' if x.overall==maxv }}" data-open-day="{{ x.day }}"
+            style="--h:{{ (100*x.overall/maxv)|round(0,'floor')|int }}%">
+      <span class="col-val">{{ (x.overall/1000)|round(1) }}k</span>
+      <span class="col-bar"><i></i></span>
+      <span class="col-lbl">{{ x.day|fdate('%d %b') }}</span>
+    </button>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty small">No meals delivered yet.</div>{% endif %}
+</div>
+
+<div class="card">
+  <div class="card-title"><h3>Day by day</h3><span class="spacer"></span>
+    <span class="small muted">newest first · tap to open</span></div>
+  <div class="dayrows">
+    {% for x in days|reverse %}
+    <button class="dayrow" data-open-day="{{ x.day }}">
+      <div class="dr-date">
+        <b>{{ x.day|fdate('%d') }}</b><span>{{ x.day|fdate('%b') }}</span>
+      </div>
+      <div class="dr-mid">
+        <div class="dr-day">{{ x.day|fdate('%A') }}</div>
+        <div class="dr-meta">{{ x.delivered }} meal{{ 's' if x.delivered!=1 }}
+          <span class="dr-pip sub"></span>{{ x.sub_meals }} subs{% if x.trial_meals %}
+          <span class="dr-pip trial"></span>{{ x.trial_meals }} trials{% endif %}</div>
+      </div>
+      <div class="dr-amt"><b>{{ x.overall|inr }}</b>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+             stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></div>
+    </button>
+    {% else %}<div class="empty small">No sales recorded yet.</div>{% endfor %}
   </div>
 </div>
-<div class="card">
-  <div class="card-title"><h3>Day-by-day</h3></div>
-  <div class="table-wrap"><table class="rev-table">
-    <tr><th>Date</th><th class="num">Subs ₹</th><th class="num">Trials ₹</th>
-        <th class="num">Total ₹</th><th class="num">Delivered</th></tr>
-    {% for x in days|reverse %}
-    <tr>
-      <td><b>{{ x.day|fdate('%a, %d %b') }}</b></td>
-      <td class="num">{{ x.sub_sales|inr }}{% if x.subs %} <span class="muted">·{{ x.subs }}</span>{% endif %}</td>
-      <td class="num">{{ x.trial_sales|inr }}{% if x.trials %} <span class="muted">·{{ x.trials }}</span>{% endif %}</td>
-      <td class="num"><b>{{ x.overall|inr }}</b></td>
-      <td class="num">{{ x.delivered }}</td>
-    </tr>
-    {% else %}<tr><td colspan="5" class="muted">No sales recorded yet.</td></tr>{% endfor %}
-  </table></div>
+
+{# ---- Per-day drill-down sheets (one per day, opened on tap) ---- #}
+{% for x in days %}{% set det = day_details[x.day] %}
+<div class="daysheet-wrap" id="day-{{ x.day }}" aria-hidden="true">
+  <div class="daysheet-scrim" data-close></div>
+  <div class="daysheet" role="dialog" aria-modal="true" aria-label="Sales for {{ x.day|fdate('%d %b %Y') }}">
+    <div class="ds-grip-wrap"><span class="ds-grip"></span></div>
+    <div class="ds-head">
+      <div class="ds-head-main">
+        <div class="ds-date">{{ x.day|fdate('%A, %d %b %Y') }}</div>
+        <div class="ds-total">{{ x.overall|inr }}</div>
+        <div class="ds-cap">{{ x.delivered }} meal{{ 's' if x.delivered!=1 }} delivered</div>
+      </div>
+      <button class="ds-x" data-close aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+             stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="ds-splits">
+      <div class="ds-split">
+        <span class="ds-dot sub"></span>
+        <div><span class="ds-split-k">Subscriptions</span>
+          <span class="ds-split-v">{{ det.sub_total|inr }}</span></div>
+        <i>{{ det.sub_meals }}</i>
+      </div>
+      <div class="ds-split">
+        <span class="ds-dot trial"></span>
+        <div><span class="ds-split-k">Trials</span>
+          <span class="ds-split-v">{{ det.trial_total|inr }}</span></div>
+        <i>{{ det.trial_meals }}</i>
+      </div>
+    </div>
+    <div class="ds-list">
+      {% for it in det.orders %}
+      <div class="ds-item">
+        <span class="ds-av {{ 'trial' if it.source=='trial' }}">{{ it.name[:1]|upper }}</span>
+        <div class="ds-info">
+          <div class="ds-name">{{ it.name }}</div>
+          <div class="ds-sub">
+            <span class="ds-plan">{{ it.label or ('Trial meal' if it.source=='trial' else 'Meal') }}</span>
+            <span class="chip chip-xs {{ 'chip-dinner' if it.meal_type=='Dinner' else 'chip-lunch' }}">{{ it.meal_type }}</span>
+            {% if it.source=='trial' %}<span class="chip chip-xs chip-trial">Trial</span>{% endif %}
+          </div>
+        </div>
+        <div class="ds-price">{{ it.value|inr }}</div>
+      </div>
+      {% else %}<div class="empty small">No delivered orders this day.</div>{% endfor %}
+    </div>
+    <div class="ds-foot">
+      <span>Total sales</span><b>{{ x.overall|inr }}</b>
+    </div>
+  </div>
 </div>
+{% endfor %}
 
 {% elif period == 'week' %}
 {# ---------------- WEEKLY ---------------- #}
 {% set maxv = (weeks|map(attribute='overall')|max) or 1 %}
-<div class="card">
-  <div class="card-title"><h3>Weekly sales</h3><span class="spacer"></span>
-    <span class="small muted">last {{ weeks|length }} weeks</span></div>
-  <div class="bars">
+<div class="card chart-card">
+  <div class="card-title"><div><h3>Weekly earned sales</h3>
+    <div class="small muted">value of meals delivered each week</div></div></div>
+  <div class="daychart">
     {% for w in weeks %}
-    <div class="bar-col">
-      <div class="bar-val">{{ (w.overall/1000)|round(1) }}k</div>
-      <div class="bar" style="height:{{ (100*w.overall/maxv)|round(0,'floor') }}%"></div>
-      <div class="bar-lbl">{{ w.week_start|fdate('%d %b') }}</div>
+    <div class="col {{ 'peak' if w.overall==maxv }}" style="--h:{{ (100*w.overall/maxv)|round(0,'floor')|int }}%">
+      <span class="col-val">{{ (w.overall/1000)|round(1) }}k</span>
+      <span class="col-bar"><i></i></span>
+      <span class="col-lbl">{{ w.week_start|fdate('%d %b') }}</span>
     </div>
-    {% endfor %}
+    {% else %}<div class="empty small">No weekly sales yet.</div>{% endfor %}
   </div>
 </div>
 <div class="card">
-  <div class="card-title"><h3>Week-by-week</h3></div>
+  <div class="card-title"><h3>Week by week</h3></div>
   <div class="table-wrap"><table class="rev-table">
     <tr><th>Week of</th><th class="num">Subs ₹</th><th class="num">Trials ₹</th>
-        <th class="num">Total ₹</th><th class="num">Delivered</th></tr>
+        <th class="num">Total ₹</th><th class="num">Meals</th></tr>
     {% for w in weeks|reverse %}
     <tr>
       <td><b>{{ w.week_start|fdate('%d %b %Y') }}</b></td>
-      <td class="num">{{ w.sub_sales|inr }}{% if w.subs %} <span class="muted">·{{ w.subs }}</span>{% endif %}</td>
-      <td class="num">{{ w.trial_sales|inr }}{% if w.trials %} <span class="muted">·{{ w.trials }}</span>{% endif %}</td>
+      <td class="num">{{ w.sub_sales|inr }}{% if w.sub_meals %} <span class="muted">·{{ w.sub_meals }}</span>{% endif %}</td>
+      <td class="num">{{ w.trial_sales|inr }}{% if w.trial_meals %} <span class="muted">·{{ w.trial_meals }}</span>{% endif %}</td>
       <td class="num"><b>{{ w.overall|inr }}</b></td>
       <td class="num">{{ w.delivered }}</td>
     </tr>
-    {% endfor %}
+    {% else %}<tr><td colspan="5" class="muted">No sales yet.</td></tr>{% endfor %}
   </table></div>
 </div>
 
 {% else %}
 {# ---------------- MONTHLY ---------------- #}
 {% set maxv = (months|map(attribute='overall')|max) or 1 %}
-<div class="card">
-  <div class="card-title"><h3>Monthly revenue</h3></div>
-  <div class="bars bars-tall">
+<div class="card chart-card">
+  <div class="card-title"><div><h3>Monthly earned revenue</h3>
+    <div class="small muted">value of meals delivered each month</div></div></div>
+  <div class="daychart daychart-tall">
     {% for m in months %}
-    <div class="bar-col">
-      <div class="bar-val strong">{{ m.overall|inr }}</div>
-      <div class="bar" style="height:{{ (100*m.overall/maxv)|round(0,'floor') }}%"></div>
-      <div class="bar-lbl">{{ m.month }}</div>
+    <div class="col {{ 'peak' if m.overall==maxv }}" style="--h:{{ (100*m.overall/maxv)|round(0,'floor')|int }}%">
+      <span class="col-val">{{ m.overall|inr }}</span>
+      <span class="col-bar"><i></i></span>
+      <span class="col-lbl">{{ m.month }}</span>
     </div>
-    {% endfor %}
+    {% else %}<div class="empty small">No monthly revenue yet.</div>{% endfor %}
   </div>
 </div>
 <div class="card">
-  <div class="card-title"><h3>Month-by-month</h3></div>
+  <div class="card-title"><h3>Month by month</h3></div>
   <div class="table-wrap"><table class="rev-table">
     <tr><th>Month</th><th class="num">Subs ₹</th><th class="num">Trials ₹</th><th class="num">Total ₹</th>
-        <th class="num">Sold</th><th class="num">Delivered</th><th class="num">Growth</th></tr>
+        <th class="num">Meals</th><th class="num">Booked</th><th class="num">Growth</th></tr>
     {% for m in months|reverse %}
     <tr>
       <td><b>{{ m.month }}</b></td>
       <td class="num">{{ m.sub_sales|inr }}</td>
       <td class="num">{{ m.trial_sales|inr }}</td>
       <td class="num"><b>{{ m.overall|inr }}</b></td>
-      <td class="num">{{ m.subs_sold }}</td>
       <td class="num">{{ m.delivered }}</td>
+      <td class="num">{{ m.subs_sold }}</td>
       <td class="num">{% if m.growth is none %}—{% else %}
         <span style="color:{{ 'var(--lime)' if m.growth>=0 else 'var(--danger)' }}">
         {{ '+' if m.growth>=0 }}{{ (m.growth*100)|round(0,'floor')|int }}%</span>{% endif %}</td>
     </tr>
-    {% endfor %}
+    {% else %}<tr><td colspan="7" class="muted">No sales yet.</td></tr>{% endfor %}
   </table></div>
 </div>
 {% endif %}
 
 <!-- Plan breakdown (always shown) -->
 <div class="card">
-  <div class="card-title"><h3>Sales by plan</h3></div>
+  <div class="card-title"><h3>Booked by plan</h3><span class="spacer"></span>
+    <span class="small muted">total contract value</span></div>
   {% set pmax = (by_plan|map(attribute='amt')|max) or 1 %}
   <div class="planbars">
     {% for p in by_plan %}
@@ -167,4 +246,39 @@
   <div class="legend small" style="margin-top:10px">
     <span class="dot dot-sage"></span> billed &nbsp; <span class="dot dot-lime"></span> received</div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Per-day drill-down sheets — open on tap, close on scrim / ✕ / Esc / back.
+(function () {
+  function open(day) {
+    const w = document.getElementById('day-' + day);
+    if (!w) return;
+    w.classList.add('show');
+    document.body.classList.add('sheet-open');
+    history.pushState({ sheet: day }, '');
+  }
+  function closeAll() {
+    document.querySelectorAll('.daysheet-wrap.show').forEach(w => w.classList.remove('show'));
+    document.body.classList.remove('sheet-open');
+  }
+  document.addEventListener('click', e => {
+    const opener = e.target.closest('[data-open-day]');
+    if (opener) { open(opener.dataset.openDay); return; }
+    if (e.target.closest('[data-close]')) {
+      if (history.state && history.state.sheet) history.back(); else closeAll();
+    }
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && document.querySelector('.daysheet-wrap.show')) {
+      if (history.state && history.state.sheet) history.back(); else closeAll();
+    }
+  });
+  window.addEventListener('popstate', closeAll);
+
+  // Start the chart scrolled to the most recent day (right edge).
+  document.querySelectorAll('.daychart').forEach(ch => { ch.scrollLeft = ch.scrollWidth; });
+})();
+</script>
 {% endblock %}

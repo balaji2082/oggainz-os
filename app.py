@@ -649,10 +649,10 @@ def trial_deliver(tid):
 @app.route("/revenue")
 def revenue():
     c = conn()
-    period = request.args.get("period", "month")     # day | week | month
+    period = request.args.get("period", "day")       # day | week | month
     months = core.monthly_breakdown(c)
     weeks = core.weekly_breakdown(c)
-    days = core.daily_breakdown(c)
+    days, day_details, earned = core.daily_view(c)
     stats = core.headline_stats(c)
     by_plan = c.execute(
         "SELECT plan_name, COUNT(*) n, COALESCE(SUM(total_amount),0) amt, "
@@ -665,6 +665,7 @@ def revenue():
     cur = next((m for m in months if m["month"] == this_month), None)
     c.close()
     return render_template("revenue.html", months=months, weeks=weeks, days=days,
+                           day_details=day_details, earned=earned,
                            stats=stats, by_plan=by_plan, period=period,
                            collected=collected, cur=cur, this_month=this_month)
 

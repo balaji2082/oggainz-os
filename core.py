@@ -282,35 +282,138 @@ def month_label_iso(day_iso=None):
     return d.strftime("%b-%Y")
 
 
-def monthly_breakdown(conn):
-    """One row per month with sales, trials, orders delivered, growth %."""
-    months = [r["m"] for r in conn.execute(
-        "SELECT month m FROM subscriptions WHERE month IS NOT NULL "
-        "UNION SELECT month FROM trial_orders WHERE month IS NOT NULL"
-    ).fetchall()]
-    # sort by real date
-    def keyf(m):
-        try:
-            return datetime.strptime(m, "%b-%Y")
-        except Exception:
-            return datetime.min
-    months = sorted(set(months), key=keyf)
+# ---------------------------------------------------------------------------
+# Earned (delivered) revenue
+# ---------------------------------------------------------------------------
+# "Sales" for a day/week/month means the VALUE OF MEALS ACTUALLY DELIVERED in
+# that period — NOT the lump subscription amount dumped on its start date. Each
+# delivered meal is priced individually:
+#   * a subscription meal  = its share of the pack  (pack total ÷ meals in pack)
+#   * a trial meal          = its own trial price    (split if delivered over many)
+# Summing those gives the real money earned that day. Per-meal values are rounded
+# to whole rupees so the line items always add up to the day total on screen.
+
+def _delivered_meal_rows(conn):
+    """Every Delivered meal with the rupee value it earned. Single source of truth
+    for the day/week/month earned-revenue views and the per-day drill-down."""
+    rows = conn.execute(
+        "SELECT d.id, d.date, d.meal_type, d.subscription_id, d.trial_id, "
+        "       COALESCE(s.customer_name, t.name, d.name) AS name, "
+        "       COALESCE(s.plan_name, t.order_text, d.notes) AS label, "
+        "       s.total_amount AS sub_total, s.total_meals_scheduled AS sub_meals, "
+        "       t.amount AS trial_amount "
+        "FROM deliveries d "
+        "LEFT JOIN subscriptions s ON s.id = d.subscription_id "
+        "LEFT JOIN trial_orders  t ON t.id = d.trial_id "
+        "WHERE d.status='Delivered' AND d.date IS NOT NULL").fetchall()
+
+    # a trial may (rarely) be delivered over several meals — split its price evenly
+    trial_counts = {}
+    for r in rows:
+        if r["trial_id"]:
+            trial_counts[r["trial_id"]] = trial_counts.get(r["trial_id"], 0) + 1
+
     out = []
-    prev = None
-    g = lambda q, *a: (conn.execute(q, a).fetchone()[0] or 0)
-    for m in months:
-        sub_sales = g("SELECT COALESCE(SUM(total_amount),0) FROM subscriptions WHERE month=?", m)
-        trial_sales = g("SELECT COALESCE(SUM(amount),0) FROM trial_orders WHERE month=?", m)
-        subs_sold = g("SELECT COUNT(*) FROM subscriptions WHERE month=?", m)
-        paid = g("SELECT COUNT(*) FROM subscriptions WHERE month=? AND payment_status='Paid'", m)
-        unpaid = g("SELECT COUNT(*) FROM subscriptions WHERE month=? AND payment_status!='Paid'", m)
-        delivered = g("SELECT COUNT(*) FROM deliveries WHERE month=? AND status='Delivered'", m)
-        overall = sub_sales + trial_sales
-        growth = None if not prev else (overall - prev) / prev if prev else None
+    for r in rows:
+        if r["subscription_id"]:
+            meals = r["sub_meals"] or 0
+            value = round((r["sub_total"] or 0) / meals) if meals else 0
+            source = "sub"
+        elif r["trial_id"]:
+            n = trial_counts.get(r["trial_id"], 1) or 1
+            value = round((r["trial_amount"] or 0) / n)
+            source = "trial"
+        else:
+            value, source = 0, "other"
         out.append({
-            "month": m, "sub_sales": sub_sales, "trial_sales": trial_sales,
+            "id": r["id"], "day": str(r["date"])[:10],
+            "name": r["name"] or "—", "label": r["label"] or "",
+            "meal_type": r["meal_type"] or "Lunch",
+            "source": source, "value": value,
+            "sub_id": r["subscription_id"], "trial_id": r["trial_id"],
+        })
+    return out
+
+
+def _blank_bucket():
+    return {"sub_sales": 0, "trial_sales": 0, "sub_meals": 0,
+            "trial_meals": 0, "delivered": 0}
+
+
+def _add_meal(bucket, m):
+    bucket["delivered"] += 1
+    if m["source"] == "trial":
+        bucket["trial_sales"] += m["value"]; bucket["trial_meals"] += 1
+    else:
+        bucket["sub_sales"] += m["value"]; bucket["sub_meals"] += 1
+
+
+def daily_view(conn, limit=30):
+    """Build the whole day-wise revenue view in one pass over delivered meals.
+
+    Returns (days, details, earned):
+      days    – per-day buckets oldest→newest (for the chart + day list)
+      details – {day: {items, total, sub_total, trial_total, sub_meals,
+                       trial_meals, count}} for the per-day drill-down sheet
+      earned  – all-time earned totals (headline number the charts tie back to)
+    """
+    from collections import defaultdict
+    rows = _delivered_meal_rows(conn)
+    agg = defaultdict(_blank_bucket)
+    items = defaultdict(list)
+    earned = _blank_bucket()
+    for m in rows:
+        _add_meal(earned, m)
+        _add_meal(agg[m["day"]], m)
+        items[m["day"]].append(m)
+    earned["overall"] = earned["sub_sales"] + earned["trial_sales"]
+
+    days = []
+    for k in sorted(agg.keys()):
+        b = agg[k]; b["day"] = k; b["overall"] = b["sub_sales"] + b["trial_sales"]
+        days.append(b)
+    days = days[-limit:]
+
+    details = {}
+    for b in days:
+        day_items = sorted(items[b["day"]],
+                           key=lambda m: (m["meal_type"] == "Dinner", (m["name"] or "").lower()))
+        details[b["day"]] = {
+            "orders": day_items, "total": b["overall"],
+            "sub_total": b["sub_sales"], "trial_total": b["trial_sales"],
+            "sub_meals": b["sub_meals"], "trial_meals": b["trial_meals"],
+            "count": b["delivered"],
+        }
+    return days, details, earned
+
+
+def monthly_breakdown(conn):
+    """One row per month: earned (delivered) sub/trial revenue + meals delivered,
+    plus subs booked that month (context) and month-on-month growth on earned sales."""
+    from collections import defaultdict
+    earned = defaultdict(_blank_bucket)
+    for m in _delivered_meal_rows(conn):
+        label = datetime.strptime(m["day"], "%Y-%m-%d").strftime("%b-%Y")
+        _add_meal(earned[label], m)
+
+    g = lambda q, *a: (conn.execute(q, a).fetchone()[0] or 0)
+    booked = [r["m"] for r in conn.execute(
+        "SELECT month m FROM subscriptions WHERE month IS NOT NULL "
+        "UNION SELECT month FROM trial_orders WHERE month IS NOT NULL").fetchall()]
+    months = sorted(set(list(earned.keys()) + booked), key=_mkey)
+
+    out, prev = [], None
+    for mo in months:
+        b = earned.get(mo, _blank_bucket())
+        overall = b["sub_sales"] + b["trial_sales"]
+        subs_sold = g("SELECT COUNT(*) FROM subscriptions WHERE month=?", mo)
+        paid = g("SELECT COUNT(*) FROM subscriptions WHERE month=? AND payment_status='Paid'", mo)
+        unpaid = g("SELECT COUNT(*) FROM subscriptions WHERE month=? AND payment_status!='Paid'", mo)
+        growth = None if prev is None else ((overall - prev) / prev if prev else None)
+        out.append({
+            "month": mo, "sub_sales": b["sub_sales"], "trial_sales": b["trial_sales"],
             "overall": overall, "subs_sold": subs_sold, "paid": paid, "unpaid": unpaid,
-            "delivered": delivered, "growth": growth,
+            "delivered": b["delivered"], "growth": growth,
         })
         prev = overall
     return out
@@ -364,62 +467,28 @@ def customer_analytics(conn):
 
 
 def weekly_breakdown(conn, limit=10):
-    """Last `limit` weeks (Mon-start): subs started, sub sales, trials, trial sales, meals delivered."""
+    """Last `limit` weeks (Mon-start) of earned (delivered) sub + trial revenue."""
     from collections import defaultdict
 
     def wk(dstr):
         d = datetime.strptime(dstr[:10], "%Y-%m-%d").date()
         return (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
 
-    weeks = defaultdict(lambda: {"sub_sales": 0, "subs": 0, "trial_sales": 0,
-                                 "trials": 0, "delivered": 0})
-    for r in conn.execute("SELECT start_date, total_amount FROM subscriptions "
-                          "WHERE start_date IS NOT NULL").fetchall():
-        w = wk(r["start_date"]); weeks[w]["sub_sales"] += r["total_amount"] or 0; weeks[w]["subs"] += 1
-    for r in conn.execute("SELECT date, amount FROM trial_orders WHERE date IS NOT NULL").fetchall():
-        w = wk(r["date"]); weeks[w]["trial_sales"] += r["amount"] or 0; weeks[w]["trials"] += 1
-    for r in conn.execute("SELECT date FROM deliveries WHERE status='Delivered' AND date IS NOT NULL").fetchall():
-        w = wk(r["date"]); weeks[w]["delivered"] += 1
+    weeks = defaultdict(_blank_bucket)
+    for m in _delivered_meal_rows(conn):
+        _add_meal(weeks[wk(m["day"])], m)
 
     out = []
     for w in sorted(weeks.keys()):
-        d = weeks[w]
-        d["week_start"] = w
-        d["overall"] = d["sub_sales"] + d["trial_sales"]
-        out.append(d)
+        b = weeks[w]; b["week_start"] = w; b["overall"] = b["sub_sales"] + b["trial_sales"]
+        out.append(b)
     return out[-limit:]
 
 
 def daily_breakdown(conn, limit=30):
-    """
-    Last `limit` operating-relevant days: subscription sales (by start date),
-    trial sales (by booking date) and meals delivered (by delivery date).
-    One row per day that had any activity, newest last (for charting).
-    """
-    from collections import defaultdict
-
-    days = defaultdict(lambda: {"sub_sales": 0, "subs": 0, "trial_sales": 0,
-                                "trials": 0, "delivered": 0})
-    for r in conn.execute("SELECT start_date d, total_amount a FROM subscriptions "
-                          "WHERE start_date IS NOT NULL").fetchall():
-        k = str(r["d"])[:10]
-        days[k]["sub_sales"] += r["a"] or 0
-        days[k]["subs"] += 1
-    for r in conn.execute("SELECT date d, amount a FROM trial_orders WHERE date IS NOT NULL").fetchall():
-        k = str(r["d"])[:10]
-        days[k]["trial_sales"] += r["a"] or 0
-        days[k]["trials"] += 1
-    for r in conn.execute("SELECT date d FROM deliveries WHERE status='Delivered' AND date IS NOT NULL").fetchall():
-        k = str(r["d"])[:10]
-        days[k]["delivered"] += 1
-
-    out = []
-    for k in sorted(days.keys()):
-        d = days[k]
-        d["day"] = k
-        d["overall"] = d["sub_sales"] + d["trial_sales"]
-        out.append(d)
-    return out[-limit:]
+    """Per-day earned-revenue buckets (the chart rows). See daily_view for the
+    full view incl. per-day drill-down details."""
+    return daily_view(conn, limit)[0]
 
 
 # ---------------------------------------------------------------------------
