@@ -4,22 +4,22 @@
 <div class="page-head"><h1>Revenue</h1><span class="spacer"></span>
   <a class="btn btn-ghost btn-sm" href="{{ url_for('export') }}">⬇ Export Excel</a></div>
 
-<!-- All-time headline tiles -->
+<!-- All-time revenue tiles (Revenue = subscriptions + trials sold) -->
 <div class="tiles tiles-3" style="margin-bottom:14px">
   <div class="tile dark tile-hero">
-    <div class="k">Earned revenue</div>
-    <div class="v">{{ earned.overall|inr }}</div>
-    <div class="tap" style="color:var(--lime-e)">{{ earned.delivered }} meals delivered</div>
+    <div class="k">Revenue</div>
+    <div class="v">{{ stats.overall|inr }}</div>
+    <div class="tap" style="color:var(--lime-e)">subscriptions + trials</div>
   </div>
   <div class="tile accent">
     <div class="k">Received</div>
-    <div class="v">{{ stats.received|inr }}</div>
+    <div class="v">{{ stats.received_all|inr }}</div>
     <div class="tap" style="color:#eafff1">cash collected</div>
   </div>
   <div class="tile tile-book">
-    <div class="k">Booked</div>
-    <div class="v">{{ stats.overall|inr }}</div>
-    <div class="tap">{{ stats.pending_amt|inr }} to collect</div>
+    <div class="k">To collect</div>
+    <div class="v">{{ stats.pending_all|inr }}</div>
+    <div class="tap">still outstanding</div>
   </div>
 </div>
 
@@ -29,20 +29,21 @@
     <div class="donut-hole"><b>{{ collected|round(0,'floor')|int }}%</b><span>collected</span></div>
   </div>
   <div class="insight-body">
-    <h3 style="margin:0 0 8px">Money health</h3>
-    <div class="legend"><span class="dot dot-lime"></span> Received <b>{{ stats.received|inr }}</b></div>
-    <div class="legend"><span class="dot dot-sage"></span> Still to collect <b>{{ stats.pending_amt|inr }}</b></div>
+    <h3 style="margin:0 0 8px">Revenue health</h3>
+    <div class="legend"><span class="dot dot-lime"></span> Received <b>{{ stats.received_all|inr }}</b></div>
+    <div class="legend"><span class="dot dot-sage"></span> Still to collect <b>{{ stats.pending_all|inr }}</b></div>
+    <div class="small muted" style="margin-top:3px">Subscriptions {{ stats.sales|inr }} · Trials {{ stats.trial_sales|inr }}</div>
     {% if cur %}
     <div class="hr"></div>
-    <div class="small muted" style="margin-bottom:2px">Earned this month ({{ this_month }})</div>
+    <div class="small muted" style="margin-bottom:2px">Revenue this month ({{ this_month }})</div>
     <div class="row" style="gap:18px; align-items:baseline">
-      <div><span class="big-num">{{ cur.overall|inr }}</span></div>
+      <div><span class="big-num">{{ cur.revenue|inr }}</span></div>
       {% if cur.growth is not none %}
       <div class="growth {{ 'up' if cur.growth>=0 else 'down' }}">
         {{ '▲' if cur.growth>=0 else '▼' }} {{ (cur.growth*100)|round(0,'floor')|int|abs }}% vs last month</div>
       {% endif %}
     </div>
-    <div class="small muted">{{ cur.delivered }} meals delivered · {{ cur.subs_sold }} subs booked</div>
+    <div class="small muted">{{ cur.sub_count }} subs · {{ cur.trial_count }} trials</div>
     {% endif %}
   </div>
 </div>
@@ -65,16 +66,17 @@
   {% endif %}
 </div>
 
-<!-- Scoped summary: delivered vs sold infographic -->
+{% if period != 'month' %}
+<!-- Scoped summary: sales ESTIMATE (delivered) vs subscriptions sold (booked) -->
 {% set cmax = ([summary.deliv_value, summary.sold_value]|max) or 1 %}
 <div class="card cmp-card">
   <div class="cmp-top">
     <h3>{{ summary.label }}</h3>
     <span class="spacer"></span>
-    <span class="small muted">delivered vs sold</span>
+    <span class="small muted">estimate vs sold</span>
   </div>
   <div class="cmp-row">
-    <span class="cmp-k"><i class="ds-dot sub"></i> Delivered</span>
+    <span class="cmp-k"><i class="ds-dot sub"></i> Est. sale</span>
     <span class="cmp-track"><i class="cmp-fill sub" style="width:{{ (100*summary.deliv_value/cmax)|round(0,'floor')|int }}%"></i></span>
     <span class="cmp-v">{{ summary.deliv_value|inr }} <small>{{ summary.deliv_meals }} meals</small></span>
   </div>
@@ -83,7 +85,10 @@
     <span class="cmp-track"><i class="cmp-fill book" style="width:{{ (100*summary.sold_value/cmax)|round(0,'floor')|int }}%"></i></span>
     <span class="cmp-v">{{ summary.sold_value|inr }} <small>{{ summary.sold_count }} packs</small></span>
   </div>
+  <div class="cmp-note">Day &amp; week figures are <b>estimates</b> (value of meals delivered).
+    Your actual revenue is subscriptions + trials — see <a href="{{ url_for('revenue', period='month') }}">Monthly</a>.</div>
 </div>
+{% endif %}
 
 {# ======================================================================= #}
 {#  Reusable: focused-period panel + day/week breakdown table              #}
@@ -109,12 +114,12 @@
     <button class="btn btn-forest btn-sm" type="submit">View</button>
   </form>
 
-  <div class="focus-cap">{{ 'Day-wise sale' if focus.period=='day' else 'Week-wise sale' }}</div>
+  <div class="focus-cap">{{ 'Day-wise estimate' if focus.period=='day' else 'Week-wise estimate' }}</div>
   <div class="focus-date">{{ focus.title }}</div>
 
   <div class="tiles tiles-2 focus-stats">
     <div class="tile dark">
-      <div class="k">Delivered sales</div>
+      <div class="k">Est. sale</div>
       <div class="v">{{ focus.delivered.total|inr }}</div>
       <div class="tap">{{ focus.delivered.count }} meal{{ 's' if focus.delivered.count!=1 }} delivered</div>
     </div>
@@ -125,7 +130,7 @@
     </div>
   </div>
 
-  <h4 class="focus-h"><span class="ds-dot sub"></span> Orders delivered <span class="muted small">· unit price</span></h4>
+  <h4 class="focus-h"><span class="ds-dot sub"></span> Orders delivered <span class="muted small">· unit price (estimate)</span></h4>
   <div class="ds-list-static">
     {% for it in focus.delivered.orders %}
     <div class="ds-item">
@@ -143,7 +148,7 @@
     {% else %}<div class="empty small">No meals delivered {{ 'this day' if focus.period=='day' else 'this week' }}.</div>{% endfor %}
   </div>
   {% if focus.delivered.orders %}
-  <div class="focus-foot"><span>{{ 'Day' if focus.period=='day' else 'Week' }} sale total</span>
+  <div class="focus-foot"><span>Est. {{ 'day' if focus.period=='day' else 'week' }} total</span>
     <b>{{ focus.delivered.total|inr }}</b></div>
   {% endif %}
 
@@ -175,7 +180,7 @@
     <span class="spacer"></span><span class="small muted">newest first · tap to open</span></div>
   <div class="table-wrap"><table class="rev-table revx">
     <tr><th>{{ 'Day' if period=='day' else 'Week of' }}</th>
-        <th class="num">Delivered</th><th class="num">Subs sold</th></tr>
+        <th class="num">Est. sale</th><th class="num">Subs sold</th></tr>
     {% for r in rows|reverse %}
     {% if period=='day' %}{% set href = url_for('revenue', period='day', d=r.key, month=scope) %}
     {% else %}{% set href = url_for('revenue', period='week', w=r.key, month=scope) %}{% endif %}
@@ -194,8 +199,8 @@
 {% if period == 'day' %}
 {% set maxv = (days|map(attribute='overall')|max) or 1 %}
 <div class="card chart-card">
-  <div class="card-title"><div><h3>Delivered sales</h3>
-    <div class="small muted">meals delivered each day{{ ' · ' + summary.label if summary.scoped }} · tap a bar</div></div></div>
+  <div class="card-title"><div><h3>Daily sales estimate</h3>
+    <div class="small muted">value of meals delivered each day{{ ' · ' + summary.label if summary.scoped }} · tap a bar</div></div></div>
   {% if days %}
   <div class="daychart">
     {% for x in days %}
@@ -217,8 +222,8 @@
 {% elif period == 'week' %}
 {% set maxv = (weeks|map(attribute='overall')|max) or 1 %}
 <div class="card chart-card">
-  <div class="card-title"><div><h3>Delivered sales</h3>
-    <div class="small muted">meals delivered each week{{ ' · ' + summary.label if summary.scoped }} · tap a bar</div></div></div>
+  <div class="card-title"><div><h3>Weekly sales estimate</h3>
+    <div class="small muted">value of meals delivered each week{{ ' · ' + summary.label if summary.scoped }} · tap a bar</div></div></div>
   {% if weeks %}
   <div class="daychart">
     {% for w in weeks %}
@@ -238,36 +243,37 @@
 {{ breakdown_table(week_table, 'week', scope) }}
 
 {% else %}
-{# ---------------- MONTHLY ---------------- #}
-{% set maxv = (months|map(attribute='overall')|max) or 1 %}
+{# -------------- MONTHLY — actual revenue (subscriptions + trials) -------------- #}
+{% set maxv = (monthly_rev|map(attribute='revenue')|max) or 1 %}
 <div class="card chart-card">
-  <div class="card-title"><div><h3>Delivered revenue by month</h3>
-    <div class="small muted">tap a bar to open that month's days</div></div></div>
+  <div class="card-title"><div><h3>Monthly revenue</h3>
+    <div class="small muted">subscriptions + trials sold · tap a bar to open that month</div></div></div>
   <div class="daychart daychart-tall">
-    {% for m in months %}
-    <a class="col {{ 'peak' if m.overall==maxv }}" href="{{ url_for('revenue', period='day', month=m.month) }}"
-       style="--h:{{ (100*m.overall/maxv)|round(0,'floor')|int }}%">
-      <span class="col-val">{{ m.overall|inr }}</span>
+    {% for m in monthly_rev %}
+    <a class="col {{ 'peak' if m.revenue==maxv }}" href="{{ url_for('revenue', period='day', month=m.month) }}"
+       style="--h:{{ (100*m.revenue/maxv)|round(0,'floor')|int }}%">
+      <span class="col-val">{{ m.revenue|inr }}</span>
       <span class="col-bar"><i></i></span>
       <span class="col-lbl">{{ m.month }}</span>
     </a>
-    {% else %}<div class="empty small">No monthly revenue yet.</div>{% endfor %}
+    {% else %}<div class="empty small">No revenue yet.</div>{% endfor %}
   </div>
 </div>
 <div class="card">
   <div class="card-title"><h3>Month by month</h3><span class="spacer"></span>
-    <span class="small muted">tap to open the month</span></div>
+    <span class="small muted">actual revenue · tap to open</span></div>
   <div class="table-wrap"><table class="rev-table revx">
-    <tr><th>Month</th><th class="num">Delivered</th><th class="num">Subs sold</th><th class="num">Growth</th></tr>
-    {% for m in months|reverse %}{% set sm = subs_month_map.get(m.month) %}
+    <tr><th>Month</th><th class="num">Subs</th><th class="num">Trials</th><th class="num">Revenue</th><th class="num">Growth</th></tr>
+    {% for m in monthly_rev|reverse %}
     <tr class="rowlink" onclick="location.href='{{ url_for('revenue', period='day', month=m.month) }}'">
       <td><b>{{ m.month }}</b></td>
-      <td class="num"><b>{{ m.overall|inr }}</b><span class="cell-sub">{{ m.delivered }} meal{{ 's' if m.delivered!=1 }}</span></td>
-      <td class="num">{% if sm and sm.count %}<b class="book">{{ sm.value|inr }}</b><span class="cell-sub">{{ sm.count }} pack{{ 's' if sm.count!=1 }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{{ m.sub_value|inr }}<span class="cell-sub">{{ m.sub_count }} pack{{ 's' if m.sub_count!=1 }}</span></td>
+      <td class="num">{{ m.trial_value|inr }}{% if m.trial_count %}<span class="cell-sub">{{ m.trial_count }} trial{{ 's' if m.trial_count!=1 }}</span>{% endif %}</td>
+      <td class="num"><b>{{ m.revenue|inr }}</b></td>
       <td class="num">{% if m.growth is none %}—{% else %}
         <span class="{{ 'up' if m.growth>=0 else 'down' }} growth">{{ '+' if m.growth>=0 }}{{ (m.growth*100)|round(0,'floor')|int }}%</span>{% endif %}</td>
     </tr>
-    {% else %}<tr><td colspan="4" class="muted">No sales yet.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="5" class="muted">No revenue yet.</td></tr>{% endfor %}
   </table></div>
 </div>
 {% endif %}

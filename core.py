@@ -269,11 +269,16 @@ def headline_stats(conn):
     sales = g("SELECT COALESCE(SUM(total_amount),0) FROM subscriptions")
     received = g("SELECT COALESCE(SUM(amount_received),0) FROM subscriptions")
     trial_sales = g("SELECT COALESCE(SUM(amount),0) FROM trial_orders")
+    trial_received = g("SELECT COALESCE(SUM(amount),0) FROM trial_orders WHERE payment_status='Paid'")
     customers = g("SELECT COUNT(*) FROM customers")
+    overall = sales + trial_sales                       # REVENUE = subscriptions + trials
+    received_all = received + trial_received
     return {
         "active": active, "ending": ending, "unpaid_n": unpaid_n, "unpaid_amt": unpaid_amt,
         "sales": sales, "received": received, "pending_amt": sales - received,
-        "trial_sales": trial_sales, "overall": sales + trial_sales, "customers": customers,
+        "trial_sales": trial_sales, "trial_received": trial_received,
+        "overall": overall, "received_all": received_all,
+        "pending_all": overall - received_all, "customers": customers,
     }
 
 
@@ -579,6 +584,39 @@ def subs_sold_detail(conn, period, key):
     return {"rows": rows, "count": len(rows),
             "value": sum(s["value"] for s in rows),
             "received": sum(s["received"] for s in rows)}
+
+
+def monthly_revenue(conn):
+    """ACTUAL revenue per month = subscriptions booked + trial sales that month.
+
+    This is the real money sold (what Balaji calls revenue), as opposed to the
+    day/week views which show a delivered-meal *estimate*. Subscriptions are dated
+    by booking_date (→ start_date), trials by their own month. Returns one row per
+    month oldest→newest with month-on-month growth on revenue."""
+    subs = {b["key"]: b for b in subs_sold_breakdown(conn, "month")}
+    trials = {}
+    for r in conn.execute("SELECT month, COUNT(*) n, COALESCE(SUM(amount),0) amt, "
+                          "COALESCE(SUM(CASE WHEN payment_status='Paid' THEN amount END),0) recv "
+                          "FROM trial_orders WHERE month IS NOT NULL GROUP BY month").fetchall():
+        trials[r["month"]] = {"n": r["n"], "amt": r["amt"], "recv": r["recv"]}
+
+    keys = sorted(set(list(subs.keys()) + list(trials.keys())), key=_mkey)
+    out, prev = [], None
+    for k in keys:
+        s = subs.get(k) or {}
+        t = trials.get(k) or {}
+        sub_value = s.get("value", 0) or 0
+        trial_value = t.get("amt", 0) or 0
+        revenue = sub_value + trial_value
+        received = (s.get("received", 0) or 0) + (t.get("recv", 0) or 0)
+        growth = None if prev is None else ((revenue - prev) / prev if prev else None)
+        out.append({
+            "month": k, "sub_value": sub_value, "sub_count": s.get("count", 0) or 0,
+            "trial_value": trial_value, "trial_count": t.get("n", 0) or 0,
+            "revenue": revenue, "received": received, "growth": growth,
+        })
+        prev = revenue
+    return out
 
 
 def delivered_detail(conn, period, key):

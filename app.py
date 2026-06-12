@@ -742,14 +742,16 @@ def revenue():
         scope = "all"
 
     stats = core.headline_stats(c)
-    _, _, earned = core.daily_view(c)                # all-time earned → hero tile
+    monthly_rev = core.monthly_revenue(c)            # ACTUAL revenue (subs + trials) by month
+    _, _, earned = core.daily_view(c)                # all-time delivered ESTIMATE (day/week only)
     by_plan = c.execute(
         "SELECT plan_name, COUNT(*) n, COALESCE(SUM(total_amount),0) amt, "
         "       COALESCE(SUM(amount_received),0) recv "
         "FROM subscriptions GROUP BY plan_name ORDER BY amt DESC").fetchall()
-    collected = (stats["received"] / stats["sales"] * 100) if stats["sales"] else 0
+    # Collection rate against true revenue (subscriptions + trials).
+    collected = (stats["received_all"] / stats["overall"] * 100) if stats["overall"] else 0
     this_month = core.month_label_iso()
-    cur = next((m for m in months if m["month"] == this_month), None)
+    cur = next((m for m in monthly_rev if m["month"] == this_month), None)
 
     # Month-scoped data for the charts + tables (day & week views honour the scope).
     days, _, earned_scope = core.daily_view(c, limit=999, month=scope)
@@ -783,7 +785,7 @@ def revenue():
                            subs_months=subs_months, subs_map=subs_map,
                            subs_week_map=subs_week_map, subs_month_map=subs_month_map,
                            focus=focus, scope=scope, month_opts=month_opts, summary=summary,
-                           day_table=day_table, week_table=week_table)
+                           day_table=day_table, week_table=week_table, monthly_rev=monthly_rev)
 
 
 # ---------------------------------------------------------------------------

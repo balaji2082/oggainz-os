@@ -596,6 +596,9 @@ tr.rowlink:hover{background:var(--cream)}
 .cmp-v{flex:0 0 auto; text-align:right; font-weight:800; color:var(--forest); font-size:.95rem;
   min-width:104px; font-variant-numeric:tabular-nums}
 .cmp-v small{display:block; font-weight:600; color:var(--muted); font-size:.7rem}
+.cmp-note{margin-top:12px; padding-top:11px; border-top:1px solid var(--line); font-size:.76rem;
+  color:var(--muted); line-height:1.5}
+.cmp-note a{color:var(--lime); font-weight:700}
 
 /* Selected bar + anchor columns in the charts */
 .daychart a.col{cursor:pointer; text-decoration:none}
