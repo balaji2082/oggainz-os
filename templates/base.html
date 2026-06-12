@@ -20,6 +20,7 @@
       <a href="{{ url_for('today') }}" class="{{ 'on' if nav in ['today','home'] }}">Today</a>
       <a href="{{ url_for('subscriptions') }}" class="{{ 'on' if nav and 'subscription' in nav }}">Subscriptions</a>
       <a href="{{ url_for('customers') }}" class="{{ 'on' if nav and 'customer' in nav }}">Customers</a>
+      <a href="{{ url_for('crm_home') }}" class="{{ 'on' if nav and 'crm' in nav }}">CRM{% if g_due %} <span class="navbadge">{{ g_due }}</span>{% endif %}</a>
       <a href="{{ url_for('trials') }}" class="{{ 'on' if nav and 'trial' in nav }}">Trials</a>
       <a href="{{ url_for('revenue') }}" class="{{ 'on' if nav=='revenue' }}">Revenue</a>
       <a href="{{ url_for('settings') }}" class="{{ 'on' if nav and 'setting' in nav }}">Settings</a>
@@ -48,7 +49,7 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c.6-3.2 3-5 5.5-5s4.9 1.8 5.5 5"/><path d="M16 5.2A3 3 0 0 1 16 11"/><path d="M18 14.5c2 .6 3.2 2.2 3.5 4.5"/></svg>Customers</a>
   <a href="{{ url_for('revenue') }}" class="{{ 'on' if nav=='revenue' }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 19h16"/><rect x="7" y="11" width="3" height="6"/><rect x="12" y="7" width="3" height="10"/><rect x="17" y="13" width="3" height="4"/></svg>Revenue</a>
-  <a href="{{ url_for('more') }}" class="{{ 'on' if nav in ['more','trials','trial_new','settings','deliveries'] }}">
+  <a href="{{ url_for('more') }}" class="{{ 'on' if nav in ['more','trials','trial_new','settings','deliveries'] or (nav and 'crm' in nav) }}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>More</a>
 </nav>
 

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if lead else 'New' }} lead · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('crm_detail', lid=lead.id) if lead else url_for('crm_home') }}">‹ Cancel</a>
+  <h1 style="margin:0 0 0 6px">{{ 'Edit lead' if lead else 'New lead' }}</h1>
+</div>
+
+<form method="post" class="card">
+  <div class="form-grid">
+    <div><label>Name</label><input name="name" value="{{ lead.name if lead }}" required {{ '' if lead else 'autofocus' }}></div>
+    <div><label>Contact number</label><input name="phone" value="{{ lead.phone if lead }}" placeholder="10-digit number"></div>
+
+    <div><label>Source</label>
+      <select name="source">
+        <option value="">—</option>
+        {% for s in sources %}<option {{ 'selected' if lead and lead.source==s }}>{{ s }}</option>{% endfor %}
+      </select></div>
+    <div><label>Locality</label><input name="locality" value="{{ lead.locality if lead }}" placeholder="Perumbakkam…"></div>
+
+    <div><label>Goal</label>
+      <select name="goal">
+        <option value="">—</option>
+        {% for g in goals %}<option {{ 'selected' if lead and lead.goal==g }}>{{ g }}</option>{% endfor %}
+      </select></div>
+    <div><label>Interested in</label><input name="interest" value="{{ lead.interest if lead }}" placeholder="Elite Meal Pack, Fat-loss plan…"></div>
+
+    <div><label>Stage</label>
+      <select name="stage">
+        {% for s in stages %}<option {{ 'selected' if lead and lead.stage==s else ('selected' if not lead and s=='New') }}>{{ s }}</option>{% endfor %}
+      </select></div>
+    <div><label>Estimated value (₹)</label><input name="est_value" type="number" step="1" value="{{ lead.est_value|int if lead and lead.est_value else '' }}" placeholder="e.g. 3000"></div>
+
+    <div><label>Next follow-up</label><input name="next_follow_up" type="date" value="{{ lead.next_follow_up if lead and lead.next_follow_up else '' }}"></div>
+    {% if lead and lead.stage=='Lost' %}
+    <div><label>Lost reason</label><input name="lost_reason" value="{{ lead.lost_reason if lead }}"></div>
+    {% endif %}
+
+    <div class="full"><label>Notes</label>
+      <textarea name="notes" placeholder="Preferences, budget, objections, anything useful…">{{ lead.notes if lead }}</textarea></div>
+  </div>
+  <div class="form-actions"><button class="btn btn-primary">{{ 'Save changes' if lead else 'Add lead' }}</button></div>
+</form>
+{% endblock %}

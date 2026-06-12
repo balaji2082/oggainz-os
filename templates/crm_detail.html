@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}{{ lead.name }} · CRM · OG Gainz{% endblock %}
+{% block content %}
+{% set st_class = {'New':'st-new','Contacted':'st-contacted','Trial':'st-trial',
+                   'Negotiating':'st-negotiating','Won':'st-won','Lost':'st-lost'} %}
+
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('crm_home') }}">‹ Back</a>
+  <h1 style="margin:0 0 0 6px">{{ lead.name }}</h1>
+  <span class="chip {{ st_class[lead.stage] }}">{{ lead.stage }}</span>
+  <span class="spacer"></span>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('crm_edit', lid=lead.id) }}">Edit</a>
+</div>
+
+<!-- Contact + quick facts -->
+<div class="card">
+  <div class="tcard-meta" style="margin-bottom:0">
+    {% if lead.phone %}<a class="chip chip-line" href="{{ lead.phone|wa }}" target="_blank">💬 {{ lead.phone }}</a>{% endif %}
+    {% if lead.source %}<span class="chip chip-line">via {{ lead.source }}</span>{% endif %}
+    {% if lead.locality %}<span class="chip chip-line">📍 {{ lead.locality }}</span>{% endif %}
+    {% if lead.goal %}<span class="chip chip-line">🎯 {{ lead.goal }}</span>{% endif %}
+    {% if lead.interest %}<span class="chip chip-line">🍱 {{ lead.interest }}</span>{% endif %}
+    {% if lead.est_value %}<span class="chip chip-line">💰 {{ lead.est_value|inr }}</span>{% endif %}
+  </div>
+  {% if lead.notes %}<div class="tcard-order" style="margin-bottom:0; margin-top:12px">{{ lead.notes }}</div>{% endif %}
+  {% if lead.stage=='Lost' and lead.lost_reason %}
+  <div class="alert alert-warn" style="margin:12px 0 0">Lost: {{ lead.lost_reason }}</div>{% endif %}
+</div>
+
+<!-- Conversion / linked records -->
+{% if cust or sub %}
+<div class="card" style="background:#f2fbf5; border-color:#d5efdf">
+  <div class="card-title"><h3>✓ Converted</h3></div>
+  <div class="kvs">
+    {% if cust %}<div class="k">Customer</div><div><a href="{{ url_for('customer_detail', cid=cust.id) }}" style="color:var(--lime);font-weight:700">{{ cust.name }} ({{ cust.id }})</a></div>{% endif %}
+    {% if sub %}<div class="k">Subscription</div><div><a href="{{ url_for('subscription_detail', sid=sub.id) }}" style="color:var(--lime);font-weight:700">{{ sub.plan_name }} ({{ sub.id }}) · {{ sub.total_amount|inr }}</a></div>{% endif %}
+  </div>
+  {% if cust and not sub %}
+  <a class="btn btn-success btn-sm" style="margin-top:12px" href="{{ url_for('subscription_new', customer=cust.id, lead=lead.id) }}">+ Book a subscription</a>{% endif %}
+</div>
+{% endif %}
+
+<!-- Pipeline stage control -->
+<div class="card">
+  <div class="card-title"><h3>Pipeline stage</h3></div>
+  <div class="stage-track">
+    {% for s in ['New','Contacted','Trial','Negotiating','Won'] %}
+    {% set done = (s == lead.stage) or (lead.stage=='Won' and s!='Won') %}
+    <form method="post" action="{{ url_for('crm_stage', lid=lead.id) }}" class="stage-step {{ 'cur' if s==lead.stage }} {{ st_class[s] }}">
+      <input type="hidden" name="stage" value="{{ s }}">
+      <button type="submit">{{ s }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  <div class="row" style="gap:8px; margin-top:12px">
+    {% if lead.stage in ['Trial','Negotiating','Contacted','New'] %}
+    <form method="post" action="{{ url_for('crm_convert', lid=lead.id) }}">
+      <button class="btn btn-success btn-sm" type="submit">✓ Convert to customer</button></form>
+    {% endif %}
+    <details class="inline-lost">
+      <summary class="btn btn-danger btn-sm">Mark lost</summary>
+      <form method="post" action="{{ url_for('crm_stage', lid=lead.id) }}" class="lost-form">
+        <input type="hidden" name="stage" value="Lost">
+        <input name="lost_reason" placeholder="Reason (price, location, went cold…)">
+        <button class="btn btn-danger btn-sm" type="submit">Confirm lost</button>
+      </form>
+    </details>
+  </div>
+</div>
+
+<!-- Follow-up -->
+<div class="card">
+  <div class="card-title"><h3>Next follow-up</h3><span class="spacer"></span>
+    {% if lead.next_follow_up %}<span class="chip {{ 'chip-unpaid' if lead.next_follow_up<=today else 'chip-line' }}">{{ lead.next_follow_up|fdate('%d %b %Y') }}</span>{% endif %}</div>
+  <form method="post" action="{{ url_for('crm_followup', lid=lead.id) }}" class="row" style="gap:8px; align-items:flex-end">
+    <div style="flex:1; min-width:160px"><input name="next_follow_up" type="date" value="{{ lead.next_follow_up or '' }}"></div>
+    <button class="btn btn-forest btn-sm" type="submit">Set</button>
+  </form>
+</div>
+
+<!-- Add an update -->
+<div class="card">
+  <div class="card-title"><h3>Log an update</h3></div>
+  <form method="post" action="{{ url_for('crm_update', lid=lead.id) }}">
+    <div class="form-grid">
+      <div><label>Type</label>
+        <select name="kind">{% for k in ['Note','Call','WhatsApp','Follow-up'] %}<option>{{ k }}</option>{% endfor %}</select></div>
+      <div><label>Set next follow-up <span class="muted small">(optional)</span></label>
+        <input name="next_follow_up" type="date"></div>
+      <div class="full"><label>What happened?</label>
+        <textarea name="text" placeholder="Sent menu, asked about price, will decide next week…"></textarea></div>
+    </div>
+    <div class="form-actions"><button class="btn btn-primary">Add update</button></div>
+  </form>
+</div>
+
+<!-- Timeline -->
+<div class="card">
+  <div class="card-title"><h3>Timeline</h3><span class="spacer"></span>
+    <span class="small muted">{{ updates|length }} update{{ 's' if updates|length!=1 }}</span></div>
+  <div class="timeline">
+    {% for u in updates %}
+    <div class="tl-item">
+      <span class="tl-dot tl-{{ u.kind|lower|replace(' ','') }}"></span>
+      <div class="tl-body">
+        <div class="tl-head"><b>{{ u.kind }}</b><span class="tl-when">{{ u.at|fdate('%d %b') }} · {{ u.at[11:16] }}</span></div>
+        <div class="tl-text">{{ u.text }}</div>
+      </div>
+    </div>
+    {% else %}<div class="empty small">No updates logged yet.</div>{% endfor %}
+  </div>
+</div>
+{% endblock %}

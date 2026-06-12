@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}CRM · OG Gainz{% endblock %}
+{% block content %}
+{% set st_class = {'New':'st-new','Contacted':'st-contacted','Trial':'st-trial',
+                   'Negotiating':'st-negotiating','Won':'st-won','Lost':'st-lost'} %}
+
+<div class="page-head"><h1>CRM</h1>
+  <span class="small muted">leads → conversion</span><span class="spacer"></span>
+  <a class="btn btn-primary btn-sm" href="{{ url_for('crm_new') }}">+ New lead</a></div>
+
+<!-- Pipeline headline -->
+<div class="tiles tiles-4" style="margin-bottom:14px">
+  <div class="tile dark"><div class="k">Open leads</div><div class="v">{{ stats.open }}</div>
+    <div class="tap">in the pipeline</div></div>
+  <div class="tile tile-book"><div class="k">Pipeline value</div><div class="v">{{ stats.pipeline_value|inr }}</div>
+    <div class="tap">potential</div></div>
+  <div class="tile accent"><div class="k">Won this month</div><div class="v">{{ stats.won_month }}</div>
+    <div class="tap">{{ stats.this_month }}</div></div>
+  <div class="tile"><div class="k">Conversion</div><div class="v">{{ stats.conv_rate|round(0,'floor')|int }}%</div>
+    <div class="tap" style="color:var(--orange)">{{ stats.won }} won · {{ stats.lost }} lost</div></div>
+</div>
+
+<!-- Follow-ups due now -->
+{% if due %}
+<div class="card" style="border-color:#f6d9bf">
+  <div class="card-title"><h3>⏰ Follow up now</h3><span class="spacer"></span>
+    <span class="chip chip-ending">{{ due|length }} due</span></div>
+  <div class="list">
+    {% for l in due %}
+    <div class="litem">
+      <span class="avatar">{{ l.name[:1]|upper }}</span>
+      <a class="grow" href="{{ url_for('crm_detail', lid=l.id) }}">
+        <div class="t">{{ l.name }}</div>
+        <div class="s">due {{ l.next_follow_up|fdate('%d %b') }} · <span class="{{ st_class[l.stage] }} chip chip-xs">{{ l.stage }}</span>
+          {% if l.interest %}· {{ l.interest }}{% endif %}</div>
+      </a>
+      {% if l.phone %}<a class="iconbtn" href="{{ l.phone|wa }}" target="_blank" title="WhatsApp">💬</a>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Stage filter -->
+<div class="chiprow">
+  <a class="fchip {{ 'on' if stage=='Open' }}" href="{{ url_for('crm_home', stage='Open') }}">Open ({{ stats.open }})</a>
+  {% for s in stages %}
+  <a class="fchip {{ st_class[s] }} {{ 'on' if stage==s }}" href="{{ url_for('crm_home', stage=s) }}">{{ s }} ({{ stats.counts[s] }})</a>
+  {% endfor %}
+</div>
+
+<form method="get" class="search" style="margin-bottom:14px">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+  <input name="q" value="{{ q }}" placeholder="Search name, phone, locality…">
+  {% if stage and stage!='Open' %}<input type="hidden" name="stage" value="{{ stage }}">{% endif %}
+</form>
+
+<!-- Lead list -->
+<div class="tlist">
+  {% for l in leads %}
+  {% set order = ['New','Contacted','Trial','Negotiating'] %}
+  {% set idx = order.index(l.stage) if l.stage in order else -1 %}
+  {% set nxt = order[idx+1] if idx>=0 and idx+1 < order|length else None %}
+  <div class="tcard">
+    <div class="tcard-head">
+      <b class="tname">{{ l.name }}</b>
+      <span class="chip chip-xs {{ st_class[l.stage] }}">{{ l.stage }}</span>
+      {% if l.due %}<span class="chip chip-xs chip-unpaid">⏰ due</span>
+      {% elif l.upcoming %}<span class="chip chip-xs chip-line">↗ {{ l.next_follow_up|fdate('%d %b') }}</span>{% endif %}
+      <span class="spacer"></span>
+      {% if l.source %}<span class="small muted">{{ l.source }}</span>{% endif %}
+    </div>
+
+    <div class="tcard-meta">
+      {% if l.interest %}<span class="chip chip-line">🍱 {{ l.interest }}</span>{% endif %}
+      {% if l.goal %}<span class="chip chip-line">🎯 {{ l.goal }}</span>{% endif %}
+      {% if l.locality %}<span class="chip chip-line">📍 {{ l.locality }}</span>{% endif %}
+      {% if l.est_value %}<span class="chip chip-line">{{ l.est_value|inr }}</span>{% endif %}
+    </div>
+
+    <div class="tcard-actions">
+      {% if l.phone %}<a class="qbtn" href="{{ l.phone|wa }}" target="_blank">💬 WhatsApp</a>{% endif %}
+      {% if nxt %}
+      <form method="post" action="{{ url_for('crm_stage', lid=l.id) }}">
+        <input type="hidden" name="stage" value="{{ nxt }}">
+        <button class="qbtn" type="submit">→ {{ nxt }}</button>
+      </form>
+      {% elif l.stage in ['Trial','Negotiating'] %}
+      <form method="post" action="{{ url_for('crm_convert', lid=l.id) }}">
+        <button class="qbtn on-paid" type="submit">✓ Convert</button>
+      </form>
+      {% endif %}
+      <span class="spacer"></span>
+      <a class="btn btn-ghost btn-sm" href="{{ url_for('crm_detail', lid=l.id) }}">Open ›</a>
+    </div>
+  </div>
+  {% else %}
+  <div class="empty">
+    <div class="big">🧲</div>
+    No leads{% if q %} match “{{ q }}”{% elif stage and stage!='Open' %} in {{ stage }}{% endif %} yet.
+    {% if not q %}
+    <div style="margin-top:16px">
+      <form method="post" action="{{ url_for('crm_import_trials') }}">
+        <button class="btn btn-success">↺ Import leads from trial orders</button>
+      </form>
+      <div class="small muted" style="margin-top:8px">Turns everyone who took a trial into a lead to follow up.</div>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+{% if leads %}
+<form method="post" action="{{ url_for('crm_import_trials') }}" style="margin-top:6px">
+  <button class="btn btn-ghost btn-sm btn-block">↺ Import any new trial orders as leads</button>
+</form>
+{% endif %}
+{% endblock %}

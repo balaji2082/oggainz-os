@@ -7,12 +7,15 @@
 </div>
 
 <form method="post" class="card">
+  {% if lead %}<input type="hidden" name="lead" value="{{ lead }}">{% endif %}
   <div class="form-grid">
+    {% if preset_customer %}<div class="full alert alert-warn" style="margin-bottom:4px">
+      ✓ Lead converted — booking this pack for the new customer.</div>{% endif %}
     <div class="full">
       <label>Customer{% if sub %} (whose name this is registered under){% endif %}</label>
       <select name="customer_id" required>
         <option value="">— choose existing customer —</option>
-        {% for c in customers %}<option value="{{ c.id }}" {{ 'selected' if sub and sub.customer_id==c.id }}>{{ c.name }} ({{ c.id }})</option>{% endfor %}
+        {% for c in customers %}<option value="{{ c.id }}" {{ 'selected' if (sub and sub.customer_id==c.id) or (preset_customer and preset_customer==c.id) }}>{{ c.name }} ({{ c.id }})</option>{% endfor %}
       </select>
       <div class="small muted" style="margin-top:6px">
         {% if sub %}Pick a different customer to move this subscription to them.{% else %}New customer? <a href="{{ url_for('customer_new') }}" style="color:var(--lime)">Add one first ›</a>{% endif %}</div>

@@ -11,7 +11,10 @@ import sqlite3
 from datetime import datetime
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(APP_DIR, "oggainz.db")
+# The database file. Override with the OG_DB_PATH env var to point the app at a
+# different copy (handy for safe testing against a throwaway DB without touching
+# the live oggainz.db). Defaults to the file next to the code.
+DB_PATH = os.environ.get("OG_DB_PATH") or os.path.join(APP_DIR, "oggainz.db")
 
 # ---------------------------------------------------------------------------
 # Schema
@@ -126,10 +129,45 @@ CREATE TABLE IF NOT EXISTS holidays (
     reason TEXT
 );
 
+-- CRM: leads (prospects) tracked from first contact through to conversion.
+CREATE TABLE IF NOT EXISTS leads (
+    id              TEXT PRIMARY KEY,    -- L001, L002 ...
+    name            TEXT NOT NULL,
+    phone           TEXT,
+    source          TEXT,                -- Instagram / WhatsApp / Referral / Walk-in / Friend / Ad / Other
+    locality        TEXT,
+    goal            TEXT,                -- Fat loss / Muscle gain / Maintenance / Other
+    interest        TEXT,                -- plan/pack they're interested in
+    stage           TEXT DEFAULT 'New',  -- New / Contacted / Trial / Negotiating / Won / Lost
+    est_value       REAL,                -- potential rupee value of the deal
+    next_follow_up  TEXT,                -- YYYY-MM-DD next action date
+    last_contact    TEXT,                -- YYYY-MM-DD last touched
+    notes           TEXT,
+    lost_reason     TEXT,
+    trial_id        TEXT,                -- linked trial order, if they did a trial
+    customer_id     TEXT,                -- set when converted (Won)
+    subscription_id TEXT,                -- subscription created on conversion, if any
+    created_at      TEXT,
+    updated_at      TEXT
+);
+
+-- CRM: a timeline of updates / touches for each lead.
+CREATE TABLE IF NOT EXISTS lead_updates (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id   TEXT,
+    at        TEXT,        -- YYYY-MM-DD HH:MM:SS
+    kind      TEXT,        -- Note / Call / WhatsApp / Stage / Follow-up / Trial / System
+    text      TEXT,
+    FOREIGN KEY (lead_id) REFERENCES leads(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_deliveries_date ON deliveries(date);
 CREATE INDEX IF NOT EXISTS idx_deliveries_sub  ON deliveries(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_subs_status     ON subscriptions(status);
 CREATE INDEX IF NOT EXISTS idx_subs_customer   ON subscriptions(customer_id);
+CREATE INDEX IF NOT EXISTS idx_leads_stage     ON leads(stage);
+CREATE INDEX IF NOT EXISTS idx_leads_follow    ON leads(next_follow_up);
+CREATE INDEX IF NOT EXISTS idx_lead_updates    ON lead_updates(lead_id);
 """
 
 # Columns added after v1 shipped — added in-place so existing databases keep their data.

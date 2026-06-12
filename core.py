@@ -348,17 +348,19 @@ def _add_meal(bucket, m):
         bucket["sub_sales"] += m["value"]; bucket["sub_meals"] += 1
 
 
-def daily_view(conn, limit=30):
+def daily_view(conn, limit=30, month=None):
     """Build the whole day-wise revenue view in one pass over delivered meals.
 
     Returns (days, details, earned):
       days    – per-day buckets oldest→newest (for the chart + day list)
       details – {day: {items, total, sub_total, trial_total, sub_meals,
                        trial_meals, count}} for the per-day drill-down sheet
-      earned  – all-time earned totals (headline number the charts tie back to)
+      earned  – earned totals across the (optionally month-scoped) rows
+
+    `month` ('Mon-YYYY') scopes the whole view to one month; None = all time.
     """
     from collections import defaultdict
-    rows = _delivered_meal_rows(conn)
+    rows = _filter_month(_delivered_meal_rows(conn), month)
     agg = defaultdict(_blank_bucket)
     items = defaultdict(list)
     earned = _blank_bucket()
@@ -466,8 +468,9 @@ def customer_analytics(conn):
     return out
 
 
-def weekly_breakdown(conn, limit=10):
-    """Last `limit` weeks (Mon-start) of earned (delivered) sub + trial revenue."""
+def weekly_breakdown(conn, limit=10, month=None):
+    """Last `limit` weeks (Mon-start) of earned (delivered) sub + trial revenue.
+    `month` ('Mon-YYYY') scopes to one month; None = all time."""
     from collections import defaultdict
 
     def wk(dstr):
@@ -475,7 +478,7 @@ def weekly_breakdown(conn, limit=10):
         return (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
 
     weeks = defaultdict(_blank_bucket)
-    for m in _delivered_meal_rows(conn):
+    for m in _filter_month(_delivered_meal_rows(conn), month):
         _add_meal(weeks[wk(m["day"])], m)
 
     out = []
@@ -489,6 +492,110 @@ def daily_breakdown(conn, limit=30):
     """Per-day earned-revenue buckets (the chart rows). See daily_view for the
     full view incl. per-day drill-down details."""
     return daily_view(conn, limit)[0]
+
+
+# ---------------------------------------------------------------------------
+# Subscription SALES (packs booked)  —  vs. earned/delivered above
+# ---------------------------------------------------------------------------
+# The "earned" views above value the meals actually DELIVERED in a period. This
+# section instead tracks the subscriptions actually SOLD (booked) in a period:
+# how many packs were sold on a given day/week/month and their contract value.
+# A sale is dated by booking_date (falling back to start_date when no booking
+# date was recorded). This is the "actual subscription sales" Balaji asked for,
+# kept deliberately separate from delivered-meal revenue.
+
+def _period_key(day_iso, period):
+    """Bucket key for a date: the date itself (day), its Monday (week), or its
+    'Mon-YYYY' label (month). Day/week keys are ISO strings so they sort by time."""
+    d = datetime.strptime(str(day_iso)[:10], "%Y-%m-%d").date()
+    if period == "week":
+        return (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
+    if period == "month":
+        return d.strftime("%b-%Y")
+    return d.strftime("%Y-%m-%d")
+
+
+def _filter_month(rows, month):
+    """Keep only rows whose day falls in `month` ('Mon-YYYY'). None/'all' = no filter.
+    Filtering the source rows (not the buckets) keeps day & week totals reconciling
+    to the same month total."""
+    if not month or month == "all":
+        return rows
+    return [r for r in rows if _period_key(r["day"], "month") == month]
+
+
+def _subscription_sale_rows(conn):
+    """Every subscription as a one-off 'sale' on the day it was booked."""
+    rows = conn.execute(
+        "SELECT id, customer_id, customer_name, plan_name, duration, "
+        "       COALESCE(NULLIF(booking_date,''), start_date) AS sale_date, "
+        "       COALESCE(total_amount,0)    AS value, "
+        "       COALESCE(amount_received,0) AS received, "
+        "       payment_status, status "
+        "FROM subscriptions").fetchall()
+    out = []
+    for r in rows:
+        if not r["sale_date"]:
+            continue
+        out.append({
+            "id": r["id"], "customer_id": r["customer_id"],
+            "day": str(r["sale_date"])[:10],
+            "name": r["customer_name"] or "—", "plan": r["plan_name"] or "—",
+            "duration": r["duration"] or "", "value": r["value"],
+            "received": r["received"], "payment_status": r["payment_status"] or "Unpaid",
+            "status": r["status"] or "",
+        })
+    return out
+
+
+def _sales_blank():
+    return {"count": 0, "value": 0, "received": 0}
+
+
+def subs_sold_breakdown(conn, period, limit=None, month=None):
+    """Subscription-sales buckets oldest→newest: [{key,count,value,received}].
+    period in {'day','week','month'}. `month` scopes day/week to one month."""
+    from collections import defaultdict
+    buckets = defaultdict(_sales_blank)
+    for s in _filter_month(_subscription_sale_rows(conn), month):
+        b = buckets[_period_key(s["day"], period)]
+        b["count"] += 1
+        b["value"] += s["value"]
+        b["received"] += s["received"]
+    keys = sorted(buckets.keys(), key=(_mkey if period == "month" else (lambda k: k)))
+    out = []
+    for k in keys:
+        b = dict(buckets[k]); b["key"] = k
+        out.append(b)
+    return out[-limit:] if limit else out
+
+
+def subs_sold_detail(conn, period, key):
+    """The actual subscriptions sold in one specific day/week/month."""
+    rows = [s for s in _subscription_sale_rows(conn) if _period_key(s["day"], period) == key]
+    rows.sort(key=lambda s: (s["day"], (s["name"] or "").lower()))
+    # NB: key is 'rows' (not 'items') — Jinja's attribute lookup would otherwise
+    # resolve `.items` to dict.items rather than this list.
+    return {"rows": rows, "count": len(rows),
+            "value": sum(s["value"] for s in rows),
+            "received": sum(s["received"] for s in rows)}
+
+
+def delivered_detail(conn, period, key):
+    """Delivered-meal breakdown for ONE specific day/week/month — for any date,
+    not just the recent window. Mirrors the per-day drill-down totals so the
+    revenue date-filter can show 'orders delivered + their unit price + total'."""
+    rows = [m for m in _delivered_meal_rows(conn) if _period_key(m["day"], period) == key]
+    rows.sort(key=lambda m: (m["day"], m["meal_type"] == "Dinner", (m["name"] or "").lower()))
+    sub_total   = sum(m["value"] for m in rows if m["source"] != "trial")
+    trial_total = sum(m["value"] for m in rows if m["source"] == "trial")
+    return {
+        "orders": rows, "total": sub_total + trial_total,
+        "sub_total": sub_total, "trial_total": trial_total,
+        "sub_meals":   sum(1 for m in rows if m["source"] != "trial"),
+        "trial_meals": sum(1 for m in rows if m["source"] == "trial"),
+        "count": len(rows),
+    }
 
 
 # ---------------------------------------------------------------------------

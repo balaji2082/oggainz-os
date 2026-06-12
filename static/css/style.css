@@ -471,3 +471,146 @@ body.sheet-open{overflow:hidden}
 .ds-foot span{flex:1; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; font-size:.8rem}
 .ds-foot b{font-size:1.6rem; font-weight:800; color:var(--forest); letter-spacing:-.02em}
 @media(max-width:560px){ .ds-total{font-size:2rem} }
+
+/* ===========================================================================
+   v4 — revenue date-filter focus panel + subscription-sales (packs booked)
+   =========================================================================== */
+/* "Booked / sold" accent (distinct from lime=delivered and violet=trial) */
+.book{color:#2d56b8}
+.ds-dot.book{background:#2d6cdf}
+.dr-pip.book{background:#2d6cdf}
+.ds-av.book{background:#e3ecff; color:#2d56b8}
+
+.tiles-2{grid-template-columns:repeat(2,1fr)}
+.tile.tile-book{background:linear-gradient(135deg,#eaf0ff,#dbe6ff); border:1px solid #cdddff}
+.tile.tile-book .k{color:#3a5bb0} .tile.tile-book .v{color:#1f3f8f} .tile.tile-book .tap{color:#3a5bb0}
+
+/* Focus / date-filter panel */
+.focus-card{border:1px solid #d7e6dd}
+.focus-pick{display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap}
+.focus-pick input[type=date]{flex:1; min-width:140px; max-width:230px}
+.focus-pick .navbtn{width:40px; height:40px; border-radius:10px; border:1px solid var(--line);
+  background:#fff; display:flex; align-items:center; justify-content:center; font-size:1.3rem;
+  color:var(--forest); flex-shrink:0}
+.focus-pick .navbtn:hover{background:var(--sage)}
+.focus-pick .navbtn.is-off{opacity:.35; pointer-events:none}
+.focus-cap{font-size:.7rem; text-transform:uppercase; letter-spacing:.1em; color:var(--lime);
+  font-weight:800; margin-top:2px}
+.focus-date{font-size:1.18rem; font-weight:800; color:var(--forest); margin:1px 0 12px; letter-spacing:-.01em}
+.focus-stats{margin-bottom:14px}
+.focus-h{display:flex; align-items:center; gap:7px; margin:6px 0 9px; font-size:.95rem; color:var(--forest)}
+.focus-h .muted{font-weight:600}
+.ds-list-static{display:flex; flex-direction:column; gap:8px}
+.focus-foot{display:flex; align-items:center; gap:10px; margin-top:11px; padding-top:11px;
+  border-top:1px solid var(--line)}
+.focus-foot span{flex:1; font-weight:700; color:var(--muted); text-transform:uppercase;
+  letter-spacing:.04em; font-size:.78rem}
+.focus-foot b{font-size:1.3rem; font-weight:800; color:var(--forest)}
+
+/* clickable table rows (subscription-sales day/week tables jump to that period) */
+tr.rowlink{cursor:pointer; transition:background .12s}
+tr.rowlink:hover{background:var(--cream)}
+
+/* ===========================================================================
+   v5 — CRM (leads → conversion): nav badge, stage chips, pipeline, timeline
+   =========================================================================== */
+.navbadge{display:inline-block; background:var(--orange); color:#fff; font-size:.62rem;
+  font-weight:800; padding:1px 7px; border-radius:999px; vertical-align:middle; line-height:1.5}
+.linkrow .navbadge{font-size:.72rem; padding:2px 9px; margin-right:6px}
+
+/* Stage colour tokens (used on chips, filter pills + pipeline steps) */
+.st-new{background:#e3ecff; color:#2d56b8}
+.st-contacted{background:#d7f3f0; color:#0f766e}
+.st-trial{background:#efe6fa; color:#6b3fb0}
+.st-negotiating{background:#fdeede; color:#bc5a12}
+.st-won{background:#e3f6ea; color:#147a37}
+.st-lost{background:#eef1ef; color:#5d6b64}
+
+/* Filter chip row (stage filters) */
+.chiprow{display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin-bottom:12px;
+  -webkit-overflow-scrolling:touch; scrollbar-width:none}
+.chiprow::-webkit-scrollbar{display:none}
+.fchip{flex:0 0 auto; padding:8px 14px; border-radius:999px; font-weight:700; font-size:.82rem;
+  border:1.5px solid var(--line); background:#fff; color:var(--muted); white-space:nowrap}
+.fchip.on{background:var(--forest); border-color:var(--forest); color:#fff}
+
+/* Pipeline stage track on the detail page */
+.stage-track{display:flex; gap:6px; flex-wrap:wrap}
+.stage-step{margin:0; flex:1 1 auto; min-width:84px}
+.stage-step button{width:100%; border:1.5px solid var(--line); background:#fff; color:var(--muted);
+  border-radius:999px; padding:9px 6px; font-weight:700; font-size:.78rem; cursor:pointer;
+  font-family:inherit; transition:.12s}
+.stage-step button:hover{border-color:#cbd8d1; background:var(--cream)}
+.stage-step.cur button{background:var(--forest); border-color:var(--forest); color:#fff}
+.stage-step.st-won.cur button{background:var(--lime); border-color:var(--lime); color:#04231a}
+.stage-step.st-lost.cur button{background:#5d6b64; border-color:#5d6b64; color:#fff}
+
+/* Inline "mark lost" expander */
+.inline-lost{display:inline-block}
+.inline-lost summary{list-style:none; cursor:pointer}
+.inline-lost summary::-webkit-details-marker{display:none}
+.lost-form{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center}
+.lost-form input{flex:1; min-width:180px}
+
+/* Timeline of lead updates */
+.timeline{position:relative; padding-left:4px}
+.tl-item{display:flex; gap:12px; padding-bottom:14px; position:relative}
+.tl-item:last-child{padding-bottom:0}
+.tl-item:not(:last-child)::before{content:''; position:absolute; left:5px; top:16px; bottom:0;
+  width:2px; background:var(--line)}
+.tl-dot{width:12px; height:12px; border-radius:50%; flex:0 0 auto; margin-top:3px;
+  background:var(--muted); z-index:1; box-shadow:0 0 0 3px #fff}
+.tl-note{background:#9aa7a0} .tl-call{background:#2d6cdf} .tl-whatsapp{background:var(--lime)}
+.tl-stage{background:#8254c8} .tl-follow-up{background:var(--orange)}
+.tl-system{background:var(--forest)} .tl-trial{background:#8254c8}
+.tl-body{flex:1; min-width:0}
+.tl-head{display:flex; align-items:baseline; gap:8px}
+.tl-head b{color:var(--forest); font-size:.9rem}
+.tl-when{font-size:.72rem; color:var(--muted); margin-left:auto; white-space:nowrap}
+.tl-text{font-size:.9rem; color:var(--ink); margin-top:2px}
+
+/* ===========================================================================
+   v6 — revenue clean redesign: scope bar, month picker, compare infographic
+   =========================================================================== */
+.scopebar{display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap}
+.scopebar .seg{margin-bottom:0; max-width:none; flex:1 1 240px}
+.month-pick{display:flex; align-items:center; gap:6px; background:#fff; border:1px solid var(--line);
+  border-radius:999px; padding:3px 8px 3px 14px; box-shadow:var(--shadow); flex:0 0 auto}
+.month-pick>span{font-size:1rem; line-height:1}
+.month-pick select{width:auto; border:none; padding:8px 6px; font-weight:700; color:var(--forest);
+  background:transparent; border-radius:999px; font-size:.88rem}
+.month-pick select:focus{outline:none}
+
+/* Delivered-vs-sold comparison bars */
+.cmp-top{display:flex; align-items:center; margin-bottom:13px}
+.cmp-top h3{margin:0}
+.cmp-row{display:flex; align-items:center; gap:10px; margin-bottom:11px}
+.cmp-row:last-child{margin-bottom:0}
+.cmp-k{flex:0 0 96px; display:flex; align-items:center; gap:7px; font-weight:700;
+  font-size:.84rem; color:var(--forest)}
+.cmp-track{flex:1; height:15px; background:#eef4f0; border-radius:999px; overflow:hidden; min-width:40px}
+.cmp-fill{display:block; height:100%; border-radius:999px; min-width:3px;
+  transition:width .55s cubic-bezier(.22,1,.36,1)}
+.cmp-fill.sub{background:linear-gradient(90deg,var(--lime-l),var(--pine))}
+.cmp-fill.book{background:linear-gradient(90deg,#7aa0ff,#2d6cdf)}
+.cmp-v{flex:0 0 auto; text-align:right; font-weight:800; color:var(--forest); font-size:.95rem;
+  min-width:104px; font-variant-numeric:tabular-nums}
+.cmp-v small{display:block; font-weight:600; color:var(--muted); font-size:.7rem}
+
+/* Selected bar + anchor columns in the charts */
+.daychart a.col{cursor:pointer; text-decoration:none}
+.daychart .col.sel .col-bar i{background:linear-gradient(180deg,#3a7a63 0%,var(--forest) 100%);
+  box-shadow:0 6px 14px rgba(0,64,48,.34), inset 0 1px 0 rgba(255,255,255,.3)}
+.daychart .col.sel .col-val{color:var(--forest)}
+.daychart .col.sel .col-lbl{color:var(--forest); font-weight:800}
+
+/* Unified breakdown tables (delivered + sold side by side) */
+.revx td{vertical-align:top}
+.cell-sub{display:block; font-size:.7rem; color:var(--muted); font-weight:600; margin-top:1px}
+.rev-table .growth{font-size:.8rem}
+
+@media(max-width:560px){
+  .cmp-k{flex-basis:80px; font-size:.8rem}
+  .cmp-v{min-width:88px; font-size:.86rem}
+  .month-pick{flex:1 1 auto; justify-content:center}
+}

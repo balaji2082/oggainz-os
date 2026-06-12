@@ -14,6 +14,7 @@ from flask import (Flask, render_template, request, redirect, url_for,
 
 import db
 import core
+import crm
 
 # Run all date logic in the user's timezone (IST) even when the app is hosted on a
 # server whose clock is UTC (e.g. PythonAnywhere). Without this, "today" on the server
@@ -171,8 +172,9 @@ def today_iso():
 def inject_globals():
     c = conn()
     stats = core.headline_stats(c)
+    due = crm.followups_due_count(c)            # CRM follow-ups due → nav badge
     c.close()
-    return {"g_stats": stats, "active_page": request.endpoint,
+    return {"g_stats": stats, "g_due": due, "active_page": request.endpoint,
             "today": date.today().strftime("%Y-%m-%d"),
             "login_active": bool(APP_PASSWORD), "authed": session.get("authed"),
             "deployed": bool(APP_PASSWORD)}
@@ -341,6 +343,10 @@ def subscription_new():
              scheduled, "Active", db.now_iso()))
         c.commit()
         core.recompute_subscription(c, sid)
+        # If this booking came from converting a CRM lead, link them together.
+        lead_id = f.get("lead")
+        if lead_id:
+            crm.link_subscription(c, lead_id, sid)
         c.close()
         flash(f"Subscription {sid} created.", "ok")
         return redirect(url_for("subscription_detail", sid=sid))
@@ -348,7 +354,9 @@ def subscription_new():
     plans = c.execute("SELECT * FROM plans WHERE active=1 ORDER BY name").fetchall()
     c.close()
     return render_template("subscription_form.html", customers=customers, plans=plans,
-                           sub=None, today=date.today().strftime("%Y-%m-%d"))
+                           sub=None, today=date.today().strftime("%Y-%m-%d"),
+                           preset_customer=request.args.get("customer"),
+                           lead=request.args.get("lead"))
 
 
 @app.route("/subscriptions/<sid>/edit", methods=["GET", "POST"])
@@ -392,7 +400,8 @@ def subscription_edit(sid):
     plans = c.execute("SELECT * FROM plans WHERE active=1 ORDER BY name").fetchall()
     c.close()
     return render_template("subscription_form.html", customers=customers, plans=plans,
-                           sub=sub, today=date.today().strftime("%Y-%m-%d"))
+                           sub=sub, today=date.today().strftime("%Y-%m-%d"),
+                           preset_customer=None, lead=None)
 
 
 @app.route("/subscriptions/<sid>/status", methods=["POST"])
@@ -646,28 +655,262 @@ def trial_deliver(tid):
 # ---------------------------------------------------------------------------
 # Revenue / dashboard
 # ---------------------------------------------------------------------------
+def _valid_iso(s):
+    """Return s if it is a YYYY-MM-DD date, else None."""
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+        return s
+    except (TypeError, ValueError):
+        return None
+
+
+def _month_bounds(scope):
+    """(first_iso, last_iso) for a 'Mon-YYYY' scope, or (None, None) for all time."""
+    if not scope or scope == "all":
+        return None, None
+    first = datetime.strptime(scope, "%b-%Y").date().replace(day=1)
+    nxt = first.replace(year=first.year + 1, month=1) if first.month == 12 \
+        else first.replace(month=first.month + 1)
+    return first.strftime("%Y-%m-%d"), (nxt - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def _merge_period(deliv, dkey, sold):
+    """One row per period key combining delivered (earned) + sold (booked) buckets,
+    so the breakdown table also shows days/weeks where a pack was sold but nothing
+    was delivered. Returns a list sorted oldest→newest."""
+    rows = {}
+    for b in deliv:
+        rows[b[dkey]] = {"key": b[dkey], "deliv_value": b["overall"],
+                         "deliv_meals": b["delivered"], "sold_value": 0, "sold_count": 0}
+    for s in sold:
+        r = rows.setdefault(s["key"], {"key": s["key"], "deliv_value": 0,
+                                       "deliv_meals": 0, "sold_value": 0, "sold_count": 0})
+        r["sold_value"], r["sold_count"] = s["value"], s["count"]
+    return sorted(rows.values(), key=lambda r: r["key"])
+
+
+def _revenue_focus(c, period, scope, days, weeks):
+    """Build the 'focused period' panel for the revenue date filter: the delivered
+    orders + subscriptions sold for ONE specific day (?d=) or week (?w=). When a
+    month scope is set, it defaults to the latest active period in that month and
+    keeps the date picker / arrows inside the month. Returns None for the month view."""
+    if period not in ("day", "week"):
+        return None
+    today = date.today()
+    today_iso = today.strftime("%Y-%m-%d")
+    lo, hi = _month_bounds(scope)
+    param = "d" if period == "day" else "w"
+    raw = _valid_iso(request.args.get(param))
+    if not raw:                                   # no explicit pick → sensible default
+        if period == "day":
+            raw = days[-1]["day"] if days else (lo or today_iso)
+        else:
+            raw = weeks[-1]["week_start"] if weeks else (lo or today_iso)
+    base = datetime.strptime(raw, "%Y-%m-%d").date()
+    if period == "week":
+        base = base - timedelta(days=base.weekday())          # snap to that week's Monday
+    key = base.strftime("%Y-%m-%d")
+    step = timedelta(days=7 if period == "week" else 1)
+    this_start = today - timedelta(days=today.weekday()) if period == "week" else today
+    nxt_iso = (base + step).strftime("%Y-%m-%d")
+    prev_iso = (base - step).strftime("%Y-%m-%d")
+    focus = {
+        "period": period, "param": param, "key": key, "pick": key,
+        "prev": prev_iso, "next": nxt_iso,
+        "can_next": base < this_start and (not hi or nxt_iso <= hi),
+        "can_prev": (not lo or prev_iso >= lo),
+        "min": lo, "max": (min(hi, today_iso) if hi else today_iso),
+        "delivered": core.delivered_detail(c, period, key),
+        "subs": core.subs_sold_detail(c, period, key),
+    }
+    if period == "day":
+        focus["title"] = fmt_date(key, "%A, %d %b %Y")
+    else:
+        end = base + timedelta(days=6)
+        focus["title"] = fmt_date(key, "%d %b") + " – " + end.strftime("%d %b %Y")
+    return focus
+
+
 @app.route("/revenue")
 def revenue():
     c = conn()
     period = request.args.get("period", "day")       # day | week | month
     months = core.monthly_breakdown(c)
-    weeks = core.weekly_breakdown(c)
-    days, day_details, earned = core.daily_view(c)
+    month_opts = [m["month"] for m in months]
+    scope = request.args.get("month", "all")         # 'all' or a 'Mon-YYYY' label
+    if scope not in month_opts:
+        scope = "all"
+
     stats = core.headline_stats(c)
+    _, _, earned = core.daily_view(c)                # all-time earned → hero tile
     by_plan = c.execute(
         "SELECT plan_name, COUNT(*) n, COALESCE(SUM(total_amount),0) amt, "
         "       COALESCE(SUM(amount_received),0) recv "
         "FROM subscriptions GROUP BY plan_name ORDER BY amt DESC").fetchall()
-    # Collection rate for the donut: how much of all billed money is actually in.
     collected = (stats["received"] / stats["sales"] * 100) if stats["sales"] else 0
-    # This-month snapshot so the headline reflects current performance, not all-time only.
     this_month = core.month_label_iso()
     cur = next((m for m in months if m["month"] == this_month), None)
+
+    # Month-scoped data for the charts + tables (day & week views honour the scope).
+    days, _, earned_scope = core.daily_view(c, limit=999, month=scope)
+    weeks = core.weekly_breakdown(c, limit=999, month=scope)
+    subs_days = core.subs_sold_breakdown(c, "day", month=scope)
+    subs_weeks = core.subs_sold_breakdown(c, "week", month=scope)
+    subs_months = core.subs_sold_breakdown(c, "month")
+    subs_map = {b["key"]: b for b in subs_days}
+    subs_week_map = {b["key"]: b for b in subs_weeks}
+    subs_month_map = {b["key"]: b for b in subs_months}
+
+    # Scoped headline: delivered (earned) vs subscriptions sold (booked) for the range.
+    summary = {
+        "label": "All time" if scope == "all"
+                 else datetime.strptime(scope, "%b-%Y").strftime("%B %Y"),
+        "scoped": scope != "all",
+        "deliv_value": earned_scope["overall"], "deliv_meals": earned_scope["delivered"],
+        "sold_value": sum(b["value"] for b in subs_days),
+        "sold_count": sum(b["count"] for b in subs_days),
+        "received": sum(b["received"] for b in subs_days),
+    }
+    # Unified day/week breakdown tables (delivered + sold side by side).
+    day_table = _merge_period(days, "day", subs_days)
+    week_table = _merge_period(weeks, "week_start", subs_weeks)
+    focus = _revenue_focus(c, period, scope, days, weeks)
     c.close()
     return render_template("revenue.html", months=months, weeks=weeks, days=days,
-                           day_details=day_details, earned=earned,
-                           stats=stats, by_plan=by_plan, period=period,
-                           collected=collected, cur=cur, this_month=this_month)
+                           earned=earned, stats=stats, by_plan=by_plan, period=period,
+                           collected=collected, cur=cur, this_month=this_month,
+                           subs_days=subs_days, subs_weeks=subs_weeks,
+                           subs_months=subs_months, subs_map=subs_map,
+                           subs_week_map=subs_week_map, subs_month_map=subs_month_map,
+                           focus=focus, scope=scope, month_opts=month_opts, summary=summary,
+                           day_table=day_table, week_table=week_table)
+
+
+# ---------------------------------------------------------------------------
+# CRM — leads → conversion
+# ---------------------------------------------------------------------------
+@app.route("/crm")
+def crm_home():
+    c = conn()
+    stage = request.args.get("stage", "Open")
+    q = request.args.get("q", "").strip()
+    leads = crm.list_leads(c, stage=stage, q=q)
+    due = crm.followups_due(c)
+    stats = crm.pipeline_stats(c)
+    c.close()
+    return render_template("crm.html", leads=leads, due=due, stats=stats,
+                           stage=stage, q=q, stages=crm.STAGES,
+                           open_stages=crm.OPEN_STAGES)
+
+
+@app.route("/crm/new", methods=["GET", "POST"])
+def crm_new():
+    c = conn()
+    if request.method == "POST":
+        lid = crm.save_lead(c, request.form)
+        c.close()
+        flash(f"Lead {lid} added.", "ok")
+        return redirect(url_for("crm_detail", lid=lid))
+    c.close()
+    return render_template("crm_form.html", lead=None, sources=crm.SOURCES,
+                           goals=crm.GOALS, stages=crm.STAGES,
+                           today=date.today().strftime("%Y-%m-%d"))
+
+
+@app.route("/crm/import-trials", methods=["POST"])
+def crm_import_trials():
+    c = conn()
+    n = crm.import_from_trials(c)
+    c.close()
+    flash(f"Imported {n} lead{'s' if n != 1 else ''} from trial orders." if n
+          else "No new trials to import — all caught up.", "ok")
+    return redirect(url_for("crm_home"))
+
+
+@app.route("/crm/<lid>")
+def crm_detail(lid):
+    c = conn()
+    lead = crm.get_lead(c, lid)
+    if not lead:
+        c.close(); abort(404)
+    lead = dict(lead)
+    updates = crm.updates_for(c, lid)
+    cust = c.execute("SELECT * FROM customers WHERE id=?", (lead["customer_id"],)).fetchone() \
+        if lead["customer_id"] else None
+    sub = c.execute("SELECT * FROM subscriptions WHERE id=?", (lead["subscription_id"],)).fetchone() \
+        if lead["subscription_id"] else None
+    trial = c.execute("SELECT * FROM trial_orders WHERE id=?", (lead["trial_id"],)).fetchone() \
+        if lead["trial_id"] else None
+    c.close()
+    return render_template("crm_detail.html", lead=lead, updates=updates, cust=cust,
+                           sub=sub, trial=trial, stages=crm.STAGES,
+                           open_stages=crm.OPEN_STAGES)
+
+
+@app.route("/crm/<lid>/edit", methods=["GET", "POST"])
+def crm_edit(lid):
+    c = conn()
+    lead = crm.get_lead(c, lid)
+    if not lead:
+        c.close(); abort(404)
+    if request.method == "POST":
+        crm.save_lead(c, request.form, lid=lid)
+        c.close()
+        flash(f"Lead {lid} updated.", "ok")
+        return redirect(url_for("crm_detail", lid=lid))
+    c.close()
+    return render_template("crm_form.html", lead=lead, sources=crm.SOURCES,
+                           goals=crm.GOALS, stages=crm.STAGES,
+                           today=date.today().strftime("%Y-%m-%d"))
+
+
+@app.route("/crm/<lid>/stage", methods=["POST"])
+def crm_stage(lid):
+    c = conn()
+    stage = request.form.get("stage")
+    reason = request.form.get("lost_reason")
+    crm.set_stage(c, lid, stage, reason)
+    c.close()
+    if _wants_json():
+        return jsonify({"ok": True, "stage": stage})
+    flash(f"Moved to {stage}.", "ok")
+    return redirect(request.referrer or url_for("crm_detail", lid=lid))
+
+
+@app.route("/crm/<lid>/update", methods=["POST"])
+def crm_update(lid):
+    c = conn()
+    kind = request.form.get("kind", "Note")
+    text = (request.form.get("text") or "").strip()
+    follow = request.form.get("next_follow_up")
+    if text:
+        crm.log_update(c, lid, kind, text)
+    if follow:
+        crm.set_follow_up(c, lid, follow)
+    c.close()
+    flash("Update saved." if (text or follow) else "Nothing to save.", "ok")
+    return redirect(url_for("crm_detail", lid=lid))
+
+
+@app.route("/crm/<lid>/followup", methods=["POST"])
+def crm_followup(lid):
+    c = conn()
+    crm.set_follow_up(c, lid, request.form.get("next_follow_up") or None)
+    c.close()
+    flash("Follow-up updated.", "ok")
+    return redirect(request.referrer or url_for("crm_detail", lid=lid))
+
+
+@app.route("/crm/<lid>/convert", methods=["POST"])
+def crm_convert(lid):
+    c = conn()
+    lead = crm.get_lead(c, lid)
+    if not lead:
+        c.close(); abort(404)
+    cid = crm.convert_lead(c, lid)
+    c.close()
+    flash(f"Converted to customer {cid}. Now book their pack 👇", "ok")
+    return redirect(url_for("subscription_new", customer=cid, lead=lid))
 
 
 # ---------------------------------------------------------------------------
