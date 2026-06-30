@@ -123,27 +123,32 @@ h3{font-size:1rem; font-weight:700}
   background:#fff3e8; color:var(--orange); font-weight:700; font-size:.72rem;
   border:1px solid #f6e1cd; vertical-align:middle}
 
-/* ---------- Delivery rows ---------- */
-.dlist{display:flex; flex-direction:column; gap:10px}
-.drow{display:flex; align-items:center; gap:12px; padding:13px 14px; border:1px solid var(--line);
+/* ---------- Delivery rows (compact, phone-first) ---------- */
+[hidden]{display:none !important}        /* author display rules must not override hidden */
+.dlist{display:flex; flex-direction:column; gap:8px}
+.drow{display:flex; flex-direction:column; gap:3px; padding:10px 12px; border:1px solid var(--line);
   border-radius:var(--r-sm); background:#fff; transition:.15s}
 .drow.is-delivered{background:#f2fbf5; border-color:#d5efdf}
 .drow.is-skipped{background:#fff7f0; border-color:#f6e1cd}
-.drow .who{flex:1; min-width:0}
-.drow .who b{font-weight:700; color:var(--forest)}
-.drow .meta{font-size:.8rem; color:var(--muted); margin-top:2px}
-.drow .acts{display:flex; gap:7px; flex-shrink:0}
-.iconbtn{width:42px; height:42px; border-radius:12px; border:1.5px solid var(--line);
+/* top line: name + slot chip on the left, tiny action buttons on the right */
+.drow-top{display:flex; align-items:center; gap:8px}
+.drow-id{flex:1; min-width:0; display:flex; align-items:center; gap:6px; flex-wrap:wrap}
+.drow-name{font-weight:700; color:var(--forest); font-size:.95rem; line-height:1.2}
+.drow-meta{font-size:.82rem; color:var(--ink); font-weight:600}
+.drow-line{display:flex; flex-wrap:wrap; gap:4px 12px; font-size:.78rem; color:var(--muted)}
+.drow-line .mi{white-space:nowrap}
+.drow-note{font-size:.78rem; color:#5d6b64; line-height:1.4; word-break:break-word}
+.drow .acts{display:flex; gap:5px; flex-shrink:0}
+.iconbtn{width:33px; height:33px; border-radius:9px; border:1.5px solid var(--line);
   background:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer;
-  font-size:1.1rem; transition:.12s}
+  font-size:.92rem; transition:.12s; flex-shrink:0}
 .iconbtn.deliver.on{background:var(--lime); border-color:var(--lime); color:#fff}
 .iconbtn.skip.on{background:var(--orange); border-color:var(--orange); color:#fff}
 .iconbtn.note.on{background:#ffe9a8; border-color:#f0d27a}
 .iconbtn:active{transform:scale(.92)}
 /* Per-order note: the saved line + the inline editor */
-.drow .daynote{font-size:.8rem; color:#8a6d00; background:#fffbe8; border:1px solid #f0e3b8;
-  border-radius:8px; padding:4px 9px; margin-top:5px; display:inline-block; max-width:100%;
-  word-break:break-word}
+.drow .daynote{font-size:.78rem; color:#8a6d00; background:#fffbe8; border:1px solid #f0e3b8;
+  border-radius:8px; padding:4px 9px; margin-top:3px; max-width:100%; word-break:break-word}
 .drow .note-editor{margin-top:7px}
 .drow .note-input{width:100%; font:inherit; padding:8px 10px; border:1.5px solid var(--line);
   border-radius:10px; resize:vertical; box-sizing:border-box}

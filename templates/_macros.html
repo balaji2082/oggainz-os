@@ -1,33 +1,41 @@
 {% macro drow(r) %}
+{% set slot = r.meal_type or 'Lunch' %}
 <div class="drow {{ 'is-delivered' if r.status=='Delivered' }}{{ 'is-skipped' if r.status=='Skipped' }}"
      data-status="{{ r.status }}" data-id="{{ r.id }}">
-  <div class="who">
-    <b>{{ r.name }}</b>
-    {% if r.trial_ref %}<span class="chip chip-trial">TRIAL</span>{% endif %}
-    <span class="chip chip-{{ (r.meal_type or 'lunch')|lower }}">{{ r.meal_type or '—' }}</span>
-    <div class="meta">
-      {{ r.plan_name or r.trial_order or '' }}{% if r.preferred_timing %} · {{ r.preferred_timing }}{% endif %}
-      {% if r.locality %} · 📍 {{ r.locality }}{% endif %}
-      {% if r.sub_notes %} · {{ r.sub_notes }}{% endif %}
+  <div class="drow-top">
+    <div class="drow-id">
+      <b class="drow-name">{{ r.name }}</b>
+      <span class="chip chip-xs chip-{{ slot|lower }}">{{ slot }}</span>
+      {% if r.trial_ref %}<span class="chip chip-xs chip-trial">TRIAL</span>{% endif %}
     </div>
-    <div class="daynote" data-note {{ 'hidden' if not r.day_note }}>📝 <span class="daynote-text">{{ r.day_note }}</span></div>
-    <div class="note-editor" hidden>
-      <textarea class="note-input" rows="2"
-                placeholder="Note just for this order today — e.g. deliver to dinner, swapped plan (same price), no honey, food issue…">{{ r.day_note or '' }}</textarea>
-      <div class="note-acts">
-        <button type="button" class="btn btn-primary btn-sm" onclick="saveNote(this)">Save note</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleNote(this)">Cancel</button>
-      </div>
+    <div class="acts">
+      {% if r.phone %}<a class="iconbtn" href="{{ r.phone|wa }}" target="_blank" title="WhatsApp">💬</a>{% endif %}
+      <button class="iconbtn note {{ 'on' if r.day_note }}" title="Note for today's order"
+              onclick="toggleNote(this)">📝</button>
+      <button class="iconbtn skip {{ 'on' if r.status=='Skipped' }}" title="Skip"
+              onclick="mark(this, {{ r.id }}, 'Skipped')">✕</button>
+      <button class="iconbtn deliver {{ 'on' if r.status=='Delivered' }}" title="Delivered"
+              onclick="mark(this, {{ r.id }}, 'Delivered')">✓</button>
     </div>
   </div>
-  <div class="acts">
-    {% if r.phone %}<a class="iconbtn" href="{{ r.phone|wa }}" target="_blank" title="WhatsApp">💬</a>{% endif %}
-    <button class="iconbtn note {{ 'on' if r.day_note }}" title="Note for today's order"
-            onclick="toggleNote(this)">📝</button>
-    <button class="iconbtn skip {{ 'on' if r.status=='Skipped' }}" title="Skip"
-            onclick="mark(this, {{ r.id }}, 'Skipped')">✕</button>
-    <button class="iconbtn deliver {{ 'on' if r.status=='Delivered' }}" title="Delivered"
-            onclick="mark(this, {{ r.id }}, 'Delivered')">✓</button>
+
+  <div class="drow-meta">{{ r.plan_name or r.trial_order or 'Meal' }}</div>
+  {% if r.preferred_timing or r.locality %}
+  <div class="drow-line">
+    {% if r.preferred_timing %}<span class="mi">🕐 {{ r.preferred_timing }}</span>{% endif %}
+    {% if r.locality %}<span class="mi">📍 {{ r.locality }}</span>{% endif %}
+  </div>
+  {% endif %}
+  {% if r.sub_notes %}<div class="drow-note">📋 {{ r.sub_notes }}</div>{% endif %}
+
+  <div class="daynote" data-note {{ 'hidden' if not r.day_note }}>📝 <span class="daynote-text">{{ r.day_note or '' }}</span></div>
+  <div class="note-editor" hidden>
+    <textarea class="note-input" rows="2"
+              placeholder="Note just for this order today — e.g. deliver to dinner, swapped plan (same price), no honey, food issue…">{{ r.day_note or '' }}</textarea>
+    <div class="note-acts">
+      <button type="button" class="btn btn-primary btn-sm" onclick="saveNote(this)">Save note</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="toggleNote(this)">Cancel</button>
+    </div>
   </div>
 </div>
 {% endmacro %}

@@ -224,16 +224,19 @@ def effective_slot(conn, sub_id, day_iso, base_slot):
     return (mv["slot"] if mv else None) or base_slot or "Lunch"
 
 
-def resync_pending_slots(conn, sub_id):
-    """Point every still-Pending order row for a sub at its effective slot. Called
-    after a slot move is added/edited/removed or the sub's base slot changes, so the
-    already-generated rows (today + any future) flip to the right slot immediately.
-    Delivered/Skipped rows are left as the record of what actually happened."""
+def resync_order_slots(conn, sub_id):
+    """Re-point order rows at their effective slot after a slot move / base-slot change.
+
+    Applies to TODAY and every future row (whatever their status) so a change shows up
+    on the current day immediately — even if today's order was already marked
+    delivered/skipped — plus any still-Pending past row. Genuinely past Delivered/Skipped
+    rows are left untouched as the true record of what happened."""
     sub = conn.execute("SELECT slot FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
     base = (sub["slot"] if sub else None) or "Lunch"
+    today_iso = _today_iso()
     for r in conn.execute(
-            "SELECT id, date FROM deliveries WHERE subscription_id=? AND status='Pending'",
-            (sub_id,)).fetchall():
+            "SELECT id, date FROM deliveries WHERE subscription_id=? "
+            "AND (date>=? OR status='Pending')", (sub_id, today_iso)).fetchall():
         slot = effective_slot(conn, sub_id, r["date"], base)
         conn.execute("UPDATE deliveries SET meal_type=? WHERE id=?", (slot, r["id"]))
     conn.commit()
@@ -245,7 +248,7 @@ def add_slot_move(conn, sub_id, slot, start_iso, end_iso=None, reason=""):
         "VALUES(?,?,?,?,?,?)", (sub_id, start_iso, end_iso or None, slot,
                                 (reason or "").strip() or None, db.now_iso()))
     conn.commit()
-    resync_pending_slots(conn, sub_id)
+    resync_order_slots(conn, sub_id)
 
 
 def update_slot_move(conn, move_id, slot, start_iso, end_iso=None, reason=""):
@@ -257,7 +260,7 @@ def update_slot_move(conn, move_id, slot, start_iso, end_iso=None, reason=""):
                  "WHERE id=?", (slot, start_iso, end_iso or None,
                                 (reason or "").strip() or None, move_id))
     conn.commit()
-    resync_pending_slots(conn, mv["subscription_id"])
+    resync_order_slots(conn, mv["subscription_id"])
 
 
 def delete_slot_move(conn, move_id):
@@ -266,7 +269,7 @@ def delete_slot_move(conn, move_id):
     conn.execute("DELETE FROM subscription_slot_moves WHERE id=?", (move_id,))
     conn.commit()
     if mv:
-        resync_pending_slots(conn, mv["subscription_id"])
+        resync_order_slots(conn, mv["subscription_id"])
 
 
 # ---------------------------------------------------------------------------

@@ -418,7 +418,7 @@ def subscription_edit(sid):
         core.recompute_subscription(c, sid)
         # If the standing slot changed, re-point any still-Pending order rows (unless a
         # temporary slot move is overriding them) so today/future show the right slot.
-        core.resync_pending_slots(c, sid)
+        core.resync_order_slots(c, sid)
         # Keep the denormalised name on any future delivery rows correct too.
         c.execute("UPDATE deliveries SET name=?, customer_id=? WHERE subscription_id=?",
                   (cust["name"] if cust else sub["customer_name"],
