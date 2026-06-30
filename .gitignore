@@ -2,6 +2,7 @@
 oggainz.db
 oggainz.db-wal
 oggainz.db-shm
+*.bak
 backups/
 exports/
 _import_source/

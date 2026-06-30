@@ -463,7 +463,8 @@ def run_import(explicit=None, wipe=True):
 
     conn = db.init_db()
     if wipe:
-        for t in ("deliveries", "subscriptions", "trial_orders", "customers"):
+        for t in ("deliveries", "subscriptions", "trial_orders", "customers",
+                  "subscription_pauses", "subscription_slot_moves"):
             conn.execute(f"DELETE FROM {t}")
         conn.commit()
 

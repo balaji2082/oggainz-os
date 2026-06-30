@@ -81,6 +81,195 @@ def is_operating_day(conn, day_iso):
 
 
 # ---------------------------------------------------------------------------
+# Pause / freeze windows
+# ---------------------------------------------------------------------------
+# A subscription can be frozen for one or more date ranges (see subscription_pauses).
+# While a window covers a day, that day's order is NOT generated and no meal is
+# consumed (remaining meals carry forward). A window with no end_date is open-ended
+# (paused until manually resumed). Keeping the window on file — even after it ends —
+# is what stops the previously paused days from re-appearing as Pending orders.
+
+def _today_iso():
+    return date.today().strftime("%Y-%m-%d")
+
+
+def is_paused_on(conn, sub_id, day_iso):
+    """True if this subscription has a pause window covering `day_iso`."""
+    return conn.execute(
+        "SELECT 1 FROM subscription_pauses WHERE subscription_id=? AND start_date<=? "
+        "AND (end_date IS NULL OR end_date>=?) LIMIT 1",
+        (sub_id, day_iso, day_iso)).fetchone() is not None
+
+
+def pauses_for(conn, sub_id):
+    return conn.execute(
+        "SELECT * FROM subscription_pauses WHERE subscription_id=? "
+        "ORDER BY start_date DESC, id DESC", (sub_id,)).fetchall()
+
+
+def current_pause(conn, sub_id, day_iso=None):
+    """The pause window covering `day_iso` (default today), or None."""
+    day_iso = day_iso or _today_iso()
+    return conn.execute(
+        "SELECT * FROM subscription_pauses WHERE subscription_id=? AND start_date<=? "
+        "AND (end_date IS NULL OR end_date>=?) ORDER BY start_date DESC LIMIT 1",
+        (sub_id, day_iso, day_iso)).fetchone()
+
+
+def _purge_pending_in_range(conn, sub_id, start_iso, end_iso=None):
+    """Drop still-Pending auto rows for a sub inside [start, end] (end open if None).
+    Delivered/Skipped history is never touched."""
+    if end_iso:
+        conn.execute("DELETE FROM deliveries WHERE subscription_id=? AND status='Pending' "
+                     "AND date>=? AND date<=?", (sub_id, start_iso, end_iso))
+    else:
+        conn.execute("DELETE FROM deliveries WHERE subscription_id=? AND status='Pending' "
+                     "AND date>=?", (sub_id, start_iso))
+
+
+def add_pause(conn, sub_id, start_iso, end_iso=None, reason=""):
+    """Freeze a subscription for [start, end] (end None = open-ended). Removes any
+    Pending orders already sitting inside the window so they stop showing."""
+    conn.execute(
+        "INSERT INTO subscription_pauses(subscription_id,start_date,end_date,reason,created_at) "
+        "VALUES(?,?,?,?,?)", (sub_id, start_iso, end_iso or None, (reason or "").strip() or None,
+                              db.now_iso()))
+    _purge_pending_in_range(conn, sub_id, start_iso, end_iso)
+    conn.commit()
+    recompute_subscription(conn, sub_id)
+
+
+def update_pause(conn, pause_id, start_iso, end_iso=None, reason=""):
+    p = conn.execute("SELECT * FROM subscription_pauses WHERE id=?", (pause_id,)).fetchone()
+    if not p:
+        return
+    sub_id = p["subscription_id"]
+    conn.execute("UPDATE subscription_pauses SET start_date=?, end_date=?, reason=? WHERE id=?",
+                 (start_iso, end_iso or None, (reason or "").strip() or None, pause_id))
+    _purge_pending_in_range(conn, sub_id, start_iso, end_iso)
+    conn.commit()
+    recompute_subscription(conn, sub_id)
+
+
+def delete_pause(conn, pause_id):
+    p = conn.execute("SELECT subscription_id FROM subscription_pauses WHERE id=?",
+                     (pause_id,)).fetchone()
+    conn.execute("DELETE FROM subscription_pauses WHERE id=?", (pause_id,))
+    conn.commit()
+    if p:
+        recompute_subscription(conn, p["subscription_id"])
+
+
+def resume_subscription(conn, sub_id, resume_iso=None):
+    """Resume meals from `resume_iso` (default today): trim the covering pause window
+    so its last paused day is the day before, and cancel any window that starts on/after
+    the resume date. Fully-past windows are left intact as history."""
+    resume_iso = resume_iso or _today_iso()
+    last_paused = (datetime.strptime(resume_iso, "%Y-%m-%d").date()
+                   - timedelta(days=1)).strftime("%Y-%m-%d")
+    for p in conn.execute(
+            "SELECT * FROM subscription_pauses WHERE subscription_id=? "
+            "AND (end_date IS NULL OR end_date>=?)", (sub_id, resume_iso)).fetchall():
+        if p["start_date"] >= resume_iso:
+            conn.execute("DELETE FROM subscription_pauses WHERE id=?", (p["id"],))   # not started yet
+        elif p["start_date"] <= last_paused:
+            conn.execute("UPDATE subscription_pauses SET end_date=? WHERE id=?",
+                         (last_paused, p["id"]))                                       # trim to yesterday
+        else:
+            conn.execute("DELETE FROM subscription_pauses WHERE id=?", (p["id"],))     # would be empty
+    conn.commit()
+    recompute_subscription(conn, sub_id)
+
+
+def refresh_pause_statuses(conn):
+    """Re-sync the stored status of any subscription whose pause window has just
+    started or just ended (so a fixed 1-week freeze flips back to Active on its own
+    once the dates pass). Cheap: only touches rows that are out of step."""
+    today_iso = _today_iso()
+    changed = False
+    for r in conn.execute("SELECT id, status FROM subscriptions").fetchall():
+        paused = is_paused_on(conn, r["id"], today_iso)
+        if paused and r["status"] != "Paused":
+            recompute_subscription(conn, r["id"], commit=False); changed = True
+        elif (not paused) and r["status"] == "Paused":
+            recompute_subscription(conn, r["id"], commit=False); changed = True
+    if changed:
+        conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Slot moves (temporary Lunch <-> Dinner for a date range)
+# ---------------------------------------------------------------------------
+def slot_moves_for(conn, sub_id):
+    return conn.execute(
+        "SELECT * FROM subscription_slot_moves WHERE subscription_id=? "
+        "ORDER BY start_date DESC, id DESC", (sub_id,)).fetchall()
+
+
+def current_slot_move(conn, sub_id, day_iso=None):
+    day_iso = day_iso or _today_iso()
+    return conn.execute(
+        "SELECT * FROM subscription_slot_moves WHERE subscription_id=? AND start_date<=? "
+        "AND (end_date IS NULL OR end_date>=?) ORDER BY start_date DESC LIMIT 1",
+        (sub_id, day_iso, day_iso)).fetchone()
+
+
+def effective_slot(conn, sub_id, day_iso, base_slot):
+    """The slot a subscription delivers in on `day_iso`: a covering slot-move wins,
+    otherwise the subscription's own standing slot."""
+    mv = conn.execute(
+        "SELECT slot FROM subscription_slot_moves WHERE subscription_id=? AND start_date<=? "
+        "AND (end_date IS NULL OR end_date>=?) ORDER BY start_date DESC LIMIT 1",
+        (sub_id, day_iso, day_iso)).fetchone()
+    return (mv["slot"] if mv else None) or base_slot or "Lunch"
+
+
+def resync_pending_slots(conn, sub_id):
+    """Point every still-Pending order row for a sub at its effective slot. Called
+    after a slot move is added/edited/removed or the sub's base slot changes, so the
+    already-generated rows (today + any future) flip to the right slot immediately.
+    Delivered/Skipped rows are left as the record of what actually happened."""
+    sub = conn.execute("SELECT slot FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
+    base = (sub["slot"] if sub else None) or "Lunch"
+    for r in conn.execute(
+            "SELECT id, date FROM deliveries WHERE subscription_id=? AND status='Pending'",
+            (sub_id,)).fetchall():
+        slot = effective_slot(conn, sub_id, r["date"], base)
+        conn.execute("UPDATE deliveries SET meal_type=? WHERE id=?", (slot, r["id"]))
+    conn.commit()
+
+
+def add_slot_move(conn, sub_id, slot, start_iso, end_iso=None, reason=""):
+    conn.execute(
+        "INSERT INTO subscription_slot_moves(subscription_id,start_date,end_date,slot,reason,created_at) "
+        "VALUES(?,?,?,?,?,?)", (sub_id, start_iso, end_iso or None, slot,
+                                (reason or "").strip() or None, db.now_iso()))
+    conn.commit()
+    resync_pending_slots(conn, sub_id)
+
+
+def update_slot_move(conn, move_id, slot, start_iso, end_iso=None, reason=""):
+    mv = conn.execute("SELECT subscription_id FROM subscription_slot_moves WHERE id=?",
+                      (move_id,)).fetchone()
+    if not mv:
+        return
+    conn.execute("UPDATE subscription_slot_moves SET slot=?, start_date=?, end_date=?, reason=? "
+                 "WHERE id=?", (slot, start_iso, end_iso or None,
+                                (reason or "").strip() or None, move_id))
+    conn.commit()
+    resync_pending_slots(conn, mv["subscription_id"])
+
+
+def delete_slot_move(conn, move_id):
+    mv = conn.execute("SELECT subscription_id FROM subscription_slot_moves WHERE id=?",
+                      (move_id,)).fetchone()
+    conn.execute("DELETE FROM subscription_slot_moves WHERE id=?", (move_id,))
+    conn.commit()
+    if mv:
+        resync_pending_slots(conn, mv["subscription_id"])
+
+
+# ---------------------------------------------------------------------------
 # Subscription recompute
 # ---------------------------------------------------------------------------
 def recompute_subscription(conn, sub_id, commit=True):
@@ -100,14 +289,17 @@ def recompute_subscription(conn, sub_id, commit=True):
     scheduled = sub["total_meals_scheduled"] or 0
     remaining = max(scheduled - delivered, 0)
 
-    status = sub["status"]
-    if status != "Paused":  # never override a manual pause
-        if scheduled and delivered >= scheduled:
-            status = "Completed"
-        elif 0 < remaining <= ending_soon_threshold(conn):
-            status = "Ending Soon"
-        else:
-            status = "Active"
+    # Pause is now driven by date windows (subscription_pauses): the sub shows as
+    # Paused only while a window covers *today*. A finished freeze flips back to its
+    # real state on its own; an open-ended freeze stays Paused until resumed.
+    if is_paused_on(conn, sub_id, _today_iso()):
+        status = "Paused"
+    elif scheduled and delivered >= scheduled:
+        status = "Completed"
+    elif 0 < remaining <= ending_soon_threshold(conn):
+        status = "Ending Soon"
+    else:
+        status = "Active"
 
     conn.execute(
         "UPDATE subscriptions SET delivered_count=?, skipped_count=?, remaining_meals=?, "
@@ -137,23 +329,30 @@ def ensure_day_rows(conn, day_iso):
         return 0
     month_label = datetime.strptime(day_iso, "%Y-%m-%d").strftime("%b-%Y")
     created = 0
+    # Include Paused subs too: a sub frozen for a fixed range is still 'Paused' in the
+    # stored status after its window ends, so we lean on is_paused_on(day) per-day to
+    # decide. That way a finished freeze starts generating orders again automatically,
+    # and an open-ended freeze keeps skipping until it is resumed.
     subs = conn.execute(
-        "SELECT * FROM subscriptions WHERE status IN ('Active','Ending Soon') "
+        "SELECT * FROM subscriptions WHERE status IN ('Active','Ending Soon','Paused') "
         "AND remaining_meals > 0 AND (start_date IS NULL OR start_date<=?)",
         (day_iso,),
     ).fetchall()
     for s in subs:
+        if is_paused_on(conn, s["id"], day_iso):     # frozen this day → no order
+            continue
         exists = conn.execute(
             "SELECT 1 FROM deliveries WHERE subscription_id=? AND date=?",
             (s["id"], day_iso),
         ).fetchone()
         if exists:
             continue
+        slot = effective_slot(conn, s["id"], day_iso, s["slot"])
         conn.execute(
             "INSERT INTO deliveries(date,subscription_id,customer_id,name,meal_type,status,month,notes,created_at) "
             "VALUES(?,?,?,?,?,?,?,?,?)",
             (day_iso, s["id"], s["customer_id"], s["customer_name"],
-             s["slot"] or "Lunch", "Pending", month_label, s["plan_name"], db.now_iso()),
+             slot, "Pending", month_label, s["plan_name"], db.now_iso()),
         )
         created += 1
     if created:
@@ -215,6 +414,23 @@ def deliveries_for_day(conn, day_iso):
         "WHERE d.date=? ORDER BY (d.meal_type='Dinner'), d.name",
         (day_iso,),
     ).fetchall()
+
+
+def set_delivery_note(conn, delivery_id, text):
+    """Save (or clear) the one-off note for a single day's delivery row.
+
+    This is the per-order note for THAT date only — e.g. "deliver to dinner today",
+    "swapped to Royal at same price", "no honey", "less oil – stomach upset". It stays
+    on the row forever, so browsing that date (or the customer's delivery history) later
+    shows exactly what happened. Empty text clears the note.
+    """
+    text = (text or "").strip() or None
+    conn.execute(
+        "UPDATE deliveries SET day_note=?, day_note_at=? WHERE id=?",
+        (text, db.now_iso() if text else None, delivery_id),
+    )
+    conn.commit()
+    return text
 
 
 def mark_delivery(conn, delivery_id, status):
@@ -282,6 +498,33 @@ def headline_stats(conn):
     }
 
 
+def outstanding_detail(conn):
+    """Everything still owed, itemised so the Revenue 'To collect' box can drill down
+    the same way the home page does: each unpaid subscription (with its pending amount)
+    and each unpaid trial, both linking back to the order. Totals match
+    headline_stats['pending_all']."""
+    subs = []
+    for r in conn.execute(
+        "SELECT id, customer_id, customer_name, plan_name, "
+        "       COALESCE(total_amount,0)-COALESCE(amount_received,0) AS pending, payment_status "
+        "FROM subscriptions WHERE payment_status!='Paid' "
+        "AND COALESCE(total_amount,0)-COALESCE(amount_received,0) > 0 "
+        "ORDER BY pending DESC").fetchall():
+        subs.append(dict(r))
+    trials = []
+    for r in conn.execute(
+        "SELECT id, name, order_text, COALESCE(amount,0) AS pending "
+        "FROM trial_orders WHERE payment_status!='Paid' AND COALESCE(amount,0) > 0 "
+        "ORDER BY date DESC, id DESC").fetchall():
+        trials.append(dict(r))
+    sub_total = sum(s["pending"] for s in subs)
+    trial_total = sum(t["pending"] for t in trials)
+    return {"subs": subs, "trials": trials,
+            "sub_total": sub_total, "trial_total": trial_total,
+            "total": sub_total + trial_total,
+            "sub_n": len(subs), "trial_n": len(trials)}
+
+
 def month_label_iso(day_iso=None):
     d = datetime.strptime(day_iso, "%Y-%m-%d").date() if day_iso else date.today()
     return d.strftime("%b-%Y")
@@ -305,7 +548,8 @@ def _delivered_meal_rows(conn):
         "SELECT d.id, d.date, d.meal_type, d.subscription_id, d.trial_id, "
         "       COALESCE(s.customer_name, t.name, d.name) AS name, "
         "       COALESCE(s.plan_name, t.order_text, d.notes) AS label, "
-        "       s.total_amount AS sub_total, s.total_meals_scheduled AS sub_meals, "
+        "       s.subscription_price AS sub_price, s.delivery_fee AS sub_fee, "
+        "       s.total_meals_scheduled AS sub_meals, "
         "       t.amount AS trial_amount "
         "FROM deliveries d "
         "LEFT JOIN subscriptions s ON s.id = d.subscription_id "
@@ -320,21 +564,26 @@ def _delivered_meal_rows(conn):
 
     out = []
     for r in rows:
+        # Split each delivered meal into food vs delivery so the views can show them
+        # separately. A pack's delivery fee is the whole-pack figure, so the per-meal
+        # delivery share is fee ÷ meals (e.g. ₹1200 / 20 = ₹60 a delivery).
         if r["subscription_id"]:
             meals = r["sub_meals"] or 0
-            value = round((r["sub_total"] or 0) / meals) if meals else 0
+            food = round((r["sub_price"] or 0) / meals) if meals else 0
+            deliv = round((r["sub_fee"] or 0) / meals) if meals else 0
             source = "sub"
         elif r["trial_id"]:
             n = trial_counts.get(r["trial_id"], 1) or 1
-            value = round((r["trial_amount"] or 0) / n)
+            food = round((r["trial_amount"] or 0) / n)
+            deliv = 0
             source = "trial"
         else:
-            value, source = 0, "other"
+            food, deliv, source = 0, 0, "other"
         out.append({
             "id": r["id"], "day": str(r["date"])[:10],
             "name": r["name"] or "—", "label": r["label"] or "",
             "meal_type": r["meal_type"] or "Lunch",
-            "source": source, "value": value,
+            "source": source, "value": food + deliv, "food": food, "delivery": deliv,
             "sub_id": r["subscription_id"], "trial_id": r["trial_id"],
         })
     return out
@@ -342,11 +591,13 @@ def _delivered_meal_rows(conn):
 
 def _blank_bucket():
     return {"sub_sales": 0, "trial_sales": 0, "sub_meals": 0,
-            "trial_meals": 0, "delivered": 0}
+            "trial_meals": 0, "delivered": 0, "food": 0, "delivery": 0}
 
 
 def _add_meal(bucket, m):
     bucket["delivered"] += 1
+    bucket["food"] += m["food"]
+    bucket["delivery"] += m["delivery"]
     if m["source"] == "trial":
         bucket["trial_sales"] += m["value"]; bucket["trial_meals"] += 1
     else:
@@ -389,6 +640,7 @@ def daily_view(conn, limit=30, month=None):
             "orders": day_items, "total": b["overall"],
             "sub_total": b["sub_sales"], "trial_total": b["trial_sales"],
             "sub_meals": b["sub_meals"], "trial_meals": b["trial_meals"],
+            "food": b["food"], "delivery": b["delivery"],
             "count": b["delivered"],
         }
     return days, details, earned
@@ -535,6 +787,8 @@ def _subscription_sale_rows(conn):
         "SELECT id, customer_id, customer_name, plan_name, duration, "
         "       COALESCE(NULLIF(booking_date,''), start_date) AS sale_date, "
         "       COALESCE(total_amount,0)    AS value, "
+        "       COALESCE(subscription_price,0) AS food, "
+        "       COALESCE(delivery_fee,0)    AS delivery, "
         "       COALESCE(amount_received,0) AS received, "
         "       payment_status, status "
         "FROM subscriptions").fetchall()
@@ -547,6 +801,7 @@ def _subscription_sale_rows(conn):
             "day": str(r["sale_date"])[:10],
             "name": r["customer_name"] or "—", "plan": r["plan_name"] or "—",
             "duration": r["duration"] or "", "value": r["value"],
+            "food": r["food"], "delivery": r["delivery"],
             "received": r["received"], "payment_status": r["payment_status"] or "Unpaid",
             "status": r["status"] or "",
         })
@@ -554,11 +809,11 @@ def _subscription_sale_rows(conn):
 
 
 def _sales_blank():
-    return {"count": 0, "value": 0, "received": 0}
+    return {"count": 0, "value": 0, "received": 0, "food": 0, "delivery": 0}
 
 
 def subs_sold_breakdown(conn, period, limit=None, month=None):
-    """Subscription-sales buckets oldest→newest: [{key,count,value,received}].
+    """Subscription-sales buckets oldest→newest: [{key,count,value,food,delivery,received}].
     period in {'day','week','month'}. `month` scopes day/week to one month."""
     from collections import defaultdict
     buckets = defaultdict(_sales_blank)
@@ -566,6 +821,8 @@ def subs_sold_breakdown(conn, period, limit=None, month=None):
         b = buckets[_period_key(s["day"], period)]
         b["count"] += 1
         b["value"] += s["value"]
+        b["food"] += s["food"]
+        b["delivery"] += s["delivery"]
         b["received"] += s["received"]
     keys = sorted(buckets.keys(), key=(_mkey if period == "month" else (lambda k: k)))
     out = []
@@ -583,6 +840,8 @@ def subs_sold_detail(conn, period, key):
     # resolve `.items` to dict.items rather than this list.
     return {"rows": rows, "count": len(rows),
             "value": sum(s["value"] for s in rows),
+            "food": sum(s["food"] for s in rows),
+            "delivery": sum(s["delivery"] for s in rows),
             "received": sum(s["received"] for s in rows)}
 
 
@@ -591,8 +850,12 @@ def monthly_revenue(conn):
 
     This is the real money sold (what Balaji calls revenue), as opposed to the
     day/week views which show a delivered-meal *estimate*. Subscriptions are dated
-    by booking_date (→ start_date), trials by their own month. Returns one row per
+    by booking_date (→ start_date), trials by their own month. Each row also carries
+    the food/delivery split of what was sold AND the value of meals actually
+    *delivered* that month (the food-orders estimate), so the month view can show
+    'subscriptions sold' next to 'food actually delivered'. Returns one row per
     month oldest→newest with month-on-month growth on revenue."""
+    from collections import defaultdict
     subs = {b["key"]: b for b in subs_sold_breakdown(conn, "month")}
     trials = {}
     for r in conn.execute("SELECT month, COUNT(*) n, COALESCE(SUM(amount),0) amt, "
@@ -600,11 +863,17 @@ def monthly_revenue(conn):
                           "FROM trial_orders WHERE month IS NOT NULL GROUP BY month").fetchall():
         trials[r["month"]] = {"n": r["n"], "amt": r["amt"], "recv": r["recv"]}
 
-    keys = sorted(set(list(subs.keys()) + list(trials.keys())), key=_mkey)
+    # Value of meals actually delivered, bucketed by the month they were delivered in.
+    delivered = defaultdict(_blank_bucket)
+    for m in _delivered_meal_rows(conn):
+        _add_meal(delivered[datetime.strptime(m["day"], "%Y-%m-%d").strftime("%b-%Y")], m)
+
+    keys = sorted(set(list(subs.keys()) + list(trials.keys()) + list(delivered.keys())), key=_mkey)
     out, prev = [], None
     for k in keys:
         s = subs.get(k) or {}
         t = trials.get(k) or {}
+        dl = delivered.get(k) or _blank_bucket()
         sub_value = s.get("value", 0) or 0
         trial_value = t.get("amt", 0) or 0
         revenue = sub_value + trial_value
@@ -612,8 +881,11 @@ def monthly_revenue(conn):
         growth = None if prev is None else ((revenue - prev) / prev if prev else None)
         out.append({
             "month": k, "sub_value": sub_value, "sub_count": s.get("count", 0) or 0,
+            "sub_food": s.get("food", 0) or 0, "sub_delivery": s.get("delivery", 0) or 0,
             "trial_value": trial_value, "trial_count": t.get("n", 0) or 0,
             "revenue": revenue, "received": received, "growth": growth,
+            "deliv_value": dl["sub_sales"] + dl["trial_sales"], "deliv_meals": dl["delivered"],
+            "deliv_food": dl["food"], "deliv_delivery": dl["delivery"],
         })
         prev = revenue
     return out
@@ -630,6 +902,7 @@ def delivered_detail(conn, period, key):
     return {
         "orders": rows, "total": sub_total + trial_total,
         "sub_total": sub_total, "trial_total": trial_total,
+        "food": sum(m["food"] for m in rows), "delivery": sum(m["delivery"] for m in rows),
         "sub_meals":   sum(1 for m in rows if m["source"] != "trial"),
         "trial_meals": sum(1 for m in rows if m["source"] == "trial"),
         "count": len(rows),
@@ -668,10 +941,14 @@ def resequence_subscriptions(conn):
         for i, old in enumerate(ordered):          # pass 1: park everything in temp space
             tmp = f"__SEQ_{i}"
             conn.execute("UPDATE deliveries SET subscription_id=? WHERE subscription_id=?", (tmp, old))
+            conn.execute("UPDATE subscription_pauses SET subscription_id=? WHERE subscription_id=?", (tmp, old))
+            conn.execute("UPDATE subscription_slot_moves SET subscription_id=? WHERE subscription_id=?", (tmp, old))
             conn.execute("UPDATE subscriptions SET id=? WHERE id=?", (tmp, old))
         for i, old in enumerate(ordered):          # pass 2: temp -> final contiguous id
             tmp, new = f"__SEQ_{i}", target[old]
             conn.execute("UPDATE deliveries SET subscription_id=? WHERE subscription_id=?", (new, tmp))
+            conn.execute("UPDATE subscription_pauses SET subscription_id=? WHERE subscription_id=?", (new, tmp))
+            conn.execute("UPDATE subscription_slot_moves SET subscription_id=? WHERE subscription_id=?", (new, tmp))
             conn.execute("UPDATE subscriptions SET id=? WHERE id=?", (new, tmp))
         conn.commit()
     finally:
@@ -687,6 +964,8 @@ def delete_subscription(conn, sid):
     if not conn.execute("SELECT 1 FROM subscriptions WHERE id=?", (sid,)).fetchone():
         return False
     conn.execute("DELETE FROM deliveries WHERE subscription_id=?", (sid,))
+    conn.execute("DELETE FROM subscription_pauses WHERE subscription_id=?", (sid,))
+    conn.execute("DELETE FROM subscription_slot_moves WHERE subscription_id=?", (sid,))
     conn.execute("DELETE FROM subscriptions WHERE id=?", (sid,))
     conn.commit()
     resequence_subscriptions(conn)

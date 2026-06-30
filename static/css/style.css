@@ -138,7 +138,16 @@ h3{font-size:1rem; font-weight:700}
   font-size:1.1rem; transition:.12s}
 .iconbtn.deliver.on{background:var(--lime); border-color:var(--lime); color:#fff}
 .iconbtn.skip.on{background:var(--orange); border-color:var(--orange); color:#fff}
+.iconbtn.note.on{background:#ffe9a8; border-color:#f0d27a}
 .iconbtn:active{transform:scale(.92)}
+/* Per-order note: the saved line + the inline editor */
+.drow .daynote{font-size:.8rem; color:#8a6d00; background:#fffbe8; border:1px solid #f0e3b8;
+  border-radius:8px; padding:4px 9px; margin-top:5px; display:inline-block; max-width:100%;
+  word-break:break-word}
+.drow .note-editor{margin-top:7px}
+.drow .note-input{width:100%; font:inherit; padding:8px 10px; border:1.5px solid var(--line);
+  border-radius:10px; resize:vertical; box-sizing:border-box}
+.drow .note-acts{display:flex; gap:7px; margin-top:6px}
 
 /* ---------- Lists / tables ---------- */
 .list{display:flex; flex-direction:column; gap:10px}
@@ -616,4 +625,89 @@ tr.rowlink:hover{background:var(--cream)}
   .cmp-k{flex-basis:80px; font-size:.8rem}
   .cmp-v{min-width:88px; font-size:.86rem}
   .month-pick{flex:1 1 auto; justify-content:center}
+}
+
+/* ===========================================================================
+   v7 — slot moves, freeze/pause windows, revenue this-month hero + drill-downs
+   =========================================================================== */
+
+/* --- Subscription state banners (frozen / slot moved) --- */
+.state-banner{display:flex; gap:9px; align-items:flex-start; margin-top:11px; padding:10px 12px;
+  border-radius:var(--r-sm); font-size:.85rem; line-height:1.45}
+.state-banner span:first-child{font-size:1.05rem; line-height:1}
+.state-pause{background:#eef3fb; border:1px solid #d3e0f3; color:#33507e}
+.state-move{background:#fff4e6; border:1px solid #f6dcbf; color:#9c5a18}
+
+/* --- Compact inline forms for windows (pause / slot move / renew) --- */
+.mini-grid{display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end}
+.mini-grid>div{flex:1 1 120px; min-width:0}
+.mini-grid .grow{flex:2 1 180px}
+.mini-grid .mini-act{flex:0 0 auto; align-self:flex-end}
+.mini-l{display:block; font-size:.72rem; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--muted); font-weight:700; margin-bottom:4px}
+.mini-grid input,.mini-grid select{width:100%}
+.rowform{display:flex; gap:8px; align-items:center; margin:0}
+.rowform input[type=date]{width:auto}
+
+/* --- Window list (existing freezes / slot moves) --- */
+.window-list{margin-top:13px; display:flex; flex-direction:column; gap:9px;
+  border-top:1px solid var(--line); padding-top:13px}
+.winrow{border:1px solid var(--line); border-radius:var(--r-sm); background:#fcfdfc; overflow:hidden}
+.winrow>summary{list-style:none; cursor:pointer; display:flex; align-items:center; gap:9px;
+  padding:11px 13px; font-size:.86rem}
+.winrow>summary::-webkit-details-marker{display:none}
+.winrow .win-dates{font-weight:700; color:var(--forest)}
+.winrow .win-reason{color:var(--muted); font-size:.8rem}
+.winrow .chev{color:var(--muted); font-size:1.15rem; transition:transform .2s}
+.winrow[open] .chev{transform:rotate(90deg)}
+.winrow[open]>summary{border-bottom:1px solid var(--line); background:#f4f8f5}
+.winrow>form{padding:0 13px 12px}
+.winrow .window-list{margin-top:0}
+
+/* --- Renew disclosure --- */
+.renew-box{margin-top:12px}
+.renew-box>summary{list-style:none; cursor:pointer; display:inline-block}
+.renew-box>summary::-webkit-details-marker{display:none}
+.renew-box[open]>summary{margin-bottom:4px}
+
+/* --- Revenue: this-month hero --- */
+.month-hero{background:linear-gradient(140deg,var(--forest),var(--forest-2));
+  border:none; color:#fff; box-shadow:var(--shadow-lg)}
+.month-hero .mh-top{display:flex; align-items:center; gap:8px}
+.month-hero .mh-label{font-size:.74rem; text-transform:uppercase; letter-spacing:.1em;
+  color:var(--lime-e); font-weight:700}
+.month-hero .mh-figure{font-size:2.6rem; font-weight:800; line-height:1.05; margin:6px 0 2px}
+.month-hero .mh-cap{font-size:.78rem; color:#bfe6d2}
+.month-hero .mh-stats{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:15px}
+.month-hero .mh-stat{background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.12);
+  border-radius:var(--r-sm); padding:10px 11px; display:flex; flex-direction:column; gap:2px}
+.month-hero .mh-stat.hl{background:rgba(197,232,75,.16); border-color:rgba(197,232,75,.3)}
+.month-hero .mh-k{font-size:.66rem; text-transform:uppercase; letter-spacing:.05em; color:#cde6d9; font-weight:700}
+.month-hero .mh-v{font-size:1.2rem; font-weight:800; color:#fff; line-height:1.1}
+.month-hero .mh-n{font-size:.68rem; color:#a9d6bf}
+.month-hero .growth.up{color:var(--lime-e)} .month-hero .growth.down{color:#ffb3a8}
+.month-hero .btn-forest{background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.2)}
+
+/* Food vs delivery split strip */
+.split-strip{display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:13px; padding:10px 12px;
+  border-radius:var(--r-sm); background:rgba(255,255,255,.08); font-size:.82rem}
+.month-hero .split-strip b{color:#fff}
+.split-strip.in-card{background:#f3f8f5; border:1px solid var(--line); color:var(--ink)}
+.split-strip.in-card b{color:var(--forest)}
+
+/* Revenue tap-to-open boxes */
+.rev-boxes{display:flex; flex-direction:column; gap:10px; margin-bottom:14px}
+.disc-rev>summary{background:linear-gradient(135deg,#eef7f0,#e4f1ea)}
+.disc-ok{border-color:#d5efdf}
+.disc-ok>summary{background:#f2fbf5; color:#147a37}
+.insight-card-in{display:flex; gap:18px; align-items:center; flex-wrap:wrap}
+.oc-head{font-size:.82rem; color:var(--muted); font-weight:700; margin:2px 0 4px}
+.oc-head b{color:var(--forest)}
+
+@media(max-width:560px){
+  .month-hero .mh-figure{font-size:2.1rem}
+  .month-hero .mh-stats{grid-template-columns:1fr 1fr}
+  .month-hero .mh-stat.hl{grid-column:1 / -1}
+  .mini-grid .mini-act{flex:1 1 100%}
+  .mini-grid .mini-act .btn{width:100%}
 }

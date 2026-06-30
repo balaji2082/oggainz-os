@@ -28,6 +28,19 @@
   <div class="small muted">{{ sub.delivered_count or 0 }}/{{ sub.total_meals_scheduled }} delivered ·
     <b style="color:var(--forest)">{{ sub.remaining_meals or 0 }} meals left</b>
     {% if sub.skipped_count %} · {{ sub.skipped_count }} skipped (carried forward){% endif %}</div>
+
+  {% if cur_pause %}
+  <div class="state-banner state-pause">
+    <span>❄️</span>
+    <span>Frozen{% if cur_pause.end_date %} through <b>{{ cur_pause.end_date|fdate('%d %b') }}</b> (last paused day){% else %} (open-ended — resume when ready){% endif %}{% if cur_pause.reason %} · {{ cur_pause.reason }}{% endif %}. No orders these days; meals carry forward.</span>
+  </div>
+  {% endif %}
+  {% if cur_move %}
+  <div class="state-banner state-move">
+    <span>🔀</span>
+    <span>Delivering in <b>{{ cur_move.slot }}</b>{% if cur_move.end_date %} until <b>{{ cur_move.end_date|fdate('%d %b') }}</b>{% endif %} instead of {{ sub.slot }}{% if cur_move.reason %} · {{ cur_move.reason }}{% endif %}.</span>
+  </div>
+  {% endif %}
 </div>
 
 <div class="row">
@@ -36,7 +49,10 @@
     <div class="kvs">
       <div class="k">Plan</div><div>{{ sub.plan_name }}</div>
       <div class="k">Duration</div><div>{{ sub.duration }}</div>
-      <div class="k">Slot</div><div>{{ sub.slot }} {% if sub.preferred_timing %}· {{ sub.preferred_timing }}{% endif %}</div>
+      <div class="k">Slot</div><div>{{ sub.slot }}
+        {% if cur_move %}<span class="chip chip-{{ cur_move.slot|lower }} chip-xs">now {{ cur_move.slot }}</span>{% endif %}
+        {% if sub.preferred_timing %}· {{ sub.preferred_timing }}{% endif %}</div>
+      <div class="k">Booking</div><div>{{ sub.booking_date|fdate('%d %b %Y') or '—' }}</div>
       <div class="k">Start</div><div>{{ sub.start_date|fdate('%d %b %Y') }}</div>
       <div class="k">Last delivery</div><div>{{ sub.last_delivery_date|fdate('%d %b %Y') or '—' }}</div>
       {% if sub.notes %}<div class="k">Notes</div><div>{{ sub.notes }}</div>{% endif %}
@@ -46,8 +62,9 @@
   <div class="col card">
     <h3>Payment</h3>
     <div class="kvs">
-      <div class="k">Price</div><div>{{ sub.subscription_price|inr }}</div>
-      <div class="k">Delivery fee</div><div>{{ sub.delivery_fee|inr }}</div>
+      <div class="k">Food</div><div>{{ sub.subscription_price|inr }}</div>
+      <div class="k">Delivery fee</div><div>{{ sub.delivery_fee|inr }}
+        {% if sub.delivery_fee and sub.total_meals_scheduled %}<span class="muted small">(₹{{ (sub.delivery_fee/sub.total_meals_scheduled)|round(0,'common')|int }}/delivery)</span>{% endif %}</div>
       <div class="k">Total</div><div><b>{{ sub.total_amount|inr }}</b></div>
       <div class="k">Received</div><div>{{ sub.amount_received|inr }}</div>
       <div class="k">Status</div><div>
@@ -63,24 +80,140 @@
   </div>
 </div>
 
+{# ============================ Freeze / pause ============================ #}
+<div class="card">
+  <div class="card-title"><h3>❄️ Freeze / pause</h3><span class="spacer"></span>
+    <span class="small muted">skip a day range — meals carry forward</span></div>
+
+  {% if cur_pause %}
+  <div class="alert alert-warn" style="margin-bottom:10px">
+    <span>❄️</span>
+    <span>Currently frozen{% if cur_pause.end_date %} through {{ cur_pause.end_date|fdate('%d %b') }}{% endif %}.</span>
+    <span class="spacer"></span>
+    <form method="post" action="{{ url_for('subscription_pause', sid=sub.id) }}" class="rowform">
+      <input type="hidden" name="action" value="resume">
+      <input type="date" name="resume" value="{{ today }}" title="Resume meals from this day">
+      <button class="btn btn-success btn-sm">Resume</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('subscription_pause', sid=sub.id) }}" class="mini-grid">
+    <input type="hidden" name="action" value="add">
+    <div><label class="mini-l">Freeze from</label>
+      <input type="date" name="start" value="{{ today }}" required></div>
+    <div><label class="mini-l">Until (optional)</label>
+      <input type="date" name="end" placeholder="open-ended"></div>
+    <div class="grow"><label class="mini-l">Reason (optional)</label>
+      <input name="reason" placeholder="e.g. travelling, out of town…"></div>
+    <div class="mini-act"><button class="btn btn-primary btn-sm">Freeze</button></div>
+  </form>
+  <div class="small muted" style="margin-top:8px">Leave “Until” blank to freeze open-ended,
+    then hit Resume when they’re back. Freezing from today removes today’s order too.</div>
+
+  {% if pauses %}
+  <div class="window-list">
+    {% for p in pauses %}
+    <details class="winrow">
+      <summary>
+        <span class="win-dates">{{ p.start_date|fdate('%d %b') }} → {{ p.end_date|fdate('%d %b %Y') if p.end_date else 'open-ended' }}</span>
+        {% if p.reason %}<span class="win-reason">{{ p.reason }}</span>{% endif %}
+        {% if cur_pause and cur_pause.id==p.id %}<span class="chip chip-paused chip-xs">active</span>{% endif %}
+        <span class="spacer"></span><span class="chev">›</span>
+      </summary>
+      <form method="post" action="{{ url_for('subscription_pause', sid=sub.id) }}" class="mini-grid" style="margin-top:10px">
+        <input type="hidden" name="action" value="update"><input type="hidden" name="pid" value="{{ p.id }}">
+        <div><label class="mini-l">From</label><input type="date" name="start" value="{{ p.start_date }}"></div>
+        <div><label class="mini-l">Until</label><input type="date" name="end" value="{{ p.end_date or '' }}"></div>
+        <div class="grow"><label class="mini-l">Reason</label><input name="reason" value="{{ p.reason or '' }}"></div>
+        <div class="mini-act"><button class="btn btn-ghost btn-sm">Save</button></div>
+      </form>
+      <form method="post" action="{{ url_for('subscription_pause', sid=sub.id) }}" style="margin-top:6px"
+            onsubmit="return confirm('Remove this freeze? Those days will run normally again.');">
+        <input type="hidden" name="action" value="delete"><input type="hidden" name="pid" value="{{ p.id }}">
+        <button class="btn btn-danger btn-sm">🗑 Remove this freeze</button>
+      </form>
+    </details>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+{# ============================== Slot move =============================== #}
+<div class="card">
+  <div class="card-title"><h3>🔀 Slot move</h3><span class="spacer"></span>
+    <span class="small muted">deliver in a different slot for a while</span></div>
+
+  <form method="post" action="{{ url_for('subscription_slot_move', sid=sub.id) }}" class="mini-grid">
+    <input type="hidden" name="action" value="add">
+    <div><label class="mini-l">Move to</label>
+      <select name="slot">{% for sl in ['Dinner','Lunch'] %}
+        <option {{ 'selected' if sl != sub.slot }}>{{ sl }}</option>{% endfor %}</select></div>
+    <div><label class="mini-l">From</label><input type="date" name="start" value="{{ today }}" required></div>
+    <div><label class="mini-l">Until (optional)</label><input type="date" name="end" placeholder="until moved back"></div>
+    <div class="grow"><label class="mini-l">Reason (optional)</label>
+      <input name="reason" placeholder="e.g. working this week…"></div>
+    <div class="mini-act"><button class="btn btn-primary btn-sm">Move</button></div>
+  </form>
+  <div class="small muted" style="margin-top:8px">Usual slot is <b>{{ sub.slot }}</b>. The moved days
+    are recorded in the delivery history in their new slot; remove the move to go back.</div>
+
+  {% if slot_moves %}
+  <div class="window-list">
+    {% for mv in slot_moves %}
+    <details class="winrow">
+      <summary>
+        <span class="chip chip-{{ mv.slot|lower }} chip-xs">{{ mv.slot }}</span>
+        <span class="win-dates">{{ mv.start_date|fdate('%d %b') }} → {{ mv.end_date|fdate('%d %b %Y') if mv.end_date else 'open-ended' }}</span>
+        {% if mv.reason %}<span class="win-reason">{{ mv.reason }}</span>{% endif %}
+        {% if cur_move and cur_move.id==mv.id %}<span class="chip chip-active chip-xs">active</span>{% endif %}
+        <span class="spacer"></span><span class="chev">›</span>
+      </summary>
+      <form method="post" action="{{ url_for('subscription_slot_move', sid=sub.id) }}" class="mini-grid" style="margin-top:10px">
+        <input type="hidden" name="action" value="update"><input type="hidden" name="mid" value="{{ mv.id }}">
+        <div><label class="mini-l">Slot</label><select name="slot">{% for sl in ['Lunch','Dinner'] %}
+          <option {{ 'selected' if sl==mv.slot }}>{{ sl }}</option>{% endfor %}</select></div>
+        <div><label class="mini-l">From</label><input type="date" name="start" value="{{ mv.start_date }}"></div>
+        <div><label class="mini-l">Until</label><input type="date" name="end" value="{{ mv.end_date or '' }}"></div>
+        <div class="grow"><label class="mini-l">Reason</label><input name="reason" value="{{ mv.reason or '' }}"></div>
+        <div class="mini-act"><button class="btn btn-ghost btn-sm">Save</button></div>
+      </form>
+      <form method="post" action="{{ url_for('subscription_slot_move', sid=sub.id) }}" style="margin-top:6px"
+            onsubmit="return confirm('Remove this slot move? Future days go back to {{ sub.slot }}.');">
+        <input type="hidden" name="action" value="delete"><input type="hidden" name="mid" value="{{ mv.id }}">
+        <button class="btn btn-danger btn-sm">🗑 Remove this move</button>
+      </form>
+    </details>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+{# =============================== Actions ================================ #}
 <div class="card">
   <h3>Actions</h3>
-  <div class="row" style="gap:8px">
+  <div class="row" style="gap:8px; align-items:center">
     <a class="btn btn-ghost btn-sm" href="{{ url_for('subscription_edit', sid=sub.id) }}">✏ Edit details</a>
-    <form method="post" action="{{ url_for('subscription_renew', sid=sub.id) }}">
-      <button class="btn btn-primary btn-sm">🔄 Renew</button></form>
-    {% if sub.status=='Paused' %}
-    <form method="post" action="{{ url_for('subscription_status', sid=sub.id) }}">
-      <input type="hidden" name="to" value="Active"><button class="btn btn-success btn-sm">Resume</button></form>
-    {% elif sub.status!='Completed' %}
-    <form method="post" action="{{ url_for('subscription_status', sid=sub.id) }}">
-      <input type="hidden" name="to" value="Paused"><button class="btn btn-ghost btn-sm">Pause</button></form>
-    {% endif %}
     {% if sub.status!='Completed' %}
     <form method="post" action="{{ url_for('subscription_status', sid=sub.id) }}">
       <input type="hidden" name="to" value="Completed"><button class="btn btn-ghost btn-sm">Mark completed</button></form>
+    {% else %}
+    <form method="post" action="{{ url_for('subscription_status', sid=sub.id) }}">
+      <input type="hidden" name="to" value="Active"><button class="btn btn-ghost btn-sm">Re-activate</button></form>
     {% endif %}
   </div>
+
+  <details class="renew-box">
+    <summary><span class="btn btn-primary btn-sm">🔄 Renew this pack</span></summary>
+    <form method="post" action="{{ url_for('subscription_renew', sid=sub.id) }}" class="mini-grid" style="margin-top:12px">
+      <div><label class="mini-l">Billing date</label><input type="date" name="booking_date" value="{{ today }}"></div>
+      <div><label class="mini-l">Start date</label><input type="date" name="start_date" value="{{ today }}"></div>
+      <div><label class="mini-l">Received (₹)</label><input type="number" step="1" name="amount_received" value="0"></div>
+      <div class="mini-act"><button class="btn btn-success btn-sm">Create renewal</button></div>
+    </form>
+    <div class="small muted" style="margin-top:6px">Creates a fresh {{ sub.plan_name }} pack
+      ({{ sub.total_amount|inr }}) for {{ sub.customer_name }} billed on the date you choose.</div>
+  </details>
 
   <div class="danger-zone">
     <div class="small muted">Created by mistake? Deleting removes this subscription and its meal
@@ -95,14 +228,15 @@
   <div class="card-title"><h3>Delivery history</h3><span class="spacer"></span>
     <span class="small muted">{{ dels|length }} records</span></div>
   <div class="table-wrap"><table>
-    <tr><th>Date</th><th>Meal</th><th>Status</th></tr>
+    <tr><th>Date</th><th>Meal</th><th>Status</th><th>Note</th></tr>
     {% for d in dels %}
     <tr><td>{{ d.date|fdate('%d %b') }}</td><td>{{ d.meal_type }}</td>
       <td>{% if d.status=='Delivered' %}<span class="chip chip-active">Delivered</span>
         {% elif d.status=='Skipped' %}<span class="chip chip-ending">Skipped</span>
         {% elif d.status=='Off' %}<span class="chip chip-line">Kitchen off</span>
-        {% else %}<span class="chip chip-line">{{ d.status }}</span>{% endif %}</td></tr>
-    {% else %}<tr><td colspan="3" class="muted">No deliveries yet.</td></tr>{% endfor %}
+        {% else %}<span class="chip chip-line">{{ d.status }}</span>{% endif %}</td>
+      <td>{% if d.day_note %}<span title="{{ d.day_note_at }}">📝 {{ d.day_note }}</span>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">No deliveries yet.</td></tr>{% endfor %}
   </table></div>
 </div>
 {% endblock %}

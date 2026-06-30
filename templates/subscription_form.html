@@ -53,17 +53,27 @@
     </div>
 
     <div>
-      <label>Start date</label>
-      <input name="start_date" type="date" value="{{ sub.start_date if sub else today }}">
+      <label>Booking / billing date</label>
+      <input name="booking_date" type="date"
+             value="{{ sub.booking_date if sub else today }}">
+      <div class="small muted" style="margin-top:6px">Revenue is billed on this date.</div>
     </div>
     <div>
-      <label>Subscription price (₹)</label>
-      <input name="subscription_price" type="number" step="1" value="{{ sub.subscription_price if sub else '' }}">
+      <label>Start date</label>
+      <input name="start_date" type="date" value="{{ sub.start_date if sub else today }}">
+      <div class="small muted" style="margin-top:6px">Meals start counting from here.</div>
     </div>
 
     <div>
-      <label>Delivery fee (₹)</label>
-      <input name="delivery_fee" type="number" step="1" value="{{ sub.delivery_fee if sub else 0 }}">
+      <label>Subscription price (₹) — food only</label>
+      <input name="subscription_price" type="number" step="1" id="f_price"
+             value="{{ sub.subscription_price if sub else '' }}" oninput="feeHint()">
+    </div>
+    <div>
+      <label>Delivery fee (₹) — whole pack</label>
+      <input name="delivery_fee" type="number" step="1" id="f_fee"
+             value="{{ sub.delivery_fee if sub else 0 }}" oninput="feeHint()">
+      <div class="small muted" id="fee_hint" style="margin-top:6px"></div>
     </div>
     <div>
       <label>Amount received (₹)</label>
@@ -79,4 +89,18 @@
     <button class="btn btn-primary">{{ 'Save changes' if sub else 'Create subscription' }}</button>
   </div>
 </form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Show the per-delivery delivery fee (whole-pack fee ÷ meals) as a live hint.
+function feeHint(){
+  const fee = parseFloat(document.getElementById('f_fee').value) || 0;
+  const meals = parseInt(document.querySelector('[name=total_meals_scheduled]').value) || 0;
+  const el = document.getElementById('fee_hint');
+  if (fee > 0 && meals > 0) el.textContent = '= ₹' + Math.round(fee/meals) + ' per delivery × ' + meals;
+  else el.textContent = 'Total across the pack (e.g. ₹60 × 20 = ₹1200).';
+}
+feeHint();
+</script>
 {% endblock %}

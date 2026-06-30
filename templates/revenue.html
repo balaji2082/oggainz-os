@@ -4,48 +4,105 @@
 <div class="page-head"><h1>Revenue</h1><span class="spacer"></span>
   <a class="btn btn-ghost btn-sm" href="{{ url_for('export') }}">⬇ Export Excel</a></div>
 
-<!-- All-time revenue tiles (Revenue = subscriptions + trials sold) -->
-<div class="tiles tiles-3" style="margin-bottom:14px">
-  <div class="tile dark tile-hero">
-    <div class="k">Revenue</div>
-    <div class="v">{{ stats.overall|inr }}</div>
-    <div class="tap" style="color:var(--lime-e)">subscriptions + trials</div>
-  </div>
-  <div class="tile accent">
-    <div class="k">Received</div>
-    <div class="v">{{ stats.received_all|inr }}</div>
-    <div class="tap" style="color:#eafff1">cash collected</div>
-  </div>
-  <div class="tile tile-book">
-    <div class="k">To collect</div>
-    <div class="v">{{ stats.pending_all|inr }}</div>
-    <div class="tap">still outstanding</div>
-  </div>
-</div>
-
-<!-- Money health donut + this-month snapshot -->
-<div class="card insight-card">
-  <div class="donut" style="--pct:{{ collected|round(0,'floor')|int }}">
-    <div class="donut-hole"><b>{{ collected|round(0,'floor')|int }}%</b><span>collected</span></div>
-  </div>
-  <div class="insight-body">
-    <h3 style="margin:0 0 8px">Revenue health</h3>
-    <div class="legend"><span class="dot dot-lime"></span> Received <b>{{ stats.received_all|inr }}</b></div>
-    <div class="legend"><span class="dot dot-sage"></span> Still to collect <b>{{ stats.pending_all|inr }}</b></div>
-    <div class="small muted" style="margin-top:3px">Subscriptions {{ stats.sales|inr }} · Trials {{ stats.trial_sales|inr }}</div>
-    {% if cur %}
-    <div class="hr"></div>
-    <div class="small muted" style="margin-bottom:2px">Revenue this month ({{ this_month }})</div>
-    <div class="row" style="gap:18px; align-items:baseline">
-      <div><span class="big-num">{{ cur.revenue|inr }}</span></div>
-      {% if cur.growth is not none %}
-      <div class="growth {{ 'up' if cur.growth>=0 else 'down' }}">
-        {{ '▲' if cur.growth>=0 else '▼' }} {{ (cur.growth*100)|round(0,'floor')|int|abs }}% vs last month</div>
-      {% endif %}
-    </div>
-    <div class="small muted">{{ cur.sub_count }} subs · {{ cur.trial_count }} trials</div>
+{# ===================== THIS MONTH — the headline ===================== #}
+<div class="card month-hero">
+  <div class="mh-top">
+    <span class="mh-label">This month · {{ cur.month if cur else this_month }}</span>
+    <span class="spacer"></span>
+    {% if cur and cur.growth is not none %}
+    <span class="growth {{ 'up' if cur.growth>=0 else 'down' }}">
+      {{ '▲' if cur.growth>=0 else '▼' }} {{ (cur.growth*100)|round(0,'floor')|int|abs }}% vs last month</span>
     {% endif %}
   </div>
+  <div class="mh-figure">{{ cur.revenue|inr if cur else '₹0' }}</div>
+  <div class="mh-cap">revenue billed this month (subscriptions + trials)</div>
+
+  <div class="mh-stats">
+    <div class="mh-stat">
+      <span class="mh-k">Subscriptions sold</span>
+      <span class="mh-v">{{ cur.sub_value|inr if cur else '₹0' }}</span>
+      <span class="mh-n">{{ cur.sub_count if cur else 0 }} pack{{ 's' if not cur or cur.sub_count!=1 }}</span>
+    </div>
+    <div class="mh-stat">
+      <span class="mh-k">Trials</span>
+      <span class="mh-v">{{ cur.trial_value|inr if cur else '₹0' }}</span>
+      <span class="mh-n">{{ cur.trial_count if cur else 0 }} trial{{ 's' if not cur or cur.trial_count!=1 }}</span>
+    </div>
+    <div class="mh-stat hl">
+      <span class="mh-k">Food delivered</span>
+      <span class="mh-v">{{ cur.deliv_value|inr if cur else '₹0' }}</span>
+      <span class="mh-n">{{ cur.deliv_meals if cur else 0 }} meal{{ 's' if not cur or cur.deliv_meals!=1 }}</span>
+    </div>
+  </div>
+  {% if cur and (cur.sub_delivery or cur.deliv_delivery) %}
+  <div class="split-strip">
+    <span>🍱 Food sold <b>{{ (cur.sub_food + cur.trial_value)|inr }}</b></span>
+    <span>🛵 Delivery <b>{{ cur.sub_delivery|inr }}</b></span>
+  </div>
+  {% endif %}
+  <a class="btn btn-forest btn-sm btn-block" style="margin-top:12px"
+     href="{{ url_for('revenue', period='day', month=cur.month if cur else this_month) }}">
+    Open this month, day by day ›</a>
+</div>
+
+{# ===================== Tap-to-open detail boxes ===================== #}
+<div class="rev-boxes">
+  <!-- All-time totals (hidden until tapped) -->
+  <details class="disc disc-rev">
+    <summary><span class="ico">📊</span><span class="lbl">All-time totals</span>
+      <span class="amt">{{ stats.overall|inr }}</span><span class="chev">›</span></summary>
+    <div class="disc-body">
+      <div class="insight-card-in">
+        <div class="donut" style="--pct:{{ collected|round(0,'floor')|int }}">
+          <div class="donut-hole"><b>{{ collected|round(0,'floor')|int }}%</b><span>collected</span></div>
+        </div>
+        <div class="insight-body">
+          <div class="legend"><span class="dot dot-lime"></span> Received <b>{{ stats.received_all|inr }}</b></div>
+          <div class="legend"><span class="dot dot-sage"></span> Still to collect <b>{{ outstanding.total|inr }}</b></div>
+          <div class="hr"></div>
+          <div class="kvs">
+            <div class="k">Total revenue</div><div><b>{{ stats.overall|inr }}</b></div>
+            <div class="k">From subscriptions</div><div>{{ stats.sales|inr }}</div>
+            <div class="k">From trials</div><div>{{ stats.trial_sales|inr }}</div>
+            <div class="k">Customers</div><div>{{ stats.customers }}</div>
+          </div>
+          <a class="btn btn-ghost btn-sm btn-block" style="margin-top:10px"
+             href="{{ url_for('revenue', period='month') }}">See month-on-month ›</a>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <!-- To collect (drill-down, like the home page) -->
+  <details class="disc {{ 'disc-danger' if outstanding.total else 'disc-ok' }}">
+    <summary><span class="ico">💳</span><span class="lbl">To collect</span>
+      <span class="amt">{{ outstanding.total|inr }}</span><span class="chev">›</span></summary>
+    <div class="disc-body">
+      {% if outstanding.subs %}
+      <div class="oc-head">Subscriptions · {{ outstanding.sub_n }} · <b>{{ outstanding.sub_total|inr }}</b></div>
+      <ul class="disc-list">
+        {% for s in outstanding.subs %}
+        <li><a href="{{ url_for('subscription_detail', sid=s.id) }}">{{ s.customer_name }}</a>
+          <span class="muted small">{{ s.plan_name }}</span>
+          <span class="spacer"></span><b>{{ s.pending|inr }}</b></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if outstanding.trials %}
+      <div class="oc-head" style="margin-top:6px">Trials · {{ outstanding.trial_n }} · <b>{{ outstanding.trial_total|inr }}</b></div>
+      <ul class="disc-list">
+        {% for t in outstanding.trials %}
+        <li><a href="{{ url_for('trial_edit', tid=t.id) }}">{{ t.name }}</a>
+          <span class="muted small">{{ t.order_text }}</span>
+          <span class="spacer"></span><b>{{ t.pending|inr }}</b></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if not outstanding.subs and not outstanding.trials %}
+      <div class="center muted" style="padding:8px">All collected 🎉</div>
+      {% endif %}
+    </div>
+  </details>
 </div>
 
 <!-- ===================== scope controls ===================== -->
@@ -67,7 +124,7 @@
 </div>
 
 {% if period != 'month' %}
-<!-- Scoped summary: sales ESTIMATE (delivered) vs subscriptions sold (booked) -->
+<!-- Scoped summary: sales ESTIMATE (delivered, split food/delivery) vs subscriptions sold -->
 {% set cmax = ([summary.deliv_value, summary.sold_value]|max) or 1 %}
 <div class="card cmp-card">
   <div class="cmp-top">
@@ -84,6 +141,10 @@
     <span class="cmp-k"><i class="ds-dot book"></i> Subs sold</span>
     <span class="cmp-track"><i class="cmp-fill book" style="width:{{ (100*summary.sold_value/cmax)|round(0,'floor')|int }}%"></i></span>
     <span class="cmp-v">{{ summary.sold_value|inr }} <small>{{ summary.sold_count }} packs</small></span>
+  </div>
+  <div class="split-strip in-card">
+    <span>🍱 Food (sold) <b>{{ summary.sold_food|inr }}</b></span>
+    <span>🛵 Delivery (sold) <b>{{ summary.sold_delivery|inr }}</b></span>
   </div>
   <div class="cmp-note">Day &amp; week figures are <b>estimates</b> (value of meals delivered).
     Your actual revenue is subscriptions + trials — see <a href="{{ url_for('revenue', period='month') }}">Monthly</a>.</div>
@@ -130,7 +191,14 @@
     </div>
   </div>
 
-  <h4 class="focus-h"><span class="ds-dot sub"></span> Orders delivered <span class="muted small">· unit price (estimate)</span></h4>
+  <!-- Food vs delivery split for the delivered meals -->
+  <div class="split-strip in-card">
+    <span>🍱 Food <b>{{ focus.delivered.food|inr }}</b></span>
+    <span>🛵 Delivery <b>{{ focus.delivered.delivery|inr }}</b></span>
+    <span>Σ Total <b>{{ focus.delivered.total|inr }}</b></span>
+  </div>
+
+  <h4 class="focus-h"><span class="ds-dot sub"></span> Orders delivered <span class="muted small">· unit price (food + delivery)</span></h4>
   <div class="ds-list-static">
     {% for it in focus.delivered.orders %}
     <div class="ds-item">
@@ -143,12 +211,15 @@
           {% if it.source=='trial' %}<span class="chip chip-xs chip-trial">Trial</span>{% endif %}
         </div>
       </div>
-      <div class="ds-price">{{ it.value|inr }}</div>
+      <div class="ds-price">{{ it.value|inr }}
+        {% if it.delivery %}<span class="cell-sub">food {{ it.food|inr }} · 🛵 {{ it.delivery|inr }}</span>{% endif %}
+      </div>
     </div>
     {% else %}<div class="empty small">No meals delivered {{ 'this day' if focus.period=='day' else 'this week' }}.</div>{% endfor %}
   </div>
   {% if focus.delivered.orders %}
-  <div class="focus-foot"><span>Est. {{ 'day' if focus.period=='day' else 'week' }} total</span>
+  <div class="focus-foot"><span>Est. {{ 'day' if focus.period=='day' else 'week' }} total
+      <span class="muted small">(food {{ focus.delivered.food|inr }} + delivery {{ focus.delivered.delivery|inr }})</span></span>
     <b>{{ focus.delivered.total|inr }}</b></div>
   {% endif %}
 
@@ -165,11 +236,15 @@
           <span class="chip chip-xs chip-{{ s.payment_status|lower }}">{{ s.payment_status }}</span>
         </div>
       </div>
-      <div class="ds-price">{{ s.value|inr }}</div>
+      <div class="ds-price">{{ s.value|inr }}
+        {% if s.delivery %}<span class="cell-sub">food {{ s.food|inr }} · 🛵 {{ s.delivery|inr }}</span>{% endif %}
+      </div>
     </div>
     {% endfor %}
   </div>
-  <div class="focus-foot"><span>Subscriptions sold value</span><b>{{ focus.subs.value|inr }}</b></div>
+  <div class="focus-foot"><span>Subscriptions sold value
+      <span class="muted small">(food {{ focus.subs.food|inr }} + delivery {{ focus.subs.delivery|inr }})</span></span>
+    <b>{{ focus.subs.value|inr }}</b></div>
   {% endif %}
 </div>
 {% endmacro %}
@@ -186,8 +261,9 @@
     {% else %}{% set href = url_for('revenue', period='week', w=r.key, month=scope) %}{% endif %}
     <tr class="rowlink" onclick="location.href='{{ href }}'">
       <td><b>{{ r.key|fdate('%a, %d %b') if period=='day' else r.key|fdate('%d %b %Y') }}</b></td>
-      <td class="num"><b>{{ r.deliv_value|inr }}</b>{% if r.deliv_meals %}<span class="cell-sub">{{ r.deliv_meals }} meal{{ 's' if r.deliv_meals!=1 }}</span>{% endif %}</td>
-      <td class="num">{% if r.sold_count %}<b class="book">{{ r.sold_value|inr }}</b><span class="cell-sub">{{ r.sold_count }} pack{{ 's' if r.sold_count!=1 }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num"><b>{{ r.deliv_value|inr }}</b>
+        {% if r.deliv_meals %}<span class="cell-sub">{{ r.deliv_meals }} meal{{ 's' if r.deliv_meals!=1 }}{% if r.deliv_delivery %} · 🛵 {{ r.deliv_delivery|inr }}{% endif %}</span>{% endif %}</td>
+      <td class="num">{% if r.sold_count %}<b class="book">{{ r.sold_value|inr }}</b><span class="cell-sub">{{ r.sold_count }} pack{{ 's' if r.sold_count!=1 }}{% if r.sold_delivery %} · 🛵 {{ r.sold_delivery|inr }}{% endif %}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
     </tr>
     {% else %}<tr><td colspan="3" class="muted">No activity{{ ' in '+summary.label if summary.scoped }} yet.</td></tr>{% endfor %}
   </table></div>
@@ -261,20 +337,24 @@
 </div>
 <div class="card">
   <div class="card-title"><h3>Month by month</h3><span class="spacer"></span>
-    <span class="small muted">actual revenue · tap to open</span></div>
+    <span class="small muted">sold vs food delivered · tap to open</span></div>
   <div class="table-wrap"><table class="rev-table revx">
-    <tr><th>Month</th><th class="num">Subs</th><th class="num">Trials</th><th class="num">Revenue</th><th class="num">Growth</th></tr>
+    <tr><th>Month</th><th class="num">Subs sold</th><th class="num">Trials</th>
+        <th class="num">Food delivered</th><th class="num">Revenue</th><th class="num">Growth</th></tr>
     {% for m in monthly_rev|reverse %}
     <tr class="rowlink" onclick="location.href='{{ url_for('revenue', period='day', month=m.month) }}'">
       <td><b>{{ m.month }}</b></td>
-      <td class="num">{{ m.sub_value|inr }}<span class="cell-sub">{{ m.sub_count }} pack{{ 's' if m.sub_count!=1 }}</span></td>
+      <td class="num">{{ m.sub_value|inr }}<span class="cell-sub">{{ m.sub_count }} pack{{ 's' if m.sub_count!=1 }}{% if m.sub_delivery %} · 🛵 {{ m.sub_delivery|inr }}{% endif %}</span></td>
       <td class="num">{{ m.trial_value|inr }}{% if m.trial_count %}<span class="cell-sub">{{ m.trial_count }} trial{{ 's' if m.trial_count!=1 }}</span>{% endif %}</td>
+      <td class="num">{{ m.deliv_value|inr }}{% if m.deliv_meals %}<span class="cell-sub">{{ m.deliv_meals }} meal{{ 's' if m.deliv_meals!=1 }}</span>{% endif %}</td>
       <td class="num"><b>{{ m.revenue|inr }}</b></td>
       <td class="num">{% if m.growth is none %}—{% else %}
         <span class="{{ 'up' if m.growth>=0 else 'down' }} growth">{{ '+' if m.growth>=0 }}{{ (m.growth*100)|round(0,'floor')|int }}%</span>{% endif %}</td>
     </tr>
-    {% else %}<tr><td colspan="5" class="muted">No revenue yet.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="6" class="muted">No revenue yet.</td></tr>{% endfor %}
   </table></div>
+  <div class="small muted" style="margin-top:8px">“Subs sold” &amp; “Trials” are what was <b>billed</b> this
+    month. “Food delivered” is the estimated value of meals actually delivered in the month.</div>
 </div>
 {% endif %}
 

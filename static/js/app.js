@@ -64,6 +64,49 @@ function updateCounters(d) {
   set('cnt-skipped', d.skipped);
 }
 
+// --- Per-order note (one-off note for a single day's delivery) ---
+function toggleNote(btn) {
+  const row = btn.closest('.drow');
+  const ed = row.querySelector('.note-editor');
+  if (!ed) return;
+  if (ed.hasAttribute('hidden')) {
+    ed.removeAttribute('hidden');
+    const t = ed.querySelector('.note-input');
+    if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
+  } else {
+    ed.setAttribute('hidden', '');
+  }
+}
+
+async function saveNote(btn) {
+  const row = btn.closest('.drow');
+  const id = row.dataset.id;
+  const input = row.querySelector('.note-input');
+  const text = input.value.trim();
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/delivery/${id}/note`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'note=' + encodeURIComponent(text)
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error();
+    const disp = row.querySelector('[data-note]');
+    const span = disp.querySelector('.daynote-text');
+    if (data.note) { span.textContent = data.note; disp.removeAttribute('hidden'); }
+    else { span.textContent = ''; disp.setAttribute('hidden', ''); }
+    const nb = row.querySelector('.iconbtn.note');
+    if (nb) nb.classList.toggle('on', !!data.note);
+    row.querySelector('.note-editor').setAttribute('hidden', '');
+    showToast(data.note ? 'Note saved 📝' : 'Note cleared');
+  } catch (e) {
+    showToast('Could not save note — try again', false);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // --- Trials: one-tap Paid / Delivered toggles (progressive enhancement) ---
 // Each toggle is a real <form> so it still works with JS off; here we intercept
 // it, POST in the background and flip the button in place — no page reload.

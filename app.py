@@ -196,6 +196,7 @@ def more():
 @app.route("/today")
 def today():
     c = conn()
+    core.refresh_pause_statuses(c)        # flip any freeze that has just started/ended
     d = today_iso()
     view = request.args.get("view", "all")
     summary = core.today_summary(c, d)
@@ -249,6 +250,17 @@ def api_mark(did):
                     "skipped": s["skipped"], "total": s["total"]})
 
 
+@app.route("/api/delivery/<int:did>/note", methods=["POST"])
+def api_note(did):
+    """Save/clear the one-off note on a single day's order (slot swap, same-price plan
+    change, today-only customisation, a food issue to remember). Kept on the row so it
+    shows up in that date's list and in the customer's delivery history forever."""
+    c = conn()
+    note = core.set_delivery_note(c, did, request.form.get("note", ""))
+    c.close()
+    return jsonify({"ok": True, "note": note or ""})
+
+
 # ---------------------------------------------------------------------------
 # Deliveries / meal tracker history
 # ---------------------------------------------------------------------------
@@ -274,6 +286,7 @@ def deliveries():
 @app.route("/subscriptions")
 def subscriptions():
     c = conn()
+    core.refresh_pause_statuses(c)        # flip any freeze that has just started/ended
     status = request.args.get("status", "")
     q = request.args.get("q", "").strip()
     sql = "SELECT * FROM subscriptions WHERE 1=1"
@@ -304,13 +317,20 @@ def subscriptions():
 @app.route("/subscriptions/<sid>")
 def subscription_detail(sid):
     c = conn()
+    core.refresh_pause_statuses(c)        # flip any freeze that has just started/ended
     sub = c.execute("SELECT * FROM subscriptions WHERE id=?", (sid,)).fetchone()
     if not sub:
         c.close(); abort(404)
     cust = c.execute("SELECT * FROM customers WHERE id=?", (sub["customer_id"],)).fetchone()
     dels = c.execute("SELECT * FROM deliveries WHERE subscription_id=? ORDER BY date DESC", (sid,)).fetchall()
+    pauses = core.pauses_for(c, sid)
+    slot_moves = core.slot_moves_for(c, sid)
+    cur_pause = core.current_pause(c, sid)
+    cur_move = core.current_slot_move(c, sid)
     c.close()
-    return render_template("subscription_detail.html", sub=sub, cust=cust, dels=dels)
+    return render_template("subscription_detail.html", sub=sub, cust=cust, dels=dels,
+                           pauses=pauses, slot_moves=slot_moves, cur_pause=cur_pause,
+                           cur_move=cur_move, today=date.today().strftime("%Y-%m-%d"))
 
 
 @app.route("/subscriptions/new", methods=["GET", "POST"])
@@ -326,6 +346,12 @@ def subscription_new():
         received = float(f.get("amount_received") or 0)
         total = price + fee
         cust = c.execute("SELECT name FROM customers WHERE id=?", (f.get("customer_id"),)).fetchone()
+        # Revenue is billed on the booking date (when the money/sale happened); the
+        # subscription's clock starts on the start date. The month label follows the
+        # booking date so the sale lands in the right revenue month.
+        booking = f.get("booking_date") or f.get("start_date") or None
+        bill_month = (datetime.strptime(booking, "%Y-%m-%d").strftime("%b-%Y")
+                      if booking else core.month_label_iso())
         c.execute(
             """INSERT INTO subscriptions(id,customer_id,customer_name,plan_name,duration,notes,
                  slot,preferred_timing,booking_date,start_date,month,subscription_price,
@@ -334,10 +360,8 @@ def subscription_new():
                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (sid, f.get("customer_id"), cust["name"] if cust else f.get("customer_name"),
              f.get("plan_name"), duration, f.get("notes"), f.get("slot", "Lunch"),
-             f.get("preferred_timing"), f.get("booking_date") or None,
-             f.get("start_date") or None,
-             (datetime.strptime(f["start_date"], "%Y-%m-%d").strftime("%b-%Y")
-              if f.get("start_date") else core.month_label_iso()),
+             f.get("preferred_timing"), booking,
+             f.get("start_date") or None, bill_month,
              price, fee, total, received,
              "Paid" if received >= total and total > 0 else ("Partial" if received > 0 else "Unpaid"),
              scheduled, "Active", db.now_iso()))
@@ -375,19 +399,26 @@ def subscription_edit(sid):
         # registration). When changed, keep customer_id + the denormalised name in sync.
         cust_id = f.get("customer_id") or sub["customer_id"]
         cust = c.execute("SELECT id,name FROM customers WHERE id=?", (cust_id,)).fetchone()
+        booking = f.get("booking_date") or f.get("start_date") or sub["booking_date"]
+        bill_month = (datetime.strptime(booking, "%Y-%m-%d").strftime("%b-%Y")
+                      if booking else sub["month"])
         c.execute(
             """UPDATE subscriptions SET customer_id=?, customer_name=?, plan_name=?, duration=?,
-                 notes=?, slot=?, preferred_timing=?, start_date=?, subscription_price=?,
-                 delivery_fee=?, total_amount=?, amount_received=?, payment_status=?,
-                 total_meals_scheduled=? WHERE id=?""",
+                 notes=?, slot=?, preferred_timing=?, booking_date=?, start_date=?, month=?,
+                 subscription_price=?, delivery_fee=?, total_amount=?, amount_received=?,
+                 payment_status=?, total_meals_scheduled=? WHERE id=?""",
             (cust["id"] if cust else sub["customer_id"],
              cust["name"] if cust else sub["customer_name"],
              f.get("plan_name"), f.get("duration"), f.get("notes"), f.get("slot"),
-             f.get("preferred_timing"), f.get("start_date") or None, price, fee, total, received,
+             f.get("preferred_timing"), booking, f.get("start_date") or None, bill_month,
+             price, fee, total, received,
              "Paid" if received >= total and total > 0 else ("Partial" if received > 0 else "Unpaid"),
              int(f.get("total_meals_scheduled") or sub["total_meals_scheduled"] or 20), sid))
         c.commit()
         core.recompute_subscription(c, sid)
+        # If the standing slot changed, re-point any still-Pending order rows (unless a
+        # temporary slot move is overriding them) so today/future show the right slot.
+        core.resync_pending_slots(c, sid)
         # Keep the denormalised name on any future delivery rows correct too.
         c.execute("UPDATE deliveries SET name=?, customer_id=? WHERE subscription_id=?",
                   (cust["name"] if cust else sub["customer_name"],
@@ -406,15 +437,89 @@ def subscription_edit(sid):
 
 @app.route("/subscriptions/<sid>/status", methods=["POST"])
 def subscription_status(sid):
+    # Pause/Resume now run through the dated pause-window routes below. This only
+    # toggles the non-pause states (mark completed / re-activate).
     new = request.form.get("to")
     c = conn()
-    if new in ("Paused", "Active", "Completed"):
+    if new in ("Active", "Completed"):
         c.execute("UPDATE subscriptions SET status=? WHERE id=?", (new, sid))
         c.commit()
-        if new != "Paused":
-            core.recompute_subscription(c, sid)
+        core.recompute_subscription(c, sid)
     c.close()
     flash(f"Subscription {sid} set to {new}.", "ok")
+    return redirect(request.referrer or url_for("subscription_detail", sid=sid))
+
+
+@app.route("/subscriptions/<sid>/pause", methods=["POST"])
+def subscription_pause(sid):
+    """Add / edit / remove a freeze window, or resume from a chosen date.
+
+    Actions (form field `action`):
+      add     – start (default today) + optional end (blank = open-ended) + reason
+      update  – edit an existing window (`pid`, start, end, reason)
+      delete  – drop a window (`pid`) so those days run normally again
+      resume  – resume meals from `resume` date (default today); trims the freeze
+    """
+    c = conn()
+    if not c.execute("SELECT 1 FROM subscriptions WHERE id=?", (sid,)).fetchone():
+        c.close(); abort(404)
+    action = request.form.get("action", "add")
+    today_iso = date.today().strftime("%Y-%m-%d")
+    if action == "add":
+        start = (request.form.get("start") or "").strip() or today_iso
+        end = (request.form.get("end") or "").strip() or None
+        if end and end < start:
+            start, end = end, start
+        core.add_pause(c, sid, start, end, request.form.get("reason", ""))
+        flash("Subscription frozen." if not end
+              else f"Frozen {fmt_date(start)} – {fmt_date(end)}.", "ok")
+    elif action == "update":
+        start = (request.form.get("start") or "").strip() or today_iso
+        end = (request.form.get("end") or "").strip() or None
+        if end and end < start:
+            start, end = end, start
+        core.update_pause(c, int(request.form["pid"]), start, end, request.form.get("reason", ""))
+        flash("Freeze updated.", "ok")
+    elif action == "delete":
+        core.delete_pause(c, int(request.form["pid"]))
+        flash("Freeze removed — those days run normally again.", "ok")
+    elif action == "resume":
+        resume = (request.form.get("resume") or "").strip() or today_iso
+        core.resume_subscription(c, sid, resume)
+        flash(f"Resumed from {fmt_date(resume)}.", "ok")
+    c.close()
+    return redirect(request.referrer or url_for("subscription_detail", sid=sid))
+
+
+@app.route("/subscriptions/<sid>/slot-move", methods=["POST"])
+def subscription_slot_move(sid):
+    """Add / edit / remove a temporary slot move (e.g. Lunch → Dinner for a week)."""
+    c = conn()
+    if not c.execute("SELECT 1 FROM subscriptions WHERE id=?", (sid,)).fetchone():
+        c.close(); abort(404)
+    action = request.form.get("action", "add")
+    today_iso = date.today().strftime("%Y-%m-%d")
+    if action == "add":
+        slot = request.form.get("slot", "Dinner")
+        start = (request.form.get("start") or "").strip() or today_iso
+        end = (request.form.get("end") or "").strip() or None
+        if end and end < start:
+            start, end = end, start
+        core.add_slot_move(c, sid, slot, start, end, request.form.get("reason", ""))
+        flash(f"Moved to {slot}" + ("" if not end else f" until {fmt_date(end)}") + ".", "ok")
+    elif action == "update":
+        slot = request.form.get("slot", "Dinner")
+        start = (request.form.get("start") or "").strip() or today_iso
+        end = (request.form.get("end") or "").strip() or None
+        if end and end < start:
+            start, end = end, start
+        core.update_slot_move(c, int(request.form["mid"]), slot, start, end,
+                              request.form.get("reason", ""))
+        flash("Slot move updated.", "ok")
+    elif action == "delete":
+        core.delete_slot_move(c, int(request.form["mid"]))
+        flash("Slot move removed — back to the usual slot.", "ok")
+    c.close()
     return redirect(request.referrer or url_for("subscription_detail", sid=sid))
 
 
@@ -442,16 +547,24 @@ def subscription_renew(sid):
     if not old:
         c.close(); abort(404)
     nid = next_id(c, "subscriptions", "S")
-    start = date.today().strftime("%Y-%m-%d")
+    today_iso = date.today().strftime("%Y-%m-%d")
+    # Booking (billing) date dates the revenue; start date starts the meal clock. Both
+    # come from the renew form (default today) so a renewal can be billed on a chosen day.
+    start = (request.form.get("start_date") or "").strip() or today_iso
+    booking = (request.form.get("booking_date") or "").strip() or start
+    # Carry over the received amount/payment only if asked (default: fresh unpaid pack).
+    received = float(request.form.get("amount_received") or 0)
+    total = old["total_amount"] or 0
+    ps = "Paid" if received >= total and total > 0 else ("Partial" if received > 0 else "Unpaid")
     c.execute(
         """INSERT INTO subscriptions(id,customer_id,customer_name,plan_name,duration,notes,
              slot,preferred_timing,booking_date,start_date,month,subscription_price,delivery_fee,
              total_amount,amount_received,payment_status,total_meals_scheduled,status,created_at)
            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (nid, old["customer_id"], old["customer_name"], old["plan_name"], old["duration"],
-         old["notes"], old["slot"], old["preferred_timing"], start, start,
-         core.month_label_iso(start), old["subscription_price"], old["delivery_fee"],
-         old["total_amount"], 0, "Unpaid", old["total_meals_scheduled"], "Active", db.now_iso()))
+         old["notes"], old["slot"], old["preferred_timing"], booking, start,
+         core.month_label_iso(booking), old["subscription_price"], old["delivery_fee"],
+         old["total_amount"], received, ps, old["total_meals_scheduled"], "Active", db.now_iso()))
     c.commit()
     core.recompute_subscription(c, nid)
     c.close()
@@ -678,14 +791,19 @@ def _merge_period(deliv, dkey, sold):
     """One row per period key combining delivered (earned) + sold (booked) buckets,
     so the breakdown table also shows days/weeks where a pack was sold but nothing
     was delivered. Returns a list sorted oldest→newest."""
+    def blank(key):
+        return {"key": key, "deliv_value": 0, "deliv_meals": 0, "deliv_food": 0,
+                "deliv_delivery": 0, "sold_value": 0, "sold_count": 0,
+                "sold_food": 0, "sold_delivery": 0}
     rows = {}
     for b in deliv:
-        rows[b[dkey]] = {"key": b[dkey], "deliv_value": b["overall"],
-                         "deliv_meals": b["delivered"], "sold_value": 0, "sold_count": 0}
+        r = rows.setdefault(b[dkey], blank(b[dkey]))
+        r.update(deliv_value=b["overall"], deliv_meals=b["delivered"],
+                 deliv_food=b["food"], deliv_delivery=b["delivery"])
     for s in sold:
-        r = rows.setdefault(s["key"], {"key": s["key"], "deliv_value": 0,
-                                       "deliv_meals": 0, "sold_value": 0, "sold_count": 0})
-        r["sold_value"], r["sold_count"] = s["value"], s["count"]
+        r = rows.setdefault(s["key"], blank(s["key"]))
+        r.update(sold_value=s["value"], sold_count=s["count"],
+                 sold_food=s["food"], sold_delivery=s["delivery"])
     return sorted(rows.values(), key=lambda r: r["key"])
 
 
@@ -742,6 +860,7 @@ def revenue():
         scope = "all"
 
     stats = core.headline_stats(c)
+    outstanding = core.outstanding_detail(c)         # itemised 'to collect' drill-down
     monthly_rev = core.monthly_revenue(c)            # ACTUAL revenue (subs + trials) by month
     _, _, earned = core.daily_view(c)                # all-time delivered ESTIMATE (day/week only)
     by_plan = c.execute(
@@ -785,7 +904,8 @@ def revenue():
                            subs_months=subs_months, subs_map=subs_map,
                            subs_week_map=subs_week_map, subs_month_map=subs_month_map,
                            focus=focus, scope=scope, month_opts=month_opts, summary=summary,
-                           day_table=day_table, week_table=week_table, monthly_rev=monthly_rev)
+                           day_table=day_table, week_table=week_table, monthly_rev=monthly_rev,
+                           outstanding=outstanding)
 
 
 # ---------------------------------------------------------------------------

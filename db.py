@@ -129,6 +129,38 @@ CREATE TABLE IF NOT EXISTS holidays (
     reason TEXT
 );
 
+-- A temporary PAUSE / FREEZE window for one subscription. While "today" falls
+-- inside any window the subscription is treated as Paused: no new order rows are
+-- auto-generated for those days and its meals carry forward (nothing is consumed).
+-- end_date NULL = open-ended (paused until manually resumed). A closed window
+-- (end_date set) stays on file so the paused days never re-appear as Pending and
+-- the freeze history is auditable.
+CREATE TABLE IF NOT EXISTS subscription_pauses (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscription_id TEXT,
+    start_date      TEXT,                -- inclusive YYYY-MM-DD (first paused day)
+    end_date        TEXT,                -- inclusive YYYY-MM-DD; NULL = open-ended
+    reason          TEXT,
+    created_at      TEXT,
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
+);
+
+-- A temporary SLOT MOVE for one subscription: deliver in a different slot
+-- (e.g. Dinner instead of the usual Lunch) for a date range, then move back.
+-- The day's order rows pick up `slot` while a window covers them; past delivered
+-- rows keep whatever slot they were delivered in, so the history is preserved.
+-- end_date NULL = open-ended (until moved back / window removed).
+CREATE TABLE IF NOT EXISTS subscription_slot_moves (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscription_id TEXT,
+    start_date      TEXT,                -- inclusive YYYY-MM-DD
+    end_date        TEXT,                -- inclusive YYYY-MM-DD; NULL = open-ended
+    slot            TEXT,                -- Lunch / Dinner to use during the window
+    reason          TEXT,
+    created_at      TEXT,
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
+);
+
 -- CRM: leads (prospects) tracked from first contact through to conversion.
 CREATE TABLE IF NOT EXISTS leads (
     id              TEXT PRIMARY KEY,    -- L001, L002 ...
@@ -168,11 +200,16 @@ CREATE INDEX IF NOT EXISTS idx_subs_customer   ON subscriptions(customer_id);
 CREATE INDEX IF NOT EXISTS idx_leads_stage     ON leads(stage);
 CREATE INDEX IF NOT EXISTS idx_leads_follow    ON leads(next_follow_up);
 CREATE INDEX IF NOT EXISTS idx_lead_updates    ON lead_updates(lead_id);
+CREATE INDEX IF NOT EXISTS idx_pauses_sub      ON subscription_pauses(subscription_id);
+CREATE INDEX IF NOT EXISTS idx_slot_moves_sub  ON subscription_slot_moves(subscription_id);
 """
 
 # Columns added after v1 shipped — added in-place so existing databases keep their data.
+# day_note = a one-off note for THIS specific day's order (slot swap, same-price plan
+# change, a customisation just for today, a food issue to remember). Distinct from the
+# subscription's standing `notes` and from deliveries.notes (which holds the plan label).
 MIGRATIONS = {
-    "deliveries":    [("trial_id", "TEXT")],
+    "deliveries":    [("trial_id", "TEXT"), ("day_note", "TEXT"), ("day_note_at", "TEXT")],
     "trial_orders":  [("notes", "TEXT"), ("delivery_date", "TEXT"),
                       ("meal_type", "TEXT"), ("delivery_status", "TEXT")],
 }
