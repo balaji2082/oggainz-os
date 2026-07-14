@@ -309,6 +309,15 @@ def recompute_subscription(conn, sub_id, commit=True):
         "last_delivery_date=?, status=? WHERE id=?",
         (delivered, skipped, remaining, row["last"], status, sub_id),
     )
+    # The pack owes nothing any more → clear every still-Pending auto row (today,
+    # future, or stale past ones). This is what removes the duplicate orders that
+    # appear when past days are temporarily unmarked (sub flips back to Active,
+    # new day rows get generated) and then re-marked Delivered: the moment the
+    # count is complete again, the extra Pending rows vanish on their own.
+    # Delivered/Skipped history is never touched.
+    if scheduled and remaining <= 0:
+        conn.execute("DELETE FROM deliveries WHERE subscription_id=? AND status='Pending'",
+                     (sub_id,))
     if commit:
         conn.commit()
 
@@ -317,6 +326,62 @@ def recompute_all(conn):
     for r in conn.execute("SELECT id FROM subscriptions").fetchall():
         recompute_subscription(conn, r["id"], commit=False)
     conn.commit()
+
+
+def backfill_sub_days(conn, sub_id):
+    """Create the missing order rows for a subscription from its start date up to
+    TODAY. Called when a subscription is created/edited/renewed, so a pack that is
+    registered late (meals already handed over on previous days but never marked —
+    e.g. billed today with a start date 4 days back) immediately shows those past
+    days as Pending in Today → Unmarked past orders, instead of hiding until each
+    old day is browsed by hand.
+
+    Also removes still-Pending rows dated before the (possibly corrected) start
+    date. Never creates more rows than the pack owes, skips non-operating days and
+    freeze windows, and never touches Delivered/Skipped history. Returns the number
+    of rows created."""
+    sub = conn.execute("SELECT * FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
+    if not sub or not sub["start_date"]:
+        return 0
+    # A row before the start date can only be a stale auto-row from an earlier,
+    # wrong start date — impossible days, so clear the Pending ones.
+    conn.execute("DELETE FROM deliveries WHERE subscription_id=? AND status='Pending' "
+                 "AND date<?", (sub_id, sub["start_date"]))
+    scheduled = sub["total_meals_scheduled"] or 0
+    created = 0
+    if scheduled:
+        try:
+            d = datetime.strptime(str(sub["start_date"])[:10], "%Y-%m-%d").date()
+        except ValueError:
+            conn.commit()
+            return 0
+        today = date.today()
+        while d <= today:
+            day_iso = d.strftime("%Y-%m-%d")
+            d += timedelta(days=1)
+            # planned (Pending) + done (Delivered) rows must never exceed the pack
+            used = conn.execute(
+                "SELECT COUNT(*) FROM deliveries WHERE subscription_id=? "
+                "AND status IN ('Pending','Delivered')", (sub_id,)).fetchone()[0]
+            if used >= scheduled:
+                break
+            if not is_operating_day(conn, day_iso):
+                continue
+            if is_paused_on(conn, sub_id, day_iso):
+                continue
+            if conn.execute("SELECT 1 FROM deliveries WHERE subscription_id=? AND date=?",
+                            (sub_id, day_iso)).fetchone():
+                continue
+            slot = effective_slot(conn, sub_id, day_iso, sub["slot"])
+            conn.execute(
+                "INSERT INTO deliveries(date,subscription_id,customer_id,name,meal_type,"
+                "status,month,notes,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (day_iso, sub_id, sub["customer_id"], sub["customer_name"], slot, "Pending",
+                 datetime.strptime(day_iso, "%Y-%m-%d").strftime("%b-%Y"),
+                 sub["plan_name"], db.now_iso()))
+            created += 1
+    conn.commit()
+    return created
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +395,14 @@ def ensure_day_rows(conn, day_iso):
     """
     if not is_operating_day(conn, day_iso):
         return 0
+    # Self-heal first: drop any Pending row on this day whose subscription owes
+    # nothing any more (Completed / fully-delivered packs). Such rows are leftovers
+    # from past-day corrections — e.g. a finished pack that briefly looked Active
+    # while old days were unmarked — and must never keep showing as today's orders.
+    conn.execute(
+        "DELETE FROM deliveries WHERE date=? AND status='Pending' AND subscription_id IN "
+        "(SELECT id FROM subscriptions WHERE COALESCE(total_meals_scheduled,0)>0 "
+        " AND COALESCE(remaining_meals,0)<=0)", (day_iso,))
     month_label = datetime.strptime(day_iso, "%Y-%m-%d").strftime("%b-%Y")
     created = 0
     # Include Paused subs too: a sub frozen for a fixed range is still 'Paused' in the
@@ -350,6 +423,14 @@ def ensure_day_rows(conn, day_iso):
         ).fetchone()
         if exists:
             continue
+        # Never PLAN more meals than the pack still owes: Pending rows already on
+        # the books (any date) count against remaining, so browsing several future
+        # days can't stack up extra orders for a nearly-finished subscription.
+        planned = conn.execute(
+            "SELECT COUNT(*) FROM deliveries WHERE subscription_id=? AND status='Pending'",
+            (s["id"],)).fetchone()[0]
+        if planned >= (s["remaining_meals"] or 0):
+            continue
         slot = effective_slot(conn, s["id"], day_iso, s["slot"])
         conn.execute(
             "INSERT INTO deliveries(date,subscription_id,customer_id,name,meal_type,status,month,notes,created_at) "
@@ -358,8 +439,7 @@ def ensure_day_rows(conn, day_iso):
              slot, "Pending", month_label, s["plan_name"], db.now_iso()),
         )
         created += 1
-    if created:
-        conn.commit()
+    conn.commit()
     return created
 
 

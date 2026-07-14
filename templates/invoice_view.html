@@ -22,70 +22,101 @@
        background:rgba(255,255,255,.14); color:#fff; font-family:inherit}
   .tb-btn.hl{background:var(--lime); color:#04231a}
   .tb-btn.wa{background:#25D366; color:#04231a}
-  .sheet{max-width:760px; margin:22px auto 60px; background:#fff; border-radius:18px;
+  .tb-btn.danger{background:rgba(255,120,100,.25)}
+
+  /* ---------- A4 sheets ---------- */
+  .sheet{width:210mm; max-width:100%; margin:22px auto; background:#fff; border-radius:14px;
        overflow:hidden; box-shadow:0 16px 50px rgba(0,40,30,.18)}
-  .inv-head{background:linear-gradient(135deg,var(--forest) 0%,var(--forest-2) 100%);
-       color:#fff; padding:34px 36px 30px; position:relative}
-  .inv-head:after{content:''; position:absolute; left:0; right:0; bottom:0; height:5px;
-       background:linear-gradient(90deg,var(--lime) 0%,var(--lime-e) 55%,var(--orange) 100%)}
-  .inv-brand{display:flex; align-items:center; gap:16px}
-  .inv-brand img{height:44px}
-  .inv-brand .tag{font-size:.68rem; letter-spacing:.16em; text-transform:uppercase;
-       color:var(--lime-e); font-weight:700; margin-top:4px}
-  .inv-title{margin-left:auto; text-align:right}
-  .inv-title h1{font-size:1.5rem; font-weight:800; letter-spacing:.06em}
-  .inv-title .no{color:var(--lime-e); font-weight:700; font-size:.95rem}
-  .inv-meta{display:flex; gap:26px; flex-wrap:wrap; padding:24px 36px; border-bottom:1px solid var(--line)}
-  .im h4{font-size:.66rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted); margin-bottom:4px}
-  .im b{color:var(--forest); font-size:.98rem}
-  .im .sub{font-size:.84rem; color:var(--muted); white-space:pre-line}
-  .paychip{margin-left:auto; align-self:center; padding:8px 18px; border-radius:999px; font-weight:800; font-size:.85rem}
+  .sheet:last-of-type{margin-bottom:60px}
+
+  /* ---------- Page 1 · invoice ---------- */
+  .head{padding:13mm 16mm 9mm; border-bottom:3px solid var(--forest); position:relative;
+       display:flex; align-items:center; gap:14px}
+  .head:after{content:''; position:absolute; left:0; right:0; bottom:-3px; height:3px;
+       background:linear-gradient(90deg,var(--lime) 0%,var(--lime-e) 55%,var(--orange) 100%); opacity:.9}
+  .head img{height:38px}
+  .head .brand-sub{font-size:.72rem; color:var(--muted); margin-top:3px}
+  .htitle{margin-left:auto; text-align:right}
+  .htitle h1{font-size:1.45rem; font-weight:800; color:var(--forest); letter-spacing:.08em}
+  .htitle .no{font-size:.85rem; font-weight:700; color:var(--orange)}
+
+  .meta{display:flex; gap:10mm; flex-wrap:wrap; padding:8mm 16mm 0}
+  .im{min-width:150px}
+  .im h4{font-size:.62rem; text-transform:uppercase; letter-spacing:.14em; color:var(--muted);
+       margin-bottom:4px; font-weight:700}
+  .im b{color:var(--forest); font-size:.95rem}
+  .im .sub{font-size:.8rem; color:var(--muted); white-space:pre-line; max-width:260px}
+  .paychip{margin-left:auto; align-self:flex-start; padding:7px 16px; border-radius:999px;
+       font-weight:800; font-size:.8rem}
   .paychip.paid{background:#e3f6ea; color:#147a37}
   .paychip.unpaid{background:#fbeae8; color:#b13325}
   .paychip.partial{background:#fdeede; color:#bc5a12}
+
+  .subpanel{margin:7mm 16mm 0; border:1px solid var(--line); border-radius:10px;
+       display:grid; grid-template-columns:repeat(auto-fit, minmax(105px, 1fr)); overflow:hidden}
+  .sp{padding:9px 12px; border-right:1px solid var(--line)}
+  .sp:last-child{border-right:none}
+  .sp h5{font-size:.6rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted);
+       font-weight:700; margin-bottom:2px}
+  .sp div{font-size:.83rem; font-weight:700; color:var(--forest)}
+
   table{width:100%; border-collapse:collapse}
-  .items{padding:10px 36px 0}
-  .items th{font-size:.66rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted);
-       text-align:left; padding:14px 8px 10px; border-bottom:2px solid var(--forest)}
-  .items td{padding:13px 8px; border-bottom:1px solid var(--line); font-size:.94rem}
+  .items{padding:7mm 16mm 0}
+  .items th{font-size:.62rem; text-transform:uppercase; letter-spacing:.14em; color:var(--muted);
+       text-align:left; padding:0 8px 8px; border-bottom:2px solid var(--forest); font-weight:700}
+  .items td{padding:11px 8px; border-bottom:1px solid var(--line); font-size:.9rem}
   .items .num{text-align:right; white-space:nowrap}
-  .items td.desc b{color:var(--forest)}
-  .totals{padding:16px 36px 8px; display:flex; justify-content:flex-end}
-  .totals table{width:auto; min-width:270px}
-  .totals td{padding:6px 8px; font-size:.94rem}
-  .totals .grand td{border-top:2px solid var(--forest); padding-top:12px; font-size:1.15rem; font-weight:800; color:var(--forest)}
+  .items td.desc{color:var(--forest); font-weight:600}
+
+  .totals{padding:5mm 16mm 0; display:flex; justify-content:flex-end}
+  .totals table{width:auto; min-width:250px}
+  .totals td{padding:5px 8px; font-size:.88rem; color:#33443c}
+  .totals td:last-child{text-align:right; font-weight:600}
+  .totals .grand td{border-top:2px solid var(--forest); padding-top:10px; font-size:1.12rem;
+       font-weight:800; color:var(--forest)}
+  .totals .paidrow td{color:#147a37}
   .totals .due td{color:#b13325; font-weight:700}
-  .notes{margin:18px 36px; background:var(--cream); border-left:4px solid var(--lime);
-       border-radius:10px; padding:14px 16px; font-size:.9rem}
-  .notes h4{font-size:.66rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted); margin-bottom:4px}
-  .totals .paidrow td{color:#147a37; font-weight:700}
-  .termsbox{margin:20px 36px 0; border:1.5px solid var(--forest); border-radius:12px;
-       padding:16px 18px; background:#fbfdfb}
-  .termsbox .tb-head{font-weight:800; color:var(--forest); font-size:.95rem; margin-bottom:6px}
-  .termsbox p{font-size:.86rem; color:#33443c; margin-bottom:10px}
-  .termsbox b{color:var(--forest)}
-  .termsbtn{display:inline-block; background:var(--forest); color:#fff; font-weight:700;
-       font-size:.85rem; padding:9px 16px; border-radius:999px; text-decoration:none}
-  .termsbtn:hover{background:var(--forest-2)}
-  .inv-foot{background:var(--cream); margin-top:24px; padding:22px 36px 26px; border-top:1px solid var(--line)}
-  .inv-foot .thanks{font-weight:800; color:var(--forest); font-size:1.02rem; margin-bottom:6px}
-  .inv-foot .fine{font-size:.78rem; color:var(--muted); margin-top:10px}
-  .inv-foot a{color:var(--lime); font-weight:700; text-decoration:none}
-  .contact{display:flex; gap:20px; flex-wrap:wrap; margin-top:10px; font-size:.84rem}
-  .contact b{color:var(--forest)}
-  @media(max-width:600px){
-    .inv-head,.inv-meta,.items,.notes,.inv-foot{padding-left:18px; padding-right:18px}
-    .notes{margin-left:18px; margin-right:18px}
-    .totals{padding-right:18px}
-    .inv-title h1{font-size:1.15rem}
+
+  .notes{margin:6mm 16mm 0; background:var(--cream); border-left:3px solid var(--lime);
+       border-radius:0 8px 8px 0; padding:10px 14px; font-size:.85rem}
+
+  .foot{margin-top:8mm; padding:6mm 16mm 8mm; border-top:1px solid var(--line);
+       display:flex; gap:16px; flex-wrap:wrap; align-items:center}
+  .foot .thanks{font-weight:800; color:var(--forest); font-size:.9rem}
+  .foot .c{font-size:.8rem; color:#33443c}
+  .foot .fine{flex-basis:100%; font-size:.72rem; color:var(--muted)}
+  .foot .fine a{color:var(--lime); font-weight:700; text-decoration:none}
+
+  /* ---------- Page 2 · terms ---------- */
+  .tc-head{padding:11mm 16mm 7mm; border-bottom:3px solid var(--forest); position:relative;
+       display:flex; align-items:baseline; gap:12px}
+  .tc-head:after{content:''; position:absolute; left:0; right:0; bottom:-3px; height:3px;
+       background:linear-gradient(90deg,var(--lime) 0%,var(--lime-e) 55%,var(--orange) 100%); opacity:.9}
+  .tc-head h1{font-size:1.15rem; font-weight:800; color:var(--forest)}
+  .tc-head .sub{font-size:.75rem; color:var(--muted); margin-left:auto}
+  .tc-body{padding:8mm 16mm 6mm}
+  .tc-foot{padding:0 16mm 8mm; font-size:.72rem; color:var(--muted)}
+
+  @media(max-width:640px){
+    .head{padding:20px 18px 14px}
+    .meta{padding:16px 18px 0; gap:16px}
+    .subpanel{margin:14px 18px 0}
+    .items{padding:14px 18px 0}
+    .totals{padding:12px 18px 0}
+    .notes{margin:14px 18px 0}
+    .foot{padding:16px 18px 20px}
+    .tc-head{padding:18px 18px 12px}
+    .tc-body{padding:16px 18px 4px}
+    .tc-foot{padding:0 18px 18px}
+    .htitle h1{font-size:1.1rem}
   }
   @media print{
     body{background:#fff}
     .toolbar{display:none}
-    .sheet{margin:0; max-width:none; border-radius:0; box-shadow:none}
-    .inv-head{-webkit-print-color-adjust:exact; print-color-adjust:exact}
-    .inv-foot,.paychip,.notes,.termsbox,.termsbtn{-webkit-print-color-adjust:exact; print-color-adjust:exact}
-    .termsbox{break-inside:avoid}
+    .sheet{margin:0; width:auto; max-width:none; border-radius:0; box-shadow:none}
+    .sheet.p2{page-break-before:always}
+    .head,.head:after,.tc-head,.tc-head:after,.paychip,.notes,.foot
+      {-webkit-print-color-adjust:exact; print-color-adjust:exact}
     @page{size:A4; margin:0}
   }
 </style>
@@ -98,27 +129,30 @@
   <b>{{ inv.id }}</b>
   <span style="flex:1"></span>
   <a class="tb-btn" href="{{ url_for('invoice_edit', iid=inv.id) }}">✏ Edit</a>
-  <a class="tb-btn" href="{{ url_for('terms') }}" target="_blank">📋 Terms</a>
   <button class="tb-btn hl" onclick="window.print()">⬇ PDF</button>
   {% if wa_url %}<a class="tb-btn wa" href="{{ wa_url }}" target="_blank">💬 Send on WhatsApp</a>{% endif %}
   <button class="tb-btn" onclick="navigator.clipboard.writeText('{{ public_url }}');this.textContent='✓ Copied'">🔗 Copy link</button>
+  <form method="post" action="{{ url_for('invoice_delete', iid=inv.id) }}" style="margin:0"
+        onsubmit="return confirm('Delete invoice {{ inv.id }}? This cannot be undone.');">
+    <button class="tb-btn danger" type="submit">🗑</button>
+  </form>
 </div>
 {% endif %}
 
+<!-- ================= PAGE 1 · INVOICE ================= -->
 <div class="sheet">
-  <div class="inv-head">
-    <div class="inv-brand">
-      <img src="{{ url_for('static', filename='img/logo-white.svg') }}" alt="OG Gainz">
-      <div><div class="tag">Chennai · Since 2025</div>
-        <div style="font-size:.8rem; opacity:.85">Eat like it matters.</div></div>
-      <div class="inv-title">
-        <h1>INVOICE</h1>
-        <div class="no">{{ inv.id }}</div>
-      </div>
+  <div class="head">
+    <div>
+      <img src="{{ url_for('static', filename='img/logo-forest.svg') }}" alt="OG Gainz">
+      <div class="brand-sub">Eat like it matters · Chennai · Since 2025</div>
+    </div>
+    <div class="htitle">
+      <h1>INVOICE</h1>
+      <div class="no">{{ inv.id }}</div>
     </div>
   </div>
 
-  <div class="inv-meta">
+  <div class="meta">
     <div class="im">
       <h4>Billed to</h4>
       <b>{{ inv.bill_name or '—' }}</b>
@@ -133,15 +167,33 @@
     <span class="paychip {{ (inv.payment_status or 'Unpaid')|lower }}">{{ inv.payment_status or 'Unpaid' }}</span>
   </div>
 
+  {% if subinfo %}{% set sub = subinfo.sub %}
+  <div class="subpanel">
+    <div class="sp"><h5>Plan</h5><div>{{ sub.plan_name or '—' }}</div></div>
+    <div class="sp"><h5>Servings</h5>
+      <div>{{ sub.duration or 'Monthly' }} · {{ sub.total_meals_scheduled or '—' }} meals</div></div>
+    <div class="sp"><h5>Slot</h5><div>{{ sub.slot or 'Lunch' }}</div></div>
+    {% if sub.preferred_timing %}
+    <div class="sp"><h5>Preferred time</h5><div>{{ sub.preferred_timing }}</div></div>
+    {% endif %}
+    {% if sub.start_date %}
+    <div class="sp"><h5>Starts</h5><div>{{ sub.start_date|fdate('%d %b %Y') }}</div></div>
+    {% endif %}
+    {% if subinfo.validity %}
+    <div class="sp"><h5>Validity</h5><div>{{ subinfo.validity }} days</div></div>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <div class="items">
     <table>
       <tr><th>Description</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr>
       {% for it in items %}
       <tr>
-        <td class="desc"><b>{{ it.desc }}</b></td>
+        <td class="desc">{{ it.desc }}</td>
         <td class="num">{{ it.qty|int if it.qty == it.qty|int else it.qty }}</td>
         <td class="num">{{ it.rate|inr }}</td>
-        <td class="num"><b>{{ it.amount|inr }}</b></td>
+        <td class="num">{{ it.amount|inr }}</td>
       </tr>
       {% endfor %}
     </table>
@@ -152,47 +204,47 @@
   {% set gross = inv.total + (inv.discount or 0) %}
   <div class="totals">
     <table>
-      <tr><td>Food subscription</td><td class="num" style="text-align:right">{{ (gross - ns.delivery)|inr }}</td></tr>
-      {% if ns.delivery %}<tr><td>Delivery fee</td><td class="num" style="text-align:right">{{ ns.delivery|inr }}</td></tr>{% endif %}
+      <tr><td>Food subscription</td><td>{{ (gross - ns.delivery)|inr }}</td></tr>
+      {% if ns.delivery %}<tr><td>Delivery fee</td><td>{{ ns.delivery|inr }}</td></tr>{% endif %}
       {% if inv.discount %}
-      <tr><td>Subtotal</td><td class="num" style="text-align:right">{{ gross|inr }}</td></tr>
-      <tr><td>Discount</td><td style="text-align:right">− {{ inv.discount|inr }}</td></tr>
+      <tr><td>Subtotal</td><td>{{ gross|inr }}</td></tr>
+      <tr><td>Discount</td><td>− {{ inv.discount|inr }}</td></tr>
       {% endif %}
-      <tr class="grand"><td>Total</td><td style="text-align:right">{{ inv.total|inr }}</td></tr>
+      <tr class="grand"><td>Total</td><td>{{ inv.total|inr }}</td></tr>
       {% if inv.received %}
-      <tr class="paidrow"><td>Amount paid</td><td style="text-align:right">{{ inv.received|inr }}</td></tr>
+      <tr class="paidrow"><td>Amount paid</td><td>{{ inv.received|inr }}</td></tr>
       {% endif %}
       {% if (inv.received or 0) < inv.total %}
-      <tr class="due"><td>Balance due</td><td style="text-align:right">{{ (inv.total - (inv.received or 0))|inr }}</td></tr>
+      <tr class="due"><td>Balance due</td><td>{{ (inv.total - (inv.received or 0))|inr }}</td></tr>
       {% endif %}
     </table>
   </div>
 
   {% if inv.notes %}
-  <div class="notes"><h4>Note</h4>{{ inv.notes }}</div>
+  <div class="notes">{{ inv.notes }}</div>
   {% endif %}
 
-  <div class="termsbox">
-    <div class="tb-head">📋 Terms &amp; Conditions</div>
-    <p>This subscription is governed by the <b>OG Gainz Terms &amp; Conditions</b> — subscription
-      validity, skip &amp; carry-forward (inform before 6:00 PM the previous day), delivery windows
-      &amp; possible delays, the delivery fee and our no-refund-after-start policy. Agreed delivery
-      slots are served on a best-effort basis; occasional delays can occur due to traffic, weather
-      and other logistics factors.</p>
-    <a class="termsbtn" href="{{ url_for('terms') }}" target="_blank">Read the full Terms &amp; Conditions ›</a>
+  <div class="foot">
+    <span class="thanks">Thank you for eating like it matters. 💚</span>
+    <span class="c">📱 +91 93617 98644</span>
+    <span class="c">📸 @_oggainz</span>
+    <div class="fine">This subscription is governed by the OG Gainz <b>Terms &amp; Conditions —
+      page 2 of this document</b>, also online at
+      <a href="{{ url_for('terms') }}">{{ url_for('terms', _external=True) }}</a>.
+      Please report any issue with a meal on the same day of delivery.</div>
   </div>
+</div>
 
-  <div class="inv-foot">
-    <div class="thanks">Thank you for eating like it matters. 💚</div>
-    <div class="contact">
-      <span>📱 <b>+91 93617 98644</b> (WhatsApp / call)</span>
-      <span>📸 <b>@_oggainz</b></span>
-    </div>
-    <div class="fine">
-      Please report any issue with a meal on the same day of delivery so we can make it right.
-      Full terms: <a href="{{ url_for('terms') }}">{{ url_for('terms', _external=True) }}</a>
-    </div>
+<!-- ================= PAGE 2 · TERMS & CONDITIONS ================= -->
+<div class="sheet p2">
+  <div class="tc-head">
+    <h1>Terms &amp; Conditions</h1>
+    <span class="sub">OG Gainz · Invoice {{ inv.id }} · Page 2</span>
   </div>
+  <div class="tc-body">
+    {% include "_terms_body.html" %}
+  </div>
+  <div class="tc-foot">OG Gainz · Perumbakkam, Chennai · FSSAI registered · Last updated July 2026.</div>
 </div>
 </body>
 </html>

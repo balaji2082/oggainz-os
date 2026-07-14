@@ -1,0 +1,119 @@
+{# The Terms & Conditions body — ONE source of truth, shared by the standalone
+   /terms page and page 2 of every invoice. Styles are scoped under .tc so the
+   partial carries its own look wherever it is included. #}
+<style>
+  .tc{color:#33443c; line-height:1.55}
+  .tc section{margin-bottom:18px; break-inside:avoid}
+  .tc h2{color:#004030; font-size:.95rem; font-weight:800; margin:0 0 6px;
+    display:flex; align-items:baseline; gap:8px}
+  .tc h2 .n{color:#1FA84A; font-size:.78rem; font-weight:800; min-width:20px}
+  .tc ul{padding-left:18px; margin:0}
+  .tc li{font-size:.86rem; margin-bottom:3px}
+  .tc p{font-size:.86rem; margin:0}
+  .tc b{color:#004030}
+  .tc .tc-note{background:#F8F5EC; border-left:3px solid #1FA84A; border-radius:0 8px 8px 0;
+    padding:9px 12px; margin-top:6px; font-size:.83rem}
+  @media print{ .tc .tc-note{-webkit-print-color-adjust:exact; print-color-adjust:exact} }
+</style>
+<div class="tc">
+  <section>
+    <h2><span class="n">01</span>Subscription validity</h2>
+    <ul>
+      <li><b>Monthly packs (20 meals):</b> valid for <b>40 days</b> (Signature) or
+        <b>50 days</b> (Elite / Athlete) from the start date.</li>
+      <li><b>Weekly packs (5 meals):</b> valid for <b>15 days</b> from the start date.</li>
+      <li>Validity covers all planned usage, including skipped meals carried forward.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">02</span>Working days</h2>
+    <ul>
+      <li>Our kitchen operates <b>Monday to Friday</b>, plus select Saturdays based on
+        availability and demand. Sundays are non-operational.</li>
+      <li>If we are closed on a scheduled working day (public holiday, government regulation
+        or an operational reason), that day is <b>not counted</b> against your subscription —
+        your validity extends automatically.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">03</span>Skip &amp; carry forward</h2>
+    <ul>
+      <li>To skip a meal, inform us <b>before 6:00 PM on the previous day</b>. Requests after
+        this time cannot be accommodated — the meal is already in preparation.</li>
+      <li>Skipped meals <b>carry forward</b> and can be used within your validity period.</li>
+      <li>Extended usage beyond validity is a special case: request it <b>before subscribing</b>;
+        approval depends on feasibility and is not guaranteed.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">04</span>Delivery &amp; timing</h2>
+    <ul>
+      <li><b>Lunch:</b> 11:00 AM – 1:45 PM &nbsp;·&nbsp; <b>Dinner:</b> 5:30 PM – 8:00 PM.
+        Exact timing varies with route, location and order volume.</li>
+      <li>A specific delivery slot can be mutually scheduled in advance, subject to feasibility.</li>
+      <li>Please be available during your delivery window. If you are unavailable, the order is
+        marked delivered; re-delivery is not guaranteed.</li>
+    </ul>
+    <div class="tc-note">Where a delivery slot has been agreed and allocated, we will always do
+      our best to deliver within that promised window. Even so, an <b>occasional delay is
+      possible</b> — delivery depends on several factors beyond our control, such as traffic,
+      weather and road conditions. Whenever a delay is expected, we will keep you informed.</div>
+  </section>
+
+  <section>
+    <h2><span class="n">05</span>Delivery fee</h2>
+    <ul>
+      <li>Delivery is <b>free within our free-delivery zone</b> around our Perumbakkam kitchen.</li>
+      <li>Outside the free zone, a <b>distance-based delivery fee</b> applies — typically ₹30 to
+        ₹75 per delivery, depending on your location.</li>
+      <li>The fee is <b>confirmed at the time of booking</b> and shown as a separate line on your
+        invoice. Once agreed, it stays fixed for the duration of that subscription.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">06</span>Menu &amp; customisation</h2>
+    <ul>
+      <li>The weekly menu shows the structure and variety of your plan. Individual items or days
+        may change with ingredient availability and operational conditions.</li>
+      <li><b>Nutritional value and protein targets are always met</b> — that promise never changes.</li>
+      <li>Customisation is available within our listed options; last-minute changes may not be accepted.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">07</span>Payments, billing &amp; refunds</h2>
+    <ul>
+      <li>All subscriptions are <b>paid in advance</b>; orders are confirmed only after payment.</li>
+      <li>Your invoice itemises the meal subscription, any add-ons, the delivery fee
+        (if applicable) and the total paid.</li>
+      <li><b>No refunds once a subscription has started.</b> Any exception is at management's
+        discretion.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">08</span>Quality &amp; feedback</h2>
+    <ul>
+      <li>Any issue with a meal must be reported <b>on the same day of delivery</b> so we can
+        make it right. We genuinely want your feedback — it is how we improve.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">09</span>Nature of our service</h2>
+    <ul>
+      <li>OG Gainz is a <b>subscription-based meal service</b>, not an on-demand delivery
+        platform. Meals are prepared in batches for consistency and quality.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">10</span>Agreement</h2>
+    <p>By subscribing to OG Gainz you agree to the terms above. Thank you for helping us deliver
+      consistent, high-quality nutrition — every single day.</p>
+  </section>
+</div>

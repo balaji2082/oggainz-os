@@ -12,174 +12,69 @@
   }
   *{box-sizing:border-box; margin:0; padding:0}
   body{font-family:'Roboto','Segoe UI',-apple-system,system-ui,sans-serif; background:#e9e6dc;
-       color:var(--ink); line-height:1.6; -webkit-font-smoothing:antialiased}
-  .sheet{max-width:760px; margin:22px auto 60px; background:#fff; border-radius:18px;
-       overflow:hidden; box-shadow:0 16px 50px rgba(0,40,30,.18)}
-  .head{background:linear-gradient(135deg,var(--forest) 0%,var(--forest-2) 100%); color:#fff;
-       padding:34px 36px 30px; position:relative}
-  .head:after{content:''; position:absolute; left:0; right:0; bottom:0; height:5px;
-       background:linear-gradient(90deg,var(--lime) 0%,var(--lime-e) 55%,var(--orange) 100%)}
-  .head img{height:44px}
-  .head .tag{font-size:.68rem; letter-spacing:.16em; text-transform:uppercase;
-       color:var(--lime-e); font-weight:700; margin-top:8px}
-  .head h1{font-size:1.6rem; font-weight:800; margin-top:14px; letter-spacing:-.01em}
-  .head .sub{opacity:.85; font-size:.92rem; margin-top:4px}
-  .body{padding:28px 36px 10px}
-  section{margin-bottom:24px}
-  h2{color:var(--forest); font-size:1.02rem; font-weight:800; margin-bottom:8px;
-     display:flex; align-items:center; gap:9px}
-  h2 .n{display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px;
-     border-radius:8px; background:var(--cream); color:var(--lime); font-size:.8rem; flex:none}
-  p, li{font-size:.92rem; color:#33443c}
-  ul{padding-left:20px; margin-top:4px}
-  li{margin-bottom:4px}
-  b{color:var(--forest)}
-  .callout{background:var(--cream); border-left:4px solid var(--lime); border-radius:10px;
-     padding:12px 15px; margin-top:8px; font-size:.88rem}
-  .foot{background:var(--cream); padding:22px 36px 26px; border-top:1px solid var(--line)}
-  .foot .thanks{font-weight:800; color:var(--forest); margin-bottom:6px}
-  .foot .fine{font-size:.8rem; color:var(--muted)}
-  .contact{display:flex; gap:20px; flex-wrap:wrap; margin-top:8px; font-size:.86rem}
-  .contact b{color:var(--forest)}
-  @media(max-width:600px){ .head,.body,.foot{padding-left:18px; padding-right:18px} }
+       color:var(--ink); line-height:1.55; -webkit-font-smoothing:antialiased}
+  .toolbar{position:sticky; top:0; z-index:9; background:var(--forest); color:#fff;
+       display:flex; gap:8px; align-items:center; padding:10px 14px}
+  .toolbar b{font-size:.9rem}
+  .tb-btn{border:none; border-radius:999px; padding:8px 15px; font-weight:700; font-size:.84rem;
+       cursor:pointer; text-decoration:none; background:var(--lime); color:#04231a; font-family:inherit;
+       margin-left:auto}
+  /* A4 sheet: 210mm wide, generous even margins — clean and print-identical */
+  .sheet{width:210mm; max-width:100%; margin:22px auto 60px; background:#fff;
+       box-shadow:0 16px 50px rgba(0,40,30,.18); border-radius:14px; overflow:hidden}
+  .head{padding:14mm 16mm 10mm; border-bottom:3px solid var(--forest); position:relative}
+  .head:after{content:''; position:absolute; left:0; right:0; bottom:-3px; height:3px;
+       background:linear-gradient(90deg,var(--lime) 0%,var(--lime-e) 55%,var(--orange) 100%);
+       opacity:.9}
+  .head-row{display:flex; align-items:center; gap:14px}
+  .head img{height:38px; filter:none}
+  .head .htitle{margin-left:auto; text-align:right}
+  .head .htitle h1{font-size:1.35rem; font-weight:800; color:var(--forest); letter-spacing:-.01em}
+  .head .htitle .sub{font-size:.78rem; color:var(--muted); margin-top:2px}
+  .body{padding:10mm 16mm 6mm}
+  .foot{padding:8mm 16mm 10mm; border-top:1px solid var(--line); display:flex; gap:18px;
+       flex-wrap:wrap; align-items:center}
+  .foot .thanks{font-weight:800; color:var(--forest); font-size:.9rem}
+  .foot .c{font-size:.82rem; color:#33443c}
+  .foot .fine{flex-basis:100%; font-size:.72rem; color:var(--muted)}
+  @media(max-width:640px){ .head{padding:20px 18px 14px} .body{padding:16px 18px 4px}
+       .foot{padding:14px 18px 20px} }
   @media print{
     body{background:#fff}
-    .sheet{margin:0; max-width:none; border-radius:0; box-shadow:none}
-    .head,.foot,.callout{-webkit-print-color-adjust:exact; print-color-adjust:exact}
-    section{break-inside:avoid}
+    .toolbar{display:none}
+    .sheet{margin:0; width:auto; max-width:none; border-radius:0; box-shadow:none}
+    .head:after,.head{-webkit-print-color-adjust:exact; print-color-adjust:exact}
     @page{size:A4; margin:0}
   }
 </style>
 </head>
 <body>
+<div class="toolbar">
+  <b>OG Gainz — Terms &amp; Conditions</b>
+  <button class="tb-btn" onclick="window.print()">⬇ Save as PDF</button>
+</div>
+
 <div class="sheet">
   <div class="head">
-    <img src="{{ url_for('static', filename='img/logo-white.svg') }}" alt="OG Gainz">
-    <div class="tag">Chennai · Since 2025</div>
-    <h1>Terms &amp; Conditions</h1>
-    <div class="sub">Meal subscriptions — simple, transparent, structured.</div>
+    <div class="head-row">
+      <img src="{{ url_for('static', filename='img/logo-forest.svg') }}" alt="OG Gainz">
+      <div class="htitle">
+        <h1>Terms &amp; Conditions</h1>
+        <div class="sub">Meal subscriptions · Chennai · Since 2025</div>
+      </div>
+    </div>
   </div>
 
   <div class="body">
-    <section>
-      <h2><span class="n">1</span>Subscription validity</h2>
-      <ul>
-        <li><b>Monthly packs (20 meals)</b> are valid for the number of days shown on your pack
-          — <b>40 days</b> (Signature) or <b>50 days</b> (Elite / Athlete) from the start date.</li>
-        <li><b>Weekly packs (5 meals)</b> are valid for <b>15 days</b> from the start date.</li>
-        <li>Validity covers all planned usage, including skipped meals carried forward.</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2><span class="n">2</span>Working days</h2>
-      <ul>
-        <li>Our kitchen operates <b>Monday to Friday</b>, plus select Saturdays based on
-          availability and demand.</li>
-        <li>Sundays are non-operational.</li>
-      </ul>
-      <div class="callout">If we're closed on a scheduled working day (public holiday, government
-        regulation, or an operational reason), that day is <b>not counted</b> against your
-        subscription — your validity extends automatically.</div>
-    </section>
-
-    <section>
-      <h2><span class="n">3</span>Skip &amp; carry forward</h2>
-      <ul>
-        <li>To skip a meal, inform us <b>before 6:00 PM on the previous day</b>.</li>
-        <li>Requests after this time cannot be accommodated — the meal is already in preparation.</li>
-        <li>Skipped meals <b>carry forward</b> and can be used within your validity period.</li>
-        <li>Extended usage beyond validity is a special case: request it <b>before subscribing</b>;
-          approval depends on feasibility and is not guaranteed.</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2><span class="n">4</span>Delivery &amp; timing</h2>
-      <ul>
-        <li><b>Lunch:</b> 11:00 AM – 1:45 PM &nbsp;·&nbsp; <b>Dinner:</b> 5:30 PM – 8:00 PM.</li>
-        <li>Exact timing varies with route, location and order volume.</li>
-        <li>A specific delivery slot can be mutually scheduled in advance, subject to feasibility.</li>
-        <li>Please be available during your delivery window. If you're unavailable, the order is
-          marked delivered; re-delivery is not guaranteed.</li>
-      </ul>
-      <div class="callout">Where a delivery slot has been agreed and allocated, we will always do
-        our best to deliver within that promised window. Even so, an <b>occasional delay is
-        possible</b> — delivery depends on several factors beyond our control, such as traffic,
-        weather and road conditions. Whenever a delay is expected, we will keep you informed.
-        We appreciate your understanding.</div>
-    </section>
-
-    <section>
-      <h2><span class="n">5</span>Delivery fee</h2>
-      <ul>
-        <li>Delivery is <b>free within our free-delivery zone</b> around our Perumbakkam kitchen.</li>
-        <li>For locations outside the free zone, a <b>distance-based delivery fee</b> applies —
-          typically between ₹30 and ₹75 per delivery, depending on your location.</li>
-        <li>The applicable fee is <b>confirmed with you at the time of booking</b> and is shown as
-          a separate line on your invoice, in addition to the subscription amount.</li>
-        <li>Once agreed, the delivery fee stays fixed for the duration of that subscription.</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2><span class="n">6</span>Menu &amp; customisation</h2>
-      <ul>
-        <li>The weekly menu shows the structure and variety of your plan. Individual items or days
-          may change with ingredient availability and operational conditions.</li>
-        <li><b>Nutritional value and protein targets are always met</b> — that's the promise
-          that never changes.</li>
-        <li>Customisation is available within our listed options; last-minute changes may not be
-          accepted.</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2><span class="n">7</span>Payments, billing &amp; refunds</h2>
-      <ul>
-        <li>All subscriptions are <b>paid in advance</b>; orders are confirmed only after payment.</li>
-        <li>Your invoice itemises everything clearly: the <b>meal subscription</b> (pack, duration
-          and number of meals), any <b>add-ons</b>, the <b>delivery fee</b> (if applicable) and the
-          <b>total paid</b>.</li>
-        <li><b>No refunds once a subscription has started.</b> Any exception is at management's
-          discretion.</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2><span class="n">8</span>Quality &amp; feedback</h2>
-      <ul>
-        <li>We genuinely want your feedback — it's how we improve.</li>
-        <li>Any issue with a meal must be reported <b>on the same day of delivery</b> so we can
-          make it right.</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2><span class="n">9</span>Nature of our service</h2>
-      <ul>
-        <li>OG Gainz is a <b>subscription-based meal service</b>, not an on-demand delivery
-          platform. Meals are prepared in batches for consistency and quality.</li>
-        <li>Delays or changes can occur due to weather, supply-chain issues or unforeseen
-          circumstances — we'll always keep you informed.</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2><span class="n">10</span>Agreement</h2>
-      <p>By subscribing to OG Gainz you agree to the terms above. Thank you for helping us
-        deliver consistent, high-quality nutrition — every single day.</p>
-    </section>
+    {% include "_terms_body.html" %}
   </div>
 
   <div class="foot">
-    <div class="thanks">Eat like it matters. 💚</div>
-    <div class="contact">
-      <span>📱 <b>+91 93617 98644</b> (WhatsApp / call)</span>
-      <span>📸 <b>@_oggainz</b></span>
-    </div>
-    <div class="fine">OG Gainz · Chennai · FSSAI registered. This document was last updated in
-      July 2026 and may be revised; the latest version always lives at this link.</div>
+    <span class="thanks">Eat like it matters. 💚</span>
+    <span class="c">📱 +91 93617 98644</span>
+    <span class="c">📸 @_oggainz</span>
+    <div class="fine">OG Gainz · Perumbakkam, Chennai · FSSAI registered · Last updated July 2026.
+      The latest version always lives at this link.</div>
   </div>
 </div>
 </body>

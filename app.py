@@ -474,6 +474,9 @@ def subscription_new():
              scheduled, "Active", db.now_iso()))
         c.commit()
         core.recompute_subscription(c, sid)
+        # A back-dated start (meals already delivered, sub registered late) gets its
+        # past days as Pending rows right away → they show in the backlog to mark.
+        core.backfill_sub_days(c, sid)
         _save_composition_from_form(c, sid, f)
         # If this booking came from converting a CRM lead, link them together.
         lead_id = f.get("lead")
@@ -526,6 +529,9 @@ def subscription_edit(sid):
              int(f.get("total_meals_scheduled") or sub["total_meals_scheduled"] or 20), sid))
         c.commit()
         core.recompute_subscription(c, sid)
+        # Start date may have been corrected backwards/forwards: create the missing
+        # past-day rows (they land in the backlog) and drop impossible ones.
+        core.backfill_sub_days(c, sid)
         # If the standing slot changed, re-point any still-Pending order rows (unless a
         # temporary slot move is overriding them) so today/future show the right slot.
         core.resync_order_slots(c, sid)
@@ -682,6 +688,7 @@ def subscription_renew(sid):
          old["total_amount"], received, ps, old["total_meals_scheduled"], "Active", db.now_iso()))
     c.commit()
     core.recompute_subscription(c, nid)
+    core.backfill_sub_days(c, nid)      # renewals can be back-dated too
     c.close()
     flash(f"Renewed {sid} → new subscription {nid}.", "ok")
     return redirect(url_for("subscription_detail", sid=nid))
@@ -1420,8 +1427,9 @@ def _invoice_items_for_sub(c, sub):
         items.append({"desc": f"Add-on · {a['name']} {menu.fmt_qty(a['qty'], a['unit'])}/meal",
                       "qty": meals, "rate": round(per_meal), "amount": amt})
     pack_amt = max((sub["subscription_price"] or 0) - addon_total, 0)
-    label = f"{sub['plan_name']} · {sub['duration'] or 'Monthly'} ({meals} meals"
-    label += f" · {sub['slot'] or 'Lunch'})"
+    # Keep the line item lean — servings/slot/timing live in the invoice's
+    # subscription-details panel, not repeated here.
+    label = f"{sub['plan_name']} · {sub['duration'] or 'Monthly'} subscription"
     items.insert(0, {"desc": label, "qty": 1, "rate": pack_amt, "amount": pack_amt})
     if sub["delivery_fee"]:
         items.append({"desc": "Delivery fee", "qty": 1, "rate": sub["delivery_fee"],
@@ -1512,15 +1520,26 @@ def invoice_edit(iid):
 
 def _invoice_share(inv):
     public_url = request.url_root.rstrip("/") + url_for("invoice_public", token=inv["token"])
-    terms_url = request.url_root.rstrip("/") + url_for("terms")
     wa_text = (f"Hi {inv['bill_name']}! 🌱 Here's your OG Gainz invoice {inv['id']} "
                f"for {inr(inv['total'])}.\n\nView / download it here:\n{public_url}\n\n"
-               f"Your subscription is governed by our Terms & Conditions "
-               f"(delivery windows, skip & carry-forward, delivery fee):\n{terms_url}\n\n"
+               "Our Terms & Conditions are attached on page 2 of the invoice. "
                "Thank you for eating like it matters! 💚")
     wa_url = (wa_link(inv["bill_phone"]) + "?text=" + urllib_quote(wa_text)) \
         if inv["bill_phone"] else None
     return public_url, wa_url
+
+
+def _invoice_subinfo(c, inv):
+    """The subscription behind an invoice — feeds the invoice's details panel
+    (plan, servings, slot, preferred timing, start date, validity)."""
+    if not inv["subscription_id"]:
+        return None
+    sub = c.execute("SELECT * FROM subscriptions WHERE id=?",
+                    (inv["subscription_id"],)).fetchone()
+    if not sub:
+        return None
+    plan = menu.match_plan(c, sub["plan_name"])
+    return {"sub": sub, "validity": plan["validity_days"] if plan else None}
 
 
 def urllib_quote(s):
@@ -1545,8 +1564,10 @@ def invoice_public(token):
     if not inv:
         c.close(); abort(404)
     items = json.loads(inv["items"] or "[]")
+    subinfo = _invoice_subinfo(c, inv)
     c.close()
-    return render_template("invoice_view.html", inv=inv, items=items, internal=False)
+    return render_template("invoice_view.html", inv=inv, items=items, internal=False,
+                           subinfo=subinfo)
 
 
 @app.route("/invoices/<iid>")
@@ -1557,9 +1578,10 @@ def invoice_view(iid):
         c.close(); abort(404)
     items = json.loads(inv["items"] or "[]")
     public_url, wa_url = _invoice_share(inv)
+    subinfo = _invoice_subinfo(c, inv)
     c.close()
     return render_template("invoice_view.html", inv=inv, items=items, internal=True,
-                           public_url=public_url, wa_url=wa_url)
+                           public_url=public_url, wa_url=wa_url, subinfo=subinfo)
 
 
 @app.route("/terms")
