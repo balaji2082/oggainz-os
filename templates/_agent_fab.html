@@ -1,0 +1,153 @@
+{# Floating OG Agent — one tap from any page. Shares the same chat history,
+   endpoints and confirm-to-apply actions as the full /agent page. #}
+<button class="agent-fab" id="agentFab" onclick="fabToggle()" title="Ask OG Agent"
+        aria-label="Open OG Agent chat">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round">
+    <rect x="4" y="7" width="16" height="12" rx="3"/>
+    <circle cx="9" cy="13" r="1.3" fill="currentColor" stroke="none"/>
+    <circle cx="15" cy="13" r="1.3" fill="currentColor" stroke="none"/>
+    <path d="M12 7V4"/><circle cx="12" cy="3" r="1"/>
+  </svg>
+</button>
+
+<div class="agent-drawer" id="agentDrawer" hidden>
+  <div class="ad-head">
+    <span class="ad-title">🤖 OG Agent</span>
+    <a class="ad-link" href="{{ url_for('agent_home') }}" title="Open full chat">⤢ Full page</a>
+    <button class="ad-close" onclick="fabToggle()" aria-label="Close">✕</button>
+  </div>
+  <div class="ad-chat" id="fabChat">
+    <div class="ad-loading muted small">Loading…</div>
+  </div>
+  {% if g_agent_ready %}
+  <div class="ad-input">
+    <textarea id="fabQ" rows="1" placeholder="Ask OG Agent anything…"></textarea>
+    <button class="ad-send" id="fabSend" onclick="fabSendMsg()">➤</button>
+  </div>
+  {% else %}
+  <div class="ad-offline small">🔑 Chat is offline — add your Anthropic API key in
+    <a href="{{ url_for('settings') }}#agent">Settings → OG Agent</a>.</div>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  let fabLoaded = false;
+  const drawer = document.getElementById('agentDrawer');
+  const chatEl = document.getElementById('fabChat');
+  const q = document.getElementById('fabQ');
+
+  window.fabToggle = function () {
+    if (drawer.hasAttribute('hidden')) {
+      drawer.removeAttribute('hidden');
+      if (!fabLoaded) { fabLoaded = true; fabLoadHistory(); }
+      if (q) q.focus();
+    } else {
+      drawer.setAttribute('hidden', '');
+    }
+  };
+
+  function fabBubble(role, text) {
+    const empty = chatEl.querySelector('.ad-loading, .ad-empty');
+    if (empty) empty.remove();
+    const div = document.createElement('div');
+    div.className = 'msg ' + role;
+    const b = document.createElement('div');
+    b.className = 'msg-bubble';
+    b.textContent = text;
+    div.appendChild(b);
+    chatEl.appendChild(div);
+    chatEl.scrollTop = chatEl.scrollHeight;
+    return b;
+  }
+
+  async function fabLoadHistory() {
+    try {
+      const res = await fetch('{{ url_for("agent_history") }}');
+      const data = await res.json();
+      chatEl.innerHTML = '';
+      if (!data.msgs || !data.msgs.length) {
+        chatEl.innerHTML = '<div class="ad-empty small muted">Hey Balaji 👋 — ask me anything: ' +
+          'plans &amp; pricing, today’s prep, who’s unpaid, delivery rules… ' +
+          'Tell me something new and I’ll remember it.</div>';
+        return;
+      }
+      data.msgs.forEach(m => fabBubble(m.role, m.content));
+    } catch (e) {
+      chatEl.innerHTML = '<div class="ad-empty small muted">Could not load the chat — try again.</div>';
+    }
+  }
+
+  if (q) {
+    q.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fabSendMsg(); }
+    });
+    q.addEventListener('input', () => {
+      q.style.height = 'auto'; q.style.height = Math.min(q.scrollHeight, 110) + 'px';
+    });
+  }
+
+  window.fabSendMsg = async function () {
+    const text = q.value.trim();
+    if (!text) return;
+    q.value = ''; q.style.height = 'auto';
+    fabBubble('user', text);
+    const think = fabBubble('assistant', 'thinking…');
+    think.classList.add('thinking');
+    document.getElementById('fabSend').disabled = true;
+    try {
+      const res = await fetch('{{ url_for("agent_chat") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'q=' + encodeURIComponent(text)
+      });
+      const data = await res.json();
+      think.classList.remove('thinking');
+      if (!data.ok) { think.textContent = '⚠️ ' + data.error; return; }
+      think.textContent = data.reply;
+      (data.actions || []).forEach(a => fabAction(think.parentElement, a));
+    } catch (e) {
+      think.classList.remove('thinking');
+      think.textContent = '⚠️ Could not reach the server — try again.';
+    } finally {
+      document.getElementById('fabSend').disabled = false;
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+  };
+
+  function fabAction(msgEl, a) {
+    const box = document.createElement('div');
+    box.className = 'action-box';
+    let label;
+    if (a.type === 'rule') {
+      label = `📐 Rule for ${a.sub_id}: ${a.action} ${a.from || ''}${a.from && a.to ? ' → ' : ''}${a.to || ''}` +
+              `${a.qty ? ' ' + a.qty : ''}${a.weekdays ? ' · days ' + a.weekdays : ''}`;
+    } else if (a.type === 'remember') {
+      label = `🧠 Remember: ${a.fact || ''}`;
+    } else {
+      label = `⏰ Reminder: ${a.title || ''}`;
+    }
+    const span = document.createElement('span');
+    span.className = 'as-label';
+    span.textContent = label;
+    box.appendChild(span);
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-success btn-sm';
+    btn.textContent = '✓ Confirm';
+    btn.onclick = async () => {
+      btn.disabled = true;
+      const res = await fetch('{{ url_for("agent_action") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=' + encodeURIComponent(JSON.stringify(a))
+      });
+      const data = await res.json();
+      box.textContent = (data.ok ? '✅ ' : '⚠️ ') + data.message;
+    };
+    box.appendChild(btn);
+    msgEl.appendChild(box);
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+})();
+</script>

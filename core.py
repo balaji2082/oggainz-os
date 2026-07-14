@@ -941,17 +941,18 @@ def resequence_subscriptions(conn):
     conn.commit()                                  # make sure no transaction is open
     conn.execute("PRAGMA foreign_keys=OFF")
     try:
+        # every table that references subscriptions.id moves in lock-step
+        CHILD_TABLES = ("deliveries", "subscription_pauses", "subscription_slot_moves",
+                        "subscription_components", "component_rules", "invoices")
         for i, old in enumerate(ordered):          # pass 1: park everything in temp space
             tmp = f"__SEQ_{i}"
-            conn.execute("UPDATE deliveries SET subscription_id=? WHERE subscription_id=?", (tmp, old))
-            conn.execute("UPDATE subscription_pauses SET subscription_id=? WHERE subscription_id=?", (tmp, old))
-            conn.execute("UPDATE subscription_slot_moves SET subscription_id=? WHERE subscription_id=?", (tmp, old))
+            for t in CHILD_TABLES:
+                conn.execute(f"UPDATE {t} SET subscription_id=? WHERE subscription_id=?", (tmp, old))
             conn.execute("UPDATE subscriptions SET id=? WHERE id=?", (tmp, old))
         for i, old in enumerate(ordered):          # pass 2: temp -> final contiguous id
             tmp, new = f"__SEQ_{i}", target[old]
-            conn.execute("UPDATE deliveries SET subscription_id=? WHERE subscription_id=?", (new, tmp))
-            conn.execute("UPDATE subscription_pauses SET subscription_id=? WHERE subscription_id=?", (new, tmp))
-            conn.execute("UPDATE subscription_slot_moves SET subscription_id=? WHERE subscription_id=?", (new, tmp))
+            for t in CHILD_TABLES:
+                conn.execute(f"UPDATE {t} SET subscription_id=? WHERE subscription_id=?", (new, tmp))
             conn.execute("UPDATE subscriptions SET id=? WHERE id=?", (new, tmp))
         conn.commit()
     finally:
@@ -969,6 +970,10 @@ def delete_subscription(conn, sid):
     conn.execute("DELETE FROM deliveries WHERE subscription_id=?", (sid,))
     conn.execute("DELETE FROM subscription_pauses WHERE subscription_id=?", (sid,))
     conn.execute("DELETE FROM subscription_slot_moves WHERE subscription_id=?", (sid,))
+    conn.execute("DELETE FROM subscription_components WHERE subscription_id=?", (sid,))
+    conn.execute("DELETE FROM component_rules WHERE subscription_id=?", (sid,))
+    # invoices stay (they're financial history) but stop pointing at a dead id
+    conn.execute("UPDATE invoices SET subscription_id=NULL WHERE subscription_id=?", (sid,))
     conn.execute("DELETE FROM subscriptions WHERE id=?", (sid,))
     conn.commit()
     resequence_subscriptions(conn)

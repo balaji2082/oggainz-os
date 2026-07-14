@@ -57,27 +57,116 @@
   <div class="tile"><div class="k">Skipped</div><div class="v" id="cnt-skipped">{{ s.skipped }}</div></div>
 </div>
 
-{% if s.cook %}
-<details class="disc disc-prep">
+{% macro prep_slot(title, p, gkey) %}
+{% if p.meals %}
+<div class="prep-group">
+  <h4 class="prep-h">{{ title }} <span class="muted small">· {{ p.meals }} meal{{ 's' if p.meals != 1 }}</span></h4>
+  <div class="ing-list">
+    {% for r in p.components %}
+    {% set tkey = gkey ~ '|' ~ r.name %}
+    <div class="ing-row {{ 'ticked' if tkey in ticks }}">
+      <label class="ing-check" title="Tick when prepped">
+        <input type="checkbox" data-key="{{ tkey }}" {{ 'checked' if tkey in ticks }}
+               onchange="prepTick(this)"></label>
+      <span class="ing-emoji">{{ r.emoji or '🍽️' }}</span>
+      <span class="ing-name">{{ r.name }}</span>
+      <span class="spacer"></span>
+      <span class="ing-qty">{{ r.display }}</span>
+    </div>
+    {% if r.breakdown or r.notes %}
+    <div class="ing-sub">{% if r.breakdown %}{{ r.breakdown }}{% endif %}
+      {% if r.notes %}<span class="ing-note">✎ {{ r.notes }}</span>{% endif %}</div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  <div class="prep-packs">
+    {% for pk in p.packs %}
+    <details class="pack-line">
+      <summary><span class="qty">{{ pk.n }}×</span> {{ pk.label }}<span class="chev">›</span></summary>
+      <div class="pack-orders">
+        {% if pk.detail %}<div class="pack-detail">{{ pk.detail }}</div>{% endif %}
+        {% for o in pk.orders %}
+        <div class="pack-order"><b>{{ o.name }}</b>
+          {% if not pk.detail and o.detail %}<span class="muted small">— {{ o.detail }}</span>{% endif %}
+          {% if o.note %}<span class="ing-note">📝 {{ o.note }}</span>{% endif %}</div>
+        {% endfor %}
+      </div>
+    </details>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% if prep and prep.total.meals %}
+<details class="disc disc-prep" data-day="{{ d }}">
   <summary><span class="ico">🍱</span><span class="lbl">Prep list</span>
-    <span class="amt">{{ s.cook_total }} meals</span><span class="chev">›</span></summary>
+    <span class="amt">{{ prep.total.meals }} meals</span><span class="chev">›</span></summary>
   <div class="disc-body">
-    {% if s.cook_lunch %}
-    <div class="prep-group">
-      <h4 class="prep-h">☀ Lunch <span class="muted small">· {{ s.lunch_total }}</span></h4>
-      <ul class="prep-list">
-        {% for plan, n in s.cook_lunch %}<li><span class="qty">{{ n }}×</span> {{ plan or '—' }}</li>{% endfor %}
-      </ul>
+    <div class="small muted" style="margin-bottom:6px">Tick each item off as you prep it ✓</div>
+    {{ prep_slot('☀ Lunch', prep.lunch, 'Lunch') }}
+    {{ prep_slot('🌙 Dinner', prep.dinner, 'Dinner') }}
+    {% if prep.total.meals and (prep.lunch.meals and prep.dinner.meals) %}
+    <div class="prep-group prep-total">
+      <h4 class="prep-h">Σ Whole day <span class="muted small">· {{ prep.total.meals }} meals</span></h4>
+      <div class="ing-list">
+        {% for r in prep.total.components %}
+        {% set tkey = 'All|' ~ r.name %}
+        <div class="ing-row {{ 'ticked' if tkey in ticks }}">
+          <label class="ing-check" title="Tick when prepped">
+            <input type="checkbox" data-key="{{ tkey }}" {{ 'checked' if tkey in ticks }}
+                   onchange="prepTick(this)"></label>
+          <span class="ing-emoji">{{ r.emoji or '🍽️' }}</span>
+          <span class="ing-name">{{ r.name }}</span>
+          <span class="spacer"></span>
+          <span class="ing-qty">{{ r.display }}</span>
+        </div>
+        {% if r.breakdown or r.notes %}
+        <div class="ing-sub">{% if r.breakdown %}{{ r.breakdown }}{% endif %}
+          {% if r.notes %}<span class="ing-note">✎ {{ r.notes }}</span>{% endif %}</div>
+        {% endif %}
+        {% endfor %}
+      </div>
     </div>
     {% endif %}
-    {% if s.cook_dinner %}
-    <div class="prep-group">
-      <h4 class="prep-h">🌙 Dinner <span class="muted small">· {{ s.dinner_total }}</span></h4>
-      <ul class="prep-list">
-        {% for plan, n in s.cook_dinner %}<li><span class="qty">{{ n }}×</span> {{ plan or '—' }}</li>{% endfor %}
-      </ul>
+    {% if prep.unmapped %}
+    <div class="prep-unmapped">
+      <b>⚠️ Not in the ingredient totals yet</b> — set their meal contents to include them:
+      {% for u in prep.unmapped %}
+      <div class="pack-order">{{ u.name }} <span class="muted small">· {{ u.label }} ({{ u.slot }})</span>
+        {% if u.sub_id %}<a class="fixlink" href="{{ url_for('subscription_detail', sid=u.sub_id) }}">Set contents ›</a>
+        {% elif u.trial_id %}<a class="fixlink" href="{{ url_for('trial_edit', tid=u.trial_id) }}">Pick its pack ›</a>{% endif %}
+      </div>
+      {% endfor %}
     </div>
     {% endif %}
+  </div>
+</details>
+{% endif %}
+
+{% if backlog and backlog.count %}
+<details class="disc disc-warn" id="backlog">
+  <summary><span class="ico">⏳</span><span class="lbl">Unmarked past orders</span>
+    <span class="amt" id="backlog-count">{{ backlog.count }}</span><span class="chev">›</span></summary>
+  <div class="disc-body">
+    <div class="small muted" style="margin-bottom:8px">Orders from previous days never marked
+      delivered or skipped — they're still counted against the subscription. Clear them here:</div>
+    {% for g in backlog.groups %}
+    <div class="bl-day">
+      <div class="bl-date">{{ g.date|fdate('%A, %d %b') }}</div>
+      {% for r in g.rows %}
+      <div class="bl-row" data-id="{{ r.id }}">
+        <div class="bl-info"><b>{{ r.name }}</b>
+          <span class="chip chip-xs chip-{{ (r.meal_type or 'Lunch')|lower }}">{{ r.meal_type or 'Lunch' }}</span>
+          <div class="muted small">{{ r.plan_label or 'Meal' }}</div></div>
+        <div class="acts">
+          <button class="iconbtn skip" title="Skipped (carries forward)" onclick="markPast(this, {{ r.id }}, 'Skipped')">✕</button>
+          <button class="iconbtn deliver" title="Was delivered" onclick="markPast(this, {{ r.id }}, 'Delivered')">✓</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
   </div>
 </details>
 {% endif %}

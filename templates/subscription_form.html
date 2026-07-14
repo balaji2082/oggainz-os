@@ -6,8 +6,9 @@
   <h1 style="margin:0 0 0 6px">{{ 'Edit subscription' if sub else 'New subscription' }}</h1>
 </div>
 
-<form method="post" class="card">
+<form method="post" class="card" id="subform">
   {% if lead %}<input type="hidden" name="lead" value="{{ lead }}">{% endif %}
+  <input type="hidden" name="comp_json" id="comp_json">
   <div class="form-grid">
     {% if preset_customer %}<div class="full alert alert-warn" style="margin-bottom:4px">
       ✓ Lead converted — booking this pack for the new customer.</div>{% endif %}
@@ -22,24 +23,24 @@
     </div>
 
     <div class="full">
-      <label>Plan</label>
-      <input name="plan_name" list="plans" value="{{ sub.plan_name if sub }}" required
-             placeholder="e.g. Elite Meal Pack, Custom Meal Pack…">
-      <datalist id="plans">{% for p in plans %}<option value="{{ p.name }}">{% endfor %}</datalist>
+      <label>Pack</label>
+      <div class="packpick" id="packpick"></div>
+      <input name="plan_name" id="plan_name" value="{{ sub.plan_name if sub }}" required
+             placeholder="…or type a custom pack name" style="margin-top:8px">
     </div>
 
     <div>
       <label>Duration</label>
-      <select name="duration" onchange="if(!this.form.total_meals_scheduled.dataset.touched)this.form.total_meals_scheduled.value=(this.value=='Weekly'?5:20)">
+      <select name="duration" id="f_duration">
         {% for d in ['Monthly','Weekly','Custom'] %}
         <option {{ 'selected' if (sub.duration if sub else 'Monthly')==d }}>{{ d }}</option>{% endfor %}
       </select>
     </div>
     <div>
       <label>Total meals scheduled</label>
-      <input name="total_meals_scheduled" type="number" min="1"
+      <input name="total_meals_scheduled" type="number" min="1" id="f_meals"
              value="{{ sub.total_meals_scheduled if sub else 20 }}"
-             oninput="this.dataset.touched=1">
+             oninput="this.dataset.touched=1; refreshPricing()">
     </div>
 
     <div>
@@ -50,6 +51,20 @@
     <div>
       <label>Preferred timing</label>
       <input name="preferred_timing" value="{{ sub.preferred_timing if sub }}" placeholder="11:00 - 12:30pm">
+    </div>
+
+    <!-- ===== Meal contents: what goes in every box ===== -->
+    <div class="full">
+      <label>🍱 In every box</label>
+      <div class="builder" id="base_rows"></div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="openPicker('base')" style="margin-top:8px">＋ Add item</button>
+    </div>
+
+    <div class="full">
+      <label>⭐ Add-ons <span class="muted small">(charged per meal, prepared with every meal)</span></label>
+      <div class="builder" id="addon_rows"></div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="openPicker('addon')" style="margin-top:8px">＋ Add add-on</button>
+      <div class="small muted" id="addon_hint" style="margin-top:6px"></div>
     </div>
 
     <div>
@@ -67,7 +82,9 @@
     <div>
       <label>Subscription price (₹) — food only</label>
       <input name="subscription_price" type="number" step="1" id="f_price"
-             value="{{ sub.subscription_price if sub else '' }}" oninput="feeHint()">
+             value="{{ sub.subscription_price if sub else '' }}"
+             oninput="this.dataset.touched=1; feeHint()">
+      <div class="small" id="price_suggest" style="margin-top:6px"></div>
     </div>
     <div>
       <label>Delivery fee (₹) — whole pack</label>
@@ -82,25 +99,199 @@
 
     <div class="full">
       <label>Notes / customisations</label>
-      <textarea name="notes" placeholder="e.g. Chicken[100g] + Legumes, 1 scrambled egg, no honey…">{{ sub.notes if sub }}</textarea>
+      <textarea name="notes" placeholder="e.g. paneer instead of chicken on Tue &amp; Fri, no yogurt, deliver to office…">{{ sub.notes if sub }}</textarea>
+      <div class="small muted" style="margin-top:6px">🤖 OG Agent reads this — patterns like
+        “X instead of Y on Tue/Fri” become one-tap prep-list rules on the next page.</div>
     </div>
   </div>
   <div class="form-actions">
-    <button class="btn btn-primary">{{ 'Save changes' if sub else 'Create subscription' }}</button>
+    <button class="btn btn-primary" onclick="packComp()">{{ 'Save changes' if sub else 'Create subscription' }}</button>
   </div>
 </form>
+
+<!-- item picker sheet -->
+<div class="sheet" id="picker" hidden>
+  <div class="sheet-card">
+    <div class="card-title"><h3 id="picker_title">Add item</h3><span class="spacer"></span>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="closePicker()">✕</button></div>
+    <div id="picker_rows"></div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-// Show the per-delivery delivery fee (whole-pack fee ÷ meals) as a live hint.
+const MENU = {{ menu_data|tojson }};
+const EXISTING = {{ existing_comp|tojson }};
+const COMP = {};            // component_id -> catalog row
+MENU.components.forEach(c => COMP[c.id] = c);
+
+// rows = live composition being built: [{id, qty, kind, note}]
+let rows = EXISTING.length ? EXISTING.slice() : [];
+let pickerKind = 'base';
+
+function fmtQty(q, unit){
+  if (unit === 'g') return Math.round(q) + 'g';
+  if (unit === 'pcs') return q + ' pc' + (q != 1 ? 's' : '');
+  return q + ' serving' + (q != 1 ? 's' : '');
+}
+
+// ---- pack cards ----
+function renderPacks(){
+  const wrap = document.getElementById('packpick');
+  wrap.innerHTML = '';
+  Object.entries(MENU.plans).forEach(([name, p]) => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'packcard' + (document.getElementById('plan_name').value === name ? ' sel' : '');
+    const price = p.monthly ? '₹' + p.monthly + '/mo' : 'build your own';
+    el.innerHTML = `<b>${name.replace(' Meal Pack','')}</b><span>${price}</span>`;
+    el.onclick = () => pickPack(name);
+    wrap.appendChild(el);
+  });
+}
+
+function pickPack(name){
+  const p = MENU.plans[name];
+  document.getElementById('plan_name').value = name;
+  // load the pack recipe as the base (keeps current add-ons)
+  rows = rows.filter(r => r.kind === 'addon');
+  (p.recipe || []).forEach(r => rows.push({id: r.id, qty: r.qty, kind: 'base', note: r.note || ''}));
+  renderPacks(); renderRows(); autoPrice();
+}
+
+function autoPrice(){
+  const name = document.getElementById('plan_name').value;
+  const p = MENU.plans[name];
+  const priceEl = document.getElementById('f_price');
+  const mealsEl = document.getElementById('f_meals');
+  const dur = document.getElementById('f_duration').value;
+  if (!mealsEl.dataset.touched) mealsEl.value = (dur === 'Weekly' ? 5 : 20);
+  if (p && !priceEl.dataset.touched){
+    const base = dur === 'Weekly' ? p.weekly : p.monthly;
+    if (base) priceEl.value = Math.round(base + addonTotal());
+  }
+  refreshPricing();
+}
+document.getElementById('f_duration').addEventListener('change', autoPrice);
+
+// ---- composition rows ----
+function renderRows(){
+  ['base','addon'].forEach(kind => {
+    const wrap = document.getElementById(kind + '_rows');
+    wrap.innerHTML = '';
+    rows.filter(r => r.kind === (kind === 'addon' ? 'addon' : 'base')).forEach(r => {
+      const c = COMP[r.id]; if (!c) return;
+      const div = document.createElement('div');
+      div.className = 'b-row';
+      const priceTag = (kind === 'addon' && c.addon_price)
+        ? `<span class="b-price">₹${Math.round(c.addon_price * (r.qty/(c.step||1)))}/meal</span>` : '';
+      div.innerHTML = `
+        <span class="b-emoji">${c.emoji || '🍽️'}</span>
+        <span class="b-name">${c.name}${priceTag}
+          <input class="b-note" placeholder="note (e.g. scrambled)" value="${(r.note||'').replace(/"/g,'&quot;')}"></span>
+        <span class="stepper">
+          <button type="button" onclick="bump(${r.id},'${r.kind}',-1)">−</button>
+          <b>${fmtQty(r.qty, c.unit)}</b>
+          <button type="button" onclick="bump(${r.id},'${r.kind}',1)">＋</button>
+        </span>`;
+      div.querySelector('.b-note').addEventListener('input', e => { r.note = e.target.value; });
+      wrap.appendChild(div);
+    });
+    if (!wrap.children.length)
+      wrap.innerHTML = `<div class="empty small" style="padding:10px">${kind === 'addon'
+        ? 'No add-ons.' : 'Pick a pack above, or add items for a custom box.'}</div>`;
+  });
+  refreshPricing();
+}
+
+function bump(id, kind, dir){
+  const r = rows.find(x => x.id === id && x.kind === kind);
+  const c = COMP[id]; if (!r || !c) return;
+  const step = (c.unit === 'g') ? (c.step || 50) : (c.step || 1);
+  r.qty = Math.round((r.qty + dir * step) * 100) / 100;
+  if (r.qty <= 0) rows = rows.filter(x => x !== r);
+  renderRows();
+}
+
+function addonTotal(){   // ₹ per pack, across all meals
+  const meals = parseInt(document.getElementById('f_meals').value) || 0;
+  let perMeal = 0;
+  rows.filter(r => r.kind === 'addon').forEach(r => {
+    const c = COMP[r.id];
+    if (c && c.addon_price) perMeal += c.addon_price * (r.qty / (c.step || 1));
+  });
+  return Math.round(perMeal * meals);
+}
+
+function refreshPricing(){
+  const meals = parseInt(document.getElementById('f_meals').value) || 0;
+  const at = addonTotal();
+  const hint = document.getElementById('addon_hint');
+  hint.textContent = at ? `Add-ons ≈ ₹${Math.round(at/(meals||1))}/meal × ${meals} meals = ₹${at} per pack`
+                        : '';
+  const name = document.getElementById('plan_name').value;
+  const p = MENU.plans[name];
+  const sug = document.getElementById('price_suggest');
+  if (p){
+    const dur = document.getElementById('f_duration').value;
+    const base = (dur === 'Weekly' ? p.weekly : p.monthly) || 0;
+    if (base){
+      const total = Math.round(base + at);
+      sug.innerHTML = `Suggested: ₹${base} pack${at ? ' + ₹' + at + ' add-ons' : ''} =
+        <b>₹${total}</b> <a href="#" onclick="document.getElementById('f_price').value=${total};
+        document.getElementById('f_price').dataset.touched=1; feeHint(); return false"
+        style="color:var(--lime)">use</a>`;
+    } else sug.textContent = '';
+  } else sug.textContent = '';
+  feeHint();
+}
+
+// ---- picker sheet ----
+function openPicker(kind){
+  pickerKind = kind;
+  document.getElementById('picker_title').textContent = kind === 'addon' ? 'Add add-on' : 'Add item to the box';
+  const wrap = document.getElementById('picker_rows');
+  wrap.innerHTML = '';
+  MENU.components
+    .filter(c => kind !== 'addon' || c.addon_price)
+    .forEach(c => {
+      const div = document.createElement('button');
+      div.type = 'button'; div.className = 'pick-row';
+      const meta = [c.protein, (kind === 'addon' && c.addon_price) ? '₹' + c.addon_price : '']
+        .filter(Boolean).join(' · ');
+      div.innerHTML = `<span class="b-emoji">${c.emoji || '🍽️'}</span><b>${c.name}</b>
+        <span class="muted small">${meta}</span><span class="spacer"></span>＋`;
+      div.onclick = () => {
+        const ex = rows.find(x => x.id === c.id && x.kind === pickerKind);
+        if (ex) ex.qty += (c.unit === 'g' ? (c.step || 50) : 1);
+        else rows.push({id: c.id, qty: c.default_qty || 1, kind: pickerKind, note: ''});
+        closePicker(); renderRows();
+      };
+      wrap.appendChild(div);
+    });
+  document.getElementById('picker').hidden = false;
+}
+function closePicker(){ document.getElementById('picker').hidden = true; }
+document.getElementById('picker').addEventListener('click', e => {
+  if (e.target.id === 'picker') closePicker();
+});
+
+function packComp(){
+  document.getElementById('comp_json').value = JSON.stringify(rows);
+}
+document.getElementById('subform').addEventListener('submit', packComp);
+
 function feeHint(){
   const fee = parseFloat(document.getElementById('f_fee').value) || 0;
-  const meals = parseInt(document.querySelector('[name=total_meals_scheduled]').value) || 0;
+  const meals = parseInt(document.getElementById('f_meals').value) || 0;
   const el = document.getElementById('fee_hint');
   if (fee > 0 && meals > 0) el.textContent = '= ₹' + Math.round(fee/meals) + ' per delivery × ' + meals;
   else el.textContent = 'Total across the pack (e.g. ₹60 × 20 = ₹1200).';
 }
-feeHint();
+
+{% if sub %}document.getElementById('f_price').dataset.touched = 1;
+document.getElementById('f_meals').dataset.touched = 1;{% endif %}
+renderPacks(); renderRows(); feeHint();
 </script>
 {% endblock %}

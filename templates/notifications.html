@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Notifications · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>🔔 Notifications</h1>
+  <span class="spacer"></span>
+  <a class="btn btn-forest btn-sm" href="{{ url_for('agent_home') }}">🤖 Open OG Agent</a>
+</div>
+
+<div class="card">
+  {% for n in rows %}
+  <div class="notif {{ 'unread' if not n.is_read }}">
+    <div class="notif-ic">{{ {'digest':'📋','alert':'⚠️','reminder':'⏰','agent':'🤖'}.get(n.kind, '🔔') }}</div>
+    <div class="notif-body">
+      <b>{{ n.title }}</b>
+      {% if n.body %}<div class="notif-text">{{ n.body }}</div>{% endif %}
+      <div class="muted small">{{ n.at }}</div>
+      {% if n.link %}<a class="fixlink" href="{{ n.link }}">Open ›</a>{% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="empty"><div class="big">🔕</div>Nothing yet — OG Agent posts your morning brief and
+    alerts here (and to Telegram if connected in Settings).</div>
+  {% endfor %}
+</div>
+{% endblock %}

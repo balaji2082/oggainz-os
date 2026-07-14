@@ -193,6 +193,148 @@ CREATE TABLE IF NOT EXISTS lead_updates (
     FOREIGN KEY (lead_id) REFERENCES leads(id)
 );
 
+-- ===================== MENU ENGINE =====================
+-- The editable food catalog: every buildable item (chicken, egg, carb, veggies…).
+-- unit: 'g' (aggregated in grams with a size breakdown), 'pcs', or 'serving'.
+-- step: the natural increment (chicken 50g steps, egg 1pc). addon_price: price per
+-- step when offered as a member add-on (NULL = not sold as an add-on).
+CREATE TABLE IF NOT EXISTS components (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    unit        TEXT NOT NULL DEFAULT 'serving',   -- g | pcs | serving
+    step        REAL DEFAULT 1,
+    default_qty REAL DEFAULT 1,
+    addon_price REAL,
+    protein     TEXT,                              -- display only, e.g. '11g P / 50g'
+    emoji       TEXT,
+    sort        INTEGER DEFAULT 100,
+    active      INTEGER DEFAULT 1
+);
+
+-- What a standard pack contains (editable recipe per plan).
+CREATE TABLE IF NOT EXISTS plan_components (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id      INTEGER NOT NULL,
+    component_id INTEGER NOT NULL,
+    qty          REAL NOT NULL DEFAULT 1,
+    note         TEXT,
+    FOREIGN KEY (plan_id) REFERENCES plans(id),
+    FOREIGN KEY (component_id) REFERENCES components(id)
+);
+
+-- What THIS subscription actually gets every meal: the pack recipe snapshot
+-- (kind='base') plus paid add-ons (kind='addon') or a fully custom build.
+CREATE TABLE IF NOT EXISTS subscription_components (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscription_id TEXT NOT NULL,
+    component_id    INTEGER NOT NULL,
+    qty             REAL NOT NULL DEFAULT 1,
+    kind            TEXT DEFAULT 'base',           -- base | addon
+    note            TEXT,
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id),
+    FOREIGN KEY (component_id) REFERENCES components(id)
+);
+
+-- Standing per-subscription tweaks the prep list applies automatically:
+-- e.g. swap Chicken → Paneer on Tue+Fri, or add an extra Egg on Mondays.
+-- weekdays: CSV of weekday numbers (Mon=0); NULL = every day.
+CREATE TABLE IF NOT EXISTS component_rules (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscription_id   TEXT NOT NULL,
+    weekdays          TEXT,
+    start_date        TEXT,
+    end_date          TEXT,
+    action            TEXT NOT NULL,               -- swap | add | remove
+    from_component_id INTEGER,
+    to_component_id   INTEGER,
+    qty               REAL,
+    note              TEXT,
+    source            TEXT DEFAULT 'manual',       -- manual | agent
+    active            INTEGER DEFAULT 1,
+    created_at        TEXT,
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
+);
+
+-- ===================== INVOICES =====================
+-- items is a JSON list of {desc, qty, unit, amount}. token makes the private
+-- customer-facing link (/i/<token>) unguessable without needing a login.
+CREATE TABLE IF NOT EXISTS invoices (
+    id              TEXT PRIMARY KEY,              -- INV-001 ...
+    token           TEXT UNIQUE,
+    customer_id     TEXT,
+    subscription_id TEXT,
+    trial_id        TEXT,
+    bill_name       TEXT,
+    bill_phone      TEXT,
+    bill_address    TEXT,
+    inv_date        TEXT,
+    items           TEXT,
+    discount        REAL DEFAULT 0,
+    total           REAL DEFAULT 0,
+    received        REAL DEFAULT 0,
+    payment_status  TEXT DEFAULT 'Unpaid',
+    notes           TEXT,
+    created_at      TEXT,
+    updated_at      TEXT
+);
+
+-- ===================== OG AGENT =====================
+CREATE TABLE IF NOT EXISTS notifications (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    at      TEXT,
+    kind    TEXT,                                  -- digest | alert | reminder | agent
+    title   TEXT,
+    body    TEXT,
+    link    TEXT,
+    is_read INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS agent_messages (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    at      TEXT,
+    role    TEXT,                                  -- user | assistant
+    content TEXT
+);
+
+-- OG Agent's long-term memory: facts Balaji teaches it ("we now deliver on
+-- Saturdays too", "Prakash prefers extra spicy"). Injected into every chat so
+-- the agent's knowledge grows over time. Facts are only saved after Balaji
+-- confirms them with one tap — the agent never writes its own memory silently.
+CREATE TABLE IF NOT EXISTS agent_facts (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    at      TEXT,
+    topic   TEXT,                                  -- short label, e.g. 'pricing', 'delivery'
+    fact    TEXT NOT NULL,
+    source  TEXT DEFAULT 'chat',                   -- chat | manual
+    active  INTEGER DEFAULT 1
+);
+
+-- Prep-list tick-offs: one row per (day, item) Balaji has marked as prepped.
+-- Purely a kitchen self-check; never affects orders or subscriptions.
+CREATE TABLE IF NOT EXISTS prep_ticks (
+    date TEXT NOT NULL,                            -- YYYY-MM-DD
+    key  TEXT NOT NULL,                            -- 'Lunch|Chicken', 'All|Egg' ...
+    PRIMARY KEY (date, key)
+);
+
+-- ===================== BROCHURE =====================
+-- The always-editable digital brochure (public page /brochure). Body text uses a
+-- tiny markup: '- ' bullets, '| a | b |' tables, **bold**, blank line = new para.
+CREATE TABLE IF NOT EXISTS brochure_sections (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    sort     INTEGER DEFAULT 100,
+    title    TEXT NOT NULL,
+    subtitle TEXT,
+    body     TEXT,
+    active   INTEGER DEFAULT 1,
+    updated_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sub_comps      ON subscription_components(subscription_id);
+CREATE INDEX IF NOT EXISTS idx_plan_comps     ON plan_components(plan_id);
+CREATE INDEX IF NOT EXISTS idx_comp_rules_sub ON component_rules(subscription_id);
+CREATE INDEX IF NOT EXISTS idx_notif_read     ON notifications(is_read);
+
 CREATE INDEX IF NOT EXISTS idx_deliveries_date ON deliveries(date);
 CREATE INDEX IF NOT EXISTS idx_deliveries_sub  ON deliveries(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_subs_status     ON subscriptions(status);
@@ -211,7 +353,8 @@ CREATE INDEX IF NOT EXISTS idx_slot_moves_sub  ON subscription_slot_moves(subscr
 MIGRATIONS = {
     "deliveries":    [("trial_id", "TEXT"), ("day_note", "TEXT"), ("day_note_at", "TEXT")],
     "trial_orders":  [("notes", "TEXT"), ("delivery_date", "TEXT"),
-                      ("meal_type", "TEXT"), ("delivery_status", "TEXT")],
+                      ("meal_type", "TEXT"), ("delivery_status", "TEXT"),
+                      ("plan_id", "INTEGER")],   # which pack the trial is of → prep list
 }
 
 

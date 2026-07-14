@@ -21,6 +21,8 @@
     {% if lead.goal %}<span class="chip chip-line">🎯 {{ lead.goal }}</span>{% endif %}
     {% if lead.interest %}<span class="chip chip-line">🍱 {{ lead.interest }}</span>{% endif %}
     {% if lead.est_value %}<span class="chip chip-line">💰 {{ lead.est_value|inr }}</span>{% endif %}
+    {% if wa_brochure %}<a class="chip chip-line" href="{{ wa_brochure }}" target="_blank"
+        style="background:#e7f6ec; border-color:#bfe5cc">📘 Send brochure</a>{% endif %}
   </div>
   {% if lead.notes %}<div class="tcard-order" style="margin-bottom:0; margin-top:12px">{{ lead.notes }}</div>{% endif %}
   {% if lead.stage=='Lost' and lead.lost_reason %}

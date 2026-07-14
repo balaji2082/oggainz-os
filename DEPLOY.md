@@ -148,3 +148,28 @@ When you want a change, tell me. I push it to GitHub. Then you:
 
 > Free-tier note: PythonAnywhere emails you every ~3 months to click one link to keep the
 > account active. The first load after a quiet spell can take a few seconds. Both are normal.
+
+---
+
+## July 2026 upgrade — new features & how to deploy them
+
+The upgrade (detailed prep list, menu engine, invoices + T&C, backlog clearer, OG Agent) is
+all additive: push the code and it sets itself up on first load (new tables, brochure menu,
+updated pack prices, Royal retired). Your data is untouched; a backup is still taken locally.
+
+**Deploy as always:**
+1. Laptop: `git add -A && git commit -m "upgrade" && git push`
+2. PythonAnywhere Bash console: `cd oggainz-os && git pull`
+3. Web tab → **Reload**.
+
+**Optional — OG Agent extras (both configured inside the app, Settings → OG Agent):**
+- **Chat brain:** paste an Anthropic API key (console.anthropic.com → API keys). Without it,
+  the rules brain (morning brief, note reading, reminders) still works fully.
+- **Telegram alerts:** create a bot with @BotFather, paste the bot token + your chat id,
+  then hit "Send Telegram test".
+- **Morning brief without opening the app:** PythonAnywhere → Tasks → add a daily task:
+  `python3.10 /home/oggainz/oggainz-os/agent_daily.py` (free tier includes one daily task).
+
+**Customer-facing links (no password needed, safe to share):**
+- Invoices: each invoice gets its own secret link (`/i/<code>`) — send it via the WhatsApp button.
+- Terms & Conditions: `https://oggainz.pythonanywhere.com/terms`

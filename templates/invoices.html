@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Invoices · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head"><h1>🧾 Invoices</h1></div>
+
+<div class="card">
+  <div class="card-title"><h3>Generate an invoice</h3></div>
+  <form method="get" action="{{ url_for('invoice_new') }}" class="mini-grid">
+    <div class="grow"><label class="mini-l">From subscription</label>
+      <select name="sub" required>
+        <option value="">— pick a subscription —</option>
+        {% for s in subs %}<option value="{{ s.id }}">{{ s.id }} · {{ s.customer_name }} · {{ s.plan_name }}</option>{% endfor %}
+      </select></div>
+    <div class="mini-act"><button class="btn btn-primary btn-sm">⚡ Generate</button></div>
+  </form>
+  <div class="small muted" style="margin-top:8px">The invoice is auto-built from the pack, add-ons
+    and delivery fee — you can edit every line before sending.</div>
+</div>
+
+<div class="card">
+  <div class="card-title"><h3>All invoices</h3><span class="spacer"></span>
+    <span class="small muted">{{ rows|length }} total</span></div>
+  {% for r in rows %}
+  <a class="inv-row" href="{{ url_for('invoice_view', iid=r.id) }}">
+    <div class="inv-ic">🧾</div>
+    <div class="inv-mid">
+      <b>{{ r.bill_name }}</b>
+      <div class="muted small">{{ r.id }} · {{ r.inv_date|fdate('%d %b %Y') }}
+        {% if r.subscription_id %} · {{ r.subscription_id }}{% endif %}</div>
+    </div>
+    <div class="inv-right">
+      <b>{{ r.total|inr }}</b>
+      <span class="chip chip-xs chip-{{ (r.payment_status or 'Unpaid')|lower }}">{{ r.payment_status }}</span>
+    </div>
+  </a>
+  {% else %}
+  <div class="empty"><div class="big">🧾</div>No invoices yet — generate one from a subscription above,
+    or from any subscription's page.</div>
+  {% endfor %}
+</div>
+{% endblock %}

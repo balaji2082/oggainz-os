@@ -107,6 +107,54 @@ async function saveNote(btn) {
   }
 }
 
+// --- Prep list: tick an ingredient off as "prepped" (kitchen self-check) ---
+async function prepTick(cb) {
+  const row = cb.closest('.ing-row');
+  const dayEl = cb.closest('[data-day]');
+  const day = dayEl ? dayEl.dataset.day : '';
+  const on = cb.checked;
+  row.classList.toggle('ticked', on);
+  try {
+    const res = await fetch('/api/prep/tick', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'd=' + encodeURIComponent(day) +
+            '&key=' + encodeURIComponent(cb.dataset.key) +
+            '&on=' + (on ? '1' : '0')
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error();
+  } catch (e) {
+    cb.checked = !on;                        // roll back the optimistic tick
+    row.classList.toggle('ticked', cb.checked);
+    showToast('Could not save the tick — try again', false);
+  }
+}
+
+// --- Backlog: clear an old order that was never marked (Today → Unmarked past orders) ---
+async function markPast(btn, deliveryId, status) {
+  const row = btn.closest('.bl-row');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/delivery/${deliveryId}/mark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'status=' + encodeURIComponent(status)
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error();
+    row.style.transition = 'opacity .3s'; row.style.opacity = '.35';
+    row.querySelectorAll('button').forEach(b => b.disabled = true);
+    row.classList.add(status === 'Delivered' ? 'is-delivered' : 'is-skipped');
+    const badge = document.getElementById('backlog-count');
+    if (badge) badge.textContent = Math.max(0, parseInt(badge.textContent || '1') - 1);
+    showToast(status === 'Delivered' ? 'Marked delivered ✓' : 'Marked skipped — carries forward');
+  } catch (e) {
+    btn.disabled = false;
+    showToast('Could not save — try again', false);
+  }
+}
+
 // --- Trials: one-tap Paid / Delivered toggles (progressive enhancement) ---
 // Each toggle is a real <form> so it still works with JS off; here we intercept
 // it, POST in the background and flip the button in place — no page reload.

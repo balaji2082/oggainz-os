@@ -80,6 +80,91 @@
   </div>
 </div>
 
+{# ==================== Meal contents (prep-list source) ==================== #}
+<div class="card">
+  <div class="card-title"><h3>🍱 In every box</h3><span class="spacer"></span>
+    <a class="btn btn-ghost btn-sm" href="{{ url_for('subscription_edit', sid=sub.id) }}">Edit contents</a></div>
+  {% if comp %}
+  <div class="ing-list">
+    {% for r in comp %}
+    <div class="ing-row">
+      <span class="ing-emoji">{{ r.emoji or '🍽️' }}</span>
+      <span class="ing-name">{{ r.name }}{% if r.kind == 'addon' %} <span class="chip chip-xs chip-addon">add-on</span>{% endif %}
+        {% if r.note %}<span class="muted small"> · {{ r.note }}</span>{% endif %}</span>
+      <span class="spacer"></span>
+      <span class="ing-qty">{{ fmt_qty(r.qty, r.unit) }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty small">No contents set — the prep list can't count this pack's ingredients yet.
+    <a href="{{ url_for('subscription_edit', sid=sub.id) }}" style="color:var(--lime)"><b>Set them now ›</b></a></div>
+  {% endif %}
+
+  {% if suggestions %}
+  <div class="agent-suggest">
+    <div class="as-head">🤖 <b>OG Agent</b> read the notes and suggests:</div>
+    {% for p in suggestions %}
+    <div class="as-row">
+      <span class="as-label">{{ p.label }}</span>
+      <span class="spacer"></span>
+      <form method="post" action="{{ url_for('subscription_suggest', sid=sub.id) }}" class="rowform">
+        <input type="hidden" name="label" value="{{ p.label }}">
+        <button name="do" value="apply" class="btn btn-success btn-sm">Apply</button>
+        <button name="do" value="dismiss" class="btn btn-ghost btn-sm">✕</button>
+      </form>
+    </div>
+    {% endfor %}
+    <div class="small muted" style="margin-top:6px">Applying creates a standing rule below — the prep list follows it automatically.</div>
+  </div>
+  {% endif %}
+
+  {# -------- standing rules -------- #}
+  <details class="rules-box" {{ 'open' if rules }}>
+    <summary><b>📐 Standing rules</b> <span class="muted small">· day-wise swaps the prep list applies</span>
+      {% if rules %}<span class="navbadge">{{ rules|length }}</span>{% endif %}<span class="chev">›</span></summary>
+    {% for r in rules %}
+    <div class="as-row">
+      <span class="as-label">{{ rule_labels[r.id] }}{% if r.source=='agent' %} <span class="chip chip-xs chip-addon">agent</span>{% endif %}</span>
+      <span class="spacer"></span>
+      <form method="post" action="{{ url_for('subscription_rules', sid=sub.id) }}"
+            onsubmit="return confirm('Remove this rule?');">
+        <input type="hidden" name="do" value="delete"><input type="hidden" name="rid" value="{{ r.id }}">
+        <button class="btn btn-ghost btn-sm">🗑</button>
+      </form>
+    </div>
+    {% endfor %}
+    <form method="post" action="{{ url_for('subscription_rules', sid=sub.id) }}" class="rule-form">
+      <div class="mini-grid">
+        <div><label class="mini-l">Rule</label>
+          <select name="action" onchange="ruleKind(this)">
+            <option value="swap">Swap X → Y</option>
+            <option value="add">Add extra</option>
+            <option value="remove">Remove item</option>
+          </select></div>
+        <div data-rule="from"><label class="mini-l">Instead of</label>
+          <select name="from_component"><option value="">—</option>
+            {% for c in components %}<option value="{{ c.id }}">{{ c.emoji }} {{ c.name }}</option>{% endfor %}
+          </select></div>
+        <div data-rule="to"><label class="mini-l">Give</label>
+          <select name="to_component"><option value="">—</option>
+            {% for c in components %}<option value="{{ c.id }}">{{ c.emoji }} {{ c.name }}</option>{% endfor %}
+          </select></div>
+        <div><label class="mini-l">Qty</label>
+          <input type="number" name="qty" step="any" placeholder="auto"></div>
+      </div>
+      <div class="wk-picks">
+        <span class="mini-l" style="margin-right:4px">On days:</span>
+        {% for i, nm in [(0,'Mon'),(1,'Tue'),(2,'Wed'),(3,'Thu'),(4,'Fri'),(5,'Sat'),(6,'Sun')] %}
+        <label class="wk-pick"><input type="checkbox" name="weekday" value="{{ i }}"><span>{{ nm }}</span></label>
+        {% endfor %}
+        <span class="muted small">(none = every day)</span>
+      </div>
+      <button class="btn btn-primary btn-sm" style="margin-top:8px">Add rule</button>
+    </form>
+  </details>
+</div>
+
 {# ============================ Freeze / pause ============================ #}
 <div class="card">
   <div class="card-title"><h3>❄️ Freeze / pause</h3><span class="spacer"></span>
@@ -194,6 +279,7 @@
   <h3>Actions</h3>
   <div class="row" style="gap:8px; align-items:center">
     <a class="btn btn-ghost btn-sm" href="{{ url_for('subscription_edit', sid=sub.id) }}">✏ Edit details</a>
+    <a class="btn btn-forest btn-sm" href="{{ url_for('invoice_new', sub=sub.id) }}">🧾 Generate invoice</a>
     {% if sub.status!='Completed' %}
     <form method="post" action="{{ url_for('subscription_status', sid=sub.id) }}">
       <input type="hidden" name="to" value="Completed"><button class="btn btn-ghost btn-sm">Mark completed</button></form>
@@ -239,4 +325,17 @@
     {% else %}<tr><td colspan="4" class="muted">No deliveries yet.</td></tr>{% endfor %}
   </table></div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Show only the relevant pickers for the chosen rule type.
+function ruleKind(sel){
+  const form = sel.closest('.rule-form');
+  const from = form.querySelector('[data-rule=from]');
+  const to = form.querySelector('[data-rule=to]');
+  from.style.display = (sel.value === 'add') ? 'none' : '';
+  to.style.display = (sel.value === 'remove') ? 'none' : '';
+}
+</script>
 {% endblock %}

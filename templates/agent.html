@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}OG Agent · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>🤖 OG Agent</h1>
+  <span class="spacer"></span>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('notifications') }}">🔔 Notifications{% if g_unread %} ({{ g_unread }}){% endif %}</a>
+</div>
+
+{% if not ready %}
+<div class="alert alert-warn">
+  <span>🔑</span>
+  <span><b>Chat is offline.</b> The rules brain (daily brief, note reading, reminders) is already
+    working — to also chat with OG Agent, add your Anthropic API key in
+    <a href="{{ url_for('settings') }}#agent" style="color:var(--forest); text-decoration:underline">Settings → OG Agent</a>.</span>
+</div>
+{% endif %}
+
+<div class="card agent-card">
+  <div class="chat" id="chat">
+    {% for m in msgs %}
+    <div class="msg {{ m.role }}">
+      <div class="msg-bubble">{{ m.content }}</div>
+    </div>
+    {% else %}
+    <div class="agent-hello">
+      <div class="big">🤖</div>
+      <b>Hey Balaji — I'm OG Agent.</b>
+      <p class="small muted">I can see today's prep, every subscription's contents, payments and
+        revenue. Ask me anything, or tell me a change — e.g.:</p>
+      <div class="chip-suggests">
+        <button class="chip chip-line" onclick="ask(this.textContent)">How is this month going vs last month?</button>
+        <button class="chip chip-line" onclick="ask(this.textContent)">Who's ending soon and needs a renewal nudge?</button>
+        <button class="chip chip-line" onclick="ask(this.textContent)">Give Ram paneer instead of chicken on Tuesdays</button>
+        <button class="chip chip-line" onclick="ask(this.textContent)">What should I prep extra of this week?</button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="chat-input">
+    <textarea id="q" rows="1" placeholder="Ask OG Agent…" {{ 'disabled' if not ready }}></textarea>
+    <button class="btn btn-primary" id="send" onclick="send()" {{ 'disabled' if not ready }}>➤</button>
+  </div>
+  <div class="row" style="justify-content:space-between; margin-top:8px">
+    <span class="small muted">Actions I suggest need your confirm — final call is always yours.</span>
+    {% if msgs %}
+    <form method="post" action="{{ url_for('agent_clear') }}"
+          onsubmit="return confirm('Clear the whole chat?');">
+      <button class="btn btn-ghost btn-sm">Clear chat</button></form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title"><h3>🧠 What I've learned</h3><span class="spacer"></span>
+    <span class="small muted">{{ facts|length }} fact{{ 's' if facts|length != 1 }}</span></div>
+  <div class="small muted" style="margin-bottom:8px">
+    My permanent memory. Tell me something new in chat (I'll ask to remember it), or teach me
+    directly below. I use these facts in every answer — clearing the chat never erases them.</div>
+  {% for f in facts %}
+  <div class="fact-row">
+    <span class="fact-topic">{{ f.topic or 'general' }}</span>
+    <span class="fact-text">{{ f.fact }}
+      <span class="muted small">· {{ f.at|fdate('%d %b %Y') if f.at }}</span></span>
+    <form method="post" action="{{ url_for('agent_fact_delete', fid=f.id) }}"
+          onsubmit="return confirm('Forget this fact?');">
+      <button class="fact-del" title="Forget">✕</button></form>
+  </div>
+  {% else %}
+  <div class="small muted">Nothing yet — tell me something worth remembering and confirm the
+    🧠 suggestion, and it lands here.</div>
+  {% endfor %}
+  <form method="post" action="{{ url_for('agent_fact_add') }}" class="fact-add">
+    <input name="topic" placeholder="Topic (pricing…)" maxlength="30">
+    <input name="fact" placeholder="Teach me a fact, e.g. 'Saturday delivery costs ₹50 extra'" required>
+    <button class="btn btn-forest btn-sm" type="submit">+ Teach</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const chat = document.getElementById('chat');
+const q = document.getElementById('q');
+chat.scrollTop = chat.scrollHeight;
+if (q) {
+  q.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  q.addEventListener('input', () => { q.style.height='auto'; q.style.height=Math.min(q.scrollHeight,120)+'px'; });
+}
+
+function bubble(role, text){
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  const b = document.createElement('div');
+  b.className = 'msg-bubble';
+  b.textContent = text;
+  div.appendChild(b);
+  const hello = chat.querySelector('.agent-hello');
+  if (hello) hello.remove();
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return b;
+}
+
+function ask(t){ q.value = t; send(); }
+
+async function send(){
+  const text = q.value.trim();
+  if (!text) return;
+  q.value = ''; q.style.height = 'auto';
+  bubble('user', text);
+  const think = bubble('assistant', 'thinking…');
+  think.classList.add('thinking');
+  document.getElementById('send').disabled = true;
+  try {
+    const res = await fetch('{{ url_for("agent_chat") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'q=' + encodeURIComponent(text)
+    });
+    const data = await res.json();
+    think.classList.remove('thinking');
+    if (!data.ok) { think.textContent = '⚠️ ' + data.error; return; }
+    think.textContent = data.reply;
+    (data.actions || []).forEach(a => addAction(think.parentElement, a));
+  } catch(e) {
+    think.classList.remove('thinking');
+    think.textContent = '⚠️ Could not reach the server — try again.';
+  } finally {
+    document.getElementById('send').disabled = false;
+    chat.scrollTop = chat.scrollHeight;
+  }
+}
+
+function addAction(msgEl, a){
+  const box = document.createElement('div');
+  box.className = 'action-box';
+  const label = a.type === 'rule'
+    ? `📐 Rule for ${a.sub_id}: ${a.action} ${a.from || ''}${a.from && a.to ? ' → ' : ''}${a.to || ''}${a.qty ? ' ' + a.qty : ''}${a.weekdays ? ' · days ' + a.weekdays : ''}`
+    : `⏰ Reminder: ${a.title || ''}`;
+  box.innerHTML = `<span class="as-label">${label}</span>`;
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-success btn-sm';
+  btn.textContent = '✓ Confirm';
+  btn.onclick = async () => {
+    btn.disabled = true;
+    const res = await fetch('{{ url_for("agent_action") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'action=' + encodeURIComponent(JSON.stringify(a))
+    });
+    const data = await res.json();
+    box.innerHTML = data.ok ? '✅ ' + data.message : '⚠️ ' + data.message;
+  };
+  box.appendChild(btn);
+  msgEl.appendChild(box);
+}
+</script>
+{% endblock %}

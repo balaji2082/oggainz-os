@@ -12,9 +12,15 @@ from datetime import date, datetime, timedelta
 from flask import (Flask, render_template, request, redirect, url_for,
                    jsonify, send_file, flash, abort, session)
 
+import json
+import secrets
+
 import db
 import core
 import crm
+import menu
+import agent
+import brochure
 
 # Run all date logic in the user's timezone (IST) even when the app is hosted on a
 # server whose clock is UTC (e.g. PythonAnywhere). Without this, "today" on the server
@@ -42,6 +48,13 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 # below), so initialisation has to happen here too. init_db() is safe to repeat.
 db.init_db()
 
+# Seed the menu engine (component catalog + brochure pack recipes/prices) once,
+# then the editable digital brochure (built from those live plans/prices) once.
+_c = db.get_db()
+menu.seed_menu(_c)
+brochure.seed_brochure(_c)
+_c.close()
+
 # ---------------------------------------------------------------------------
 # Login gate
 # ---------------------------------------------------------------------------
@@ -49,7 +62,9 @@ db.init_db()
 # server). With no password configured, the app behaves exactly as before for
 # local use on your laptop — no login screen.
 APP_PASSWORD = os.environ.get("OG_PASSWORD")
-PUBLIC_ENDPOINTS = {"login", "static"}
+# invoice_public + terms + brochure are customer-facing pages (token-protected /
+# plain info), so they stay reachable without the app password.
+PUBLIC_ENDPOINTS = {"login", "static", "invoice_public", "terms", "brochure_public"}
 
 
 @app.before_request
@@ -168,13 +183,32 @@ def today_iso():
     return date.today().strftime("%Y-%m-%d")
 
 
+@app.before_request
+def agent_heartbeat():
+    """Once per day (first request), OG Agent builds the morning brief + alerts."""
+    if request.endpoint in PUBLIC_ENDPOINTS or request.endpoint is None:
+        return
+    if APP_PASSWORD and not session.get("authed"):
+        return
+    try:
+        c = conn()
+        agent.run_daily(c)
+        c.close()
+    except Exception:
+        pass                                     # the app must never die on agent trouble
+
+
 @app.context_processor
 def inject_globals():
     c = conn()
     stats = core.headline_stats(c)
     due = crm.followups_due_count(c)            # CRM follow-ups due → nav badge
+    unread = agent.unread_count(c)              # OG Agent bell badge
+    agent_ready = agent.ai_ready(c)             # floating chat: online or key missing
     c.close()
-    return {"g_stats": stats, "g_due": due, "active_page": request.endpoint,
+    return {"g_stats": stats, "g_due": due, "g_unread": unread,
+            "g_agent_ready": agent_ready,
+            "active_page": request.endpoint,
             "today": date.today().strftime("%Y-%m-%d"),
             "login_active": bool(APP_PASSWORD), "authed": session.get("authed"),
             "deployed": bool(APP_PASSWORD)}
@@ -207,11 +241,15 @@ def today():
         "SELECT * FROM subscriptions WHERE payment_status!='Paid' ORDER BY id"
     ).fetchall()
     override = core.day_override(c, d)
+    prep = menu.prep_for_day(c, d, rows=summary["rows"])   # detailed kitchen quantities
+    backlog = menu.backlog(c, date.today().strftime("%Y-%m-%d"))
+    ticks = {r["key"] for r in c.execute("SELECT key FROM prep_ticks WHERE date=?", (d,))}
     prev_d = (datetime.strptime(d, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
     next_d = (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
     c.close()
     return render_template("today.html", d=d, s=summary, ending=ending, unpaid=unpaid,
                            prev_d=prev_d, next_d=next_d, view=view, override=override,
+                           prep=prep, backlog=backlog, ticks=ticks,
                            day_label=fmt_date(d, "%A, %d %b %Y"))
 
 
@@ -250,6 +288,24 @@ def api_mark(did):
                     "skipped": s["skipped"], "total": s["total"]})
 
 
+@app.route("/api/prep/tick", methods=["POST"])
+def api_prep_tick():
+    """Toggle one prep-list item's 'prepped ✓' tick for a day. A pure kitchen
+    self-check — it never touches orders, meals or subscriptions."""
+    d = request.form.get("d") or date.today().strftime("%Y-%m-%d")
+    key = (request.form.get("key") or "").strip()
+    on = request.form.get("on") == "1"
+    if not key:
+        return jsonify({"ok": False})
+    c = conn()
+    if on:
+        c.execute("INSERT OR IGNORE INTO prep_ticks(date,key) VALUES(?,?)", (d, key))
+    else:
+        c.execute("DELETE FROM prep_ticks WHERE date=? AND key=?", (d, key))
+    c.commit(); c.close()
+    return jsonify({"ok": True, "on": on})
+
+
 @app.route("/api/delivery/<int:did>/note", methods=["POST"])
 def api_note(did):
     """Save/clear the one-off note on a single day's order (slot swap, same-price plan
@@ -283,6 +339,49 @@ def deliveries():
 # ---------------------------------------------------------------------------
 # Subscriptions
 # ---------------------------------------------------------------------------
+def _menu_data(c):
+    """Catalog + recipes + prices as one JSON blob the subscription form's JS uses
+    for pack preview, add-on pricing, and the custom builder."""
+    comps = [{"id": r["id"], "name": r["name"], "unit": r["unit"], "step": r["step"],
+              "default_qty": r["default_qty"], "addon_price": r["addon_price"],
+              "protein": r["protein"], "emoji": r["emoji"]}
+             for r in menu.all_components(c)]
+    plans_out = {}
+    for p in c.execute("SELECT * FROM plans WHERE active=1").fetchall():
+        plans_out[p["name"]] = {
+            "id": p["id"], "monthly": p["price_monthly"], "weekly": p["price_weekly"],
+            "trial": p["price_trial"], "validity": p["validity_days"],
+            "recipe": [{"id": r["component_id"], "qty": r["qty"], "note": r["note"] or ""}
+                       for r in menu.plan_recipe(c, p["id"])],
+        }
+    return {"components": comps, "plans": plans_out}
+
+
+def _save_composition_from_form(c, sid, f):
+    """Persist the composition JSON the form's JS assembles (base + add-ons).
+    If the form didn't send one (e.g. old bookmark / JS off), fall back to copying
+    the matched pack recipe so the prep list still works."""
+    raw = f.get("comp_json")
+    if raw:
+        try:
+            items = json.loads(raw)
+        except ValueError:
+            items = None
+        if isinstance(items, list):
+            base = [(int(i["id"]), float(i["qty"]), (i.get("note") or "").strip())
+                    for i in items if i.get("kind") != "addon" and float(i.get("qty") or 0) > 0]
+            addons = [(int(i["id"]), float(i["qty"]), (i.get("note") or "").strip())
+                      for i in items if i.get("kind") == "addon" and float(i.get("qty") or 0) > 0]
+            menu.save_sub_composition(c, sid, base, addons)
+            return
+    if not c.execute("SELECT 1 FROM subscription_components WHERE subscription_id=?",
+                     (sid,)).fetchone():
+        p = menu.match_plan(c, f.get("plan_name"))
+        if p:
+            menu.copy_recipe_to_subscription(c, p["id"], sid)
+            c.commit()
+
+
 @app.route("/subscriptions")
 def subscriptions():
     c = conn()
@@ -327,10 +426,18 @@ def subscription_detail(sid):
     slot_moves = core.slot_moves_for(c, sid)
     cur_pause = core.current_pause(c, sid)
     cur_move = core.current_slot_move(c, sid)
+    comp = menu.sub_composition(c, sid)
+    rules = menu.rules_for_sub(c, sid)
+    rule_labels = {r["id"]: menu.rule_label(r) for r in rules}
+    suggestions = agent.suggestions_for_sub(c, sub)
+    components = menu.all_components(c)
     c.close()
     return render_template("subscription_detail.html", sub=sub, cust=cust, dels=dels,
                            pauses=pauses, slot_moves=slot_moves, cur_pause=cur_pause,
-                           cur_move=cur_move, today=date.today().strftime("%Y-%m-%d"))
+                           cur_move=cur_move, comp=comp, rules=rules,
+                           rule_labels=rule_labels, suggestions=suggestions,
+                           components=components, fmt_qty=menu.fmt_qty,
+                           today=date.today().strftime("%Y-%m-%d"))
 
 
 @app.route("/subscriptions/new", methods=["GET", "POST"])
@@ -367,6 +474,7 @@ def subscription_new():
              scheduled, "Active", db.now_iso()))
         c.commit()
         core.recompute_subscription(c, sid)
+        _save_composition_from_form(c, sid, f)
         # If this booking came from converting a CRM lead, link them together.
         lead_id = f.get("lead")
         if lead_id:
@@ -376,11 +484,13 @@ def subscription_new():
         return redirect(url_for("subscription_detail", sid=sid))
     customers = c.execute("SELECT id,name FROM customers ORDER BY name").fetchall()
     plans = c.execute("SELECT * FROM plans WHERE active=1 ORDER BY name").fetchall()
+    menu_data = _menu_data(c)
     c.close()
     return render_template("subscription_form.html", customers=customers, plans=plans,
                            sub=None, today=date.today().strftime("%Y-%m-%d"),
                            preset_customer=request.args.get("customer"),
-                           lead=request.args.get("lead"))
+                           lead=request.args.get("lead"), menu_data=menu_data,
+                           existing_comp=[])
 
 
 @app.route("/subscriptions/<sid>/edit", methods=["GET", "POST"])
@@ -424,15 +534,20 @@ def subscription_edit(sid):
                   (cust["name"] if cust else sub["customer_name"],
                    cust["id"] if cust else sub["customer_id"], sid))
         c.commit()
+        _save_composition_from_form(c, sid, f)
         c.close()
         flash(f"Subscription {sid} updated.", "ok")
         return redirect(url_for("subscription_detail", sid=sid))
     customers = c.execute("SELECT id,name FROM customers ORDER BY name").fetchall()
     plans = c.execute("SELECT * FROM plans WHERE active=1 ORDER BY name").fetchall()
+    menu_data = _menu_data(c)
+    existing_comp = [{"id": r["component_id"], "qty": r["qty"], "kind": r["kind"],
+                      "note": r["note"] or ""} for r in menu.sub_composition(c, sid)]
     c.close()
     return render_template("subscription_form.html", customers=customers, plans=plans,
                            sub=sub, today=date.today().strftime("%Y-%m-%d"),
-                           preset_customer=None, lead=None)
+                           preset_customer=None, lead=None, menu_data=menu_data,
+                           existing_comp=existing_comp)
 
 
 @app.route("/subscriptions/<sid>/status", methods=["POST"])
@@ -691,14 +806,15 @@ def trials():
 def _save_trial(c, f, tid):
     d = f.get("date") or date.today().strftime("%Y-%m-%d")
     dd = f.get("delivery_date") or None
+    plan_id = int(f["plan_id"]) if f.get("plan_id") else None
     c.execute("""INSERT OR REPLACE INTO trial_orders(id,date,name,phone,order_text,amount,
                    payment_status,month,conversion,address,notes,delivery_date,meal_type,
-                   delivery_status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   delivery_status,plan_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
               (tid, d, f.get("name"), f.get("phone"), f.get("order_text"),
                float(f.get("amount") or 0), f.get("payment_status", "Paid"),
                core.month_label_iso(d), f.get("conversion"), f.get("address"),
                f.get("notes"), dd, f.get("meal_type", "Lunch"),
-               f.get("delivery_status", "Pending"), db.now_iso()))
+               f.get("delivery_status", "Pending"), plan_id, db.now_iso()))
     c.commit()
     core.sync_trial_delivery(c, tid)     # add/update/remove its slot in the day's orders
 
@@ -712,8 +828,10 @@ def trial_new():
         c.close()
         flash(f"Trial {tid} added.", "ok")
         return redirect(url_for("trials"))
+    plans = c.execute("SELECT id,name FROM plans WHERE active=1 ORDER BY id").fetchall()
     c.close()
-    return render_template("trial_form.html", trial=None, today=date.today().strftime("%Y-%m-%d"))
+    return render_template("trial_form.html", trial=None, plans=plans,
+                           today=date.today().strftime("%Y-%m-%d"))
 
 
 @app.route("/trials/<tid>/edit", methods=["GET", "POST"])
@@ -727,8 +845,10 @@ def trial_edit(tid):
         c.close()
         flash(f"Trial {tid} updated.", "ok")
         return redirect(url_for("trials"))
+    plans = c.execute("SELECT id,name FROM plans WHERE active=1 ORDER BY id").fetchall()
     c.close()
-    return render_template("trial_form.html", trial=trial, today=date.today().strftime("%Y-%m-%d"))
+    return render_template("trial_form.html", trial=trial, plans=plans,
+                           today=date.today().strftime("%Y-%m-%d"))
 
 
 @app.route("/trials/<tid>/pay", methods=["POST"])
@@ -964,9 +1084,16 @@ def crm_detail(lid):
     trial = c.execute("SELECT * FROM trial_orders WHERE id=?", (lead["trial_id"],)).fetchone() \
         if lead["trial_id"] else None
     c.close()
+    # One-tap "send the brochure" on WhatsApp, personalised to this lead.
+    wa_brochure = None
+    if lead["phone"]:
+        bro_url = request.url_root.rstrip("/") + url_for("brochure_public")
+        txt = (f"Hi {(lead['name'] or '').split(' ')[0]}! 🌱 Here's the OG Gainz brochure — "
+               f"plans, menus & pricing:\n{bro_url}\n\nStart with a trial, no commitment! 💚")
+        wa_brochure = wa_link(lead["phone"]) + "?text=" + urllib_quote(txt)
     return render_template("crm_detail.html", lead=lead, updates=updates, cust=cust,
                            sub=sub, trial=trial, stages=crm.STAGES,
-                           open_stages=crm.OPEN_STAGES)
+                           open_stages=crm.OPEN_STAGES, wa_brochure=wa_brochure)
 
 
 @app.route("/crm/<lid>/edit", methods=["GET", "POST"])
@@ -1133,6 +1260,493 @@ def reimport():
     importer.run_import()
     flash("Re-imported from NEW TRACKER.xlsx (a backup was taken first).", "ok")
     return redirect(url_for("today"))
+
+
+# ---------------------------------------------------------------------------
+# Composition rules + OG Agent suggestions (per subscription)
+# ---------------------------------------------------------------------------
+@app.route("/subscriptions/<sid>/rules", methods=["POST"])
+def subscription_rules(sid):
+    c = conn()
+    if not c.execute("SELECT 1 FROM subscriptions WHERE id=?", (sid,)).fetchone():
+        c.close(); abort(404)
+    f = request.form
+    action = f.get("do", "add")
+    if action == "delete":
+        c.execute("DELETE FROM component_rules WHERE id=? AND subscription_id=?",
+                  (int(f["rid"]), sid))
+        c.commit()
+        flash("Rule removed.", "ok")
+    else:
+        weekdays = ",".join(f.getlist("weekday")) or None
+        rule_action = f.get("action", "swap")
+        from_id = int(f["from_component"]) if f.get("from_component") else None
+        to_id = int(f["to_component"]) if f.get("to_component") else None
+        qty = float(f["qty"]) if f.get("qty") else None
+        ok = ((rule_action == "swap" and from_id and to_id) or
+              (rule_action == "add" and to_id) or
+              (rule_action == "remove" and from_id))
+        if ok:
+            c.execute("INSERT INTO component_rules(subscription_id,weekdays,action,"
+                      "from_component_id,to_component_id,qty,note,source,active,created_at) "
+                      "VALUES(?,?,?,?,?,?,?,?,1,?)",
+                      (sid, weekdays, rule_action, from_id, to_id, qty,
+                       f.get("note") or None, "manual", db.now_iso()))
+            c.commit()
+            flash("Rule saved — the prep list applies it automatically.", "ok")
+        else:
+            flash("Pick the item(s) for the rule first.", "ok")
+    c.close()
+    return redirect(url_for("subscription_detail", sid=sid))
+
+
+@app.route("/subscriptions/<sid>/suggest", methods=["POST"])
+def subscription_suggest(sid):
+    """Apply or dismiss one OG Agent note-parsed suggestion (one tap)."""
+    c = conn()
+    sub = c.execute("SELECT * FROM subscriptions WHERE id=?", (sid,)).fetchone()
+    if not sub:
+        c.close(); abort(404)
+    label = request.form.get("label", "")
+    if request.form.get("do") == "apply":
+        for p in agent.suggestions_for_sub(c, sub):
+            if p["label"] == label:
+                c.execute("INSERT INTO component_rules(subscription_id,weekdays,action,"
+                          "from_component_id,to_component_id,qty,note,source,active,created_at) "
+                          "VALUES(?,?,?,?,?,?,?,?,1,?)",
+                          (sid, p["weekdays"], p["action"], p["from_id"], p["to_id"],
+                           p["qty"], "from notes (OG Agent)", "agent", db.now_iso()))
+                c.commit()
+                flash("Applied ✓ — prep list updated.", "ok")
+                break
+    else:
+        agent.dismiss_suggestion(c, sid, label)
+        flash("Suggestion dismissed.", "ok")
+    c.close()
+    return redirect(url_for("subscription_detail", sid=sid))
+
+
+# ---------------------------------------------------------------------------
+# Menu editor (components + pack recipes)
+# ---------------------------------------------------------------------------
+@app.route("/menu")
+def menu_editor():
+    c = conn()
+    comps = menu.all_components(c, active_only=False)
+    plans = c.execute("SELECT * FROM plans WHERE active=1 ORDER BY id").fetchall()
+    recipes = {p["id"]: menu.plan_recipe(c, p["id"]) for p in plans}
+    c.close()
+    return render_template("menu.html", comps=comps, plans=plans, recipes=recipes,
+                           fmt_qty=menu.fmt_qty)
+
+
+@app.route("/menu/component", methods=["POST"])
+def menu_component():
+    c = conn()
+    f = request.form
+    do = f.get("do", "save")
+    cid = f.get("id")
+    if do == "toggle" and cid:
+        c.execute("UPDATE components SET active=1-active WHERE id=?", (cid,))
+        c.commit(); c.close()
+        flash("Component updated.", "ok")
+        return redirect(url_for("menu_editor"))
+    if do == "delete" and cid:
+        used = (c.execute("SELECT 1 FROM subscription_components WHERE component_id=? LIMIT 1",
+                          (cid,)).fetchone()
+                or c.execute("SELECT 1 FROM plan_components WHERE component_id=? LIMIT 1",
+                             (cid,)).fetchone())
+        if used:
+            c.execute("UPDATE components SET active=0 WHERE id=?", (cid,))
+            flash("That item is used in packs/subscriptions, so it was hidden instead of deleted.", "ok")
+        else:
+            c.execute("DELETE FROM components WHERE id=?", (cid,))
+            flash("Component deleted.", "ok")
+        c.commit(); c.close()
+        return redirect(url_for("menu_editor"))
+    vals = (f.get("name", "").strip(), f.get("unit", "serving"),
+            float(f.get("step") or 1), float(f.get("default_qty") or 1),
+            float(f["addon_price"]) if f.get("addon_price") else None,
+            f.get("protein") or None, f.get("emoji") or None,
+            int(f.get("sort") or 100))
+    if not vals[0]:
+        c.close()
+        flash("Give the item a name.", "ok")
+        return redirect(url_for("menu_editor"))
+    if cid:
+        c.execute("UPDATE components SET name=?,unit=?,step=?,default_qty=?,addon_price=?,"
+                  "protein=?,emoji=?,sort=? WHERE id=?", vals + (cid,))
+    else:
+        c.execute("INSERT INTO components(name,unit,step,default_qty,addon_price,protein,"
+                  "emoji,sort,active) VALUES(?,?,?,?,?,?,?,?,1)", vals)
+    c.commit(); c.close()
+    flash("Menu item saved.", "ok")
+    return redirect(url_for("menu_editor"))
+
+
+@app.route("/menu/recipe/<int:pid>", methods=["POST"])
+def menu_recipe(pid):
+    """Replace one pack's recipe from rows of comp_<id>=qty inputs."""
+    c = conn()
+    c.execute("DELETE FROM plan_components WHERE plan_id=?", (pid,))
+    for key, val in request.form.items():
+        if key.startswith("comp_") and val not in ("", "0"):
+            try:
+                cid, qty = int(key[5:]), float(val)
+            except ValueError:
+                continue
+            if qty > 0:
+                note = (request.form.get(f"note_{cid}") or "").strip() or None
+                c.execute("INSERT INTO plan_components(plan_id,component_id,qty,note) "
+                          "VALUES(?,?,?,?)", (pid, cid, qty, note))
+    c.commit(); c.close()
+    flash("Pack recipe updated. New subscriptions pick this up automatically.", "ok")
+    return redirect(url_for("menu_editor"))
+
+
+# ---------------------------------------------------------------------------
+# Invoices + Terms
+# ---------------------------------------------------------------------------
+def _invoice_items_for_sub(c, sub):
+    """Auto-build invoice line items from a subscription (pack + add-ons + delivery)."""
+    meals = sub["total_meals_scheduled"] or 0
+    addons = [r for r in menu.sub_composition(c, sub["id"]) if r["kind"] == "addon"]
+    addon_total = 0
+    items = []
+    for a in addons:
+        per_meal = (a["addon_price"] or 0) * (a["qty"] / (a["step"] or 1))
+        amt = round(per_meal * meals)
+        addon_total += amt
+        items.append({"desc": f"Add-on · {a['name']} {menu.fmt_qty(a['qty'], a['unit'])}/meal",
+                      "qty": meals, "rate": round(per_meal), "amount": amt})
+    pack_amt = max((sub["subscription_price"] or 0) - addon_total, 0)
+    label = f"{sub['plan_name']} · {sub['duration'] or 'Monthly'} ({meals} meals"
+    label += f" · {sub['slot'] or 'Lunch'})"
+    items.insert(0, {"desc": label, "qty": 1, "rate": pack_amt, "amount": pack_amt})
+    if sub["delivery_fee"]:
+        items.append({"desc": "Delivery fee", "qty": 1, "rate": sub["delivery_fee"],
+                      "amount": sub["delivery_fee"]})
+    return items
+
+
+@app.route("/invoices")
+def invoices():
+    c = conn()
+    rows = c.execute("SELECT * FROM invoices ORDER BY id DESC").fetchall()
+    subs = c.execute("SELECT id, customer_name, plan_name FROM subscriptions "
+                     "ORDER BY id DESC").fetchall()
+    c.close()
+    return render_template("invoices.html", rows=rows, subs=subs)
+
+
+@app.route("/invoices/new", methods=["GET", "POST"])
+def invoice_new():
+    c = conn()
+    if request.method == "GET" and request.args.get("sub"):
+        # One-tap: auto-generate from a subscription, then open it for review.
+        sub = c.execute("SELECT * FROM subscriptions WHERE id=?",
+                        (request.args["sub"],)).fetchone()
+        if not sub:
+            c.close(); abort(404)
+        cust = c.execute("SELECT * FROM customers WHERE id=?", (sub["customer_id"],)).fetchone()
+        iid = next_id(c, "invoices", "INV-")
+        items = _invoice_items_for_sub(c, sub)
+        total = sum(i["amount"] for i in items)
+        c.execute("INSERT INTO invoices(id,token,customer_id,subscription_id,bill_name,"
+                  "bill_phone,bill_address,inv_date,items,discount,total,received,"
+                  "payment_status,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (iid, secrets.token_urlsafe(16), sub["customer_id"], sub["id"],
+                   sub["customer_name"], cust["phone"] if cust else None,
+                   cust["address"] if cust else None,
+                   date.today().strftime("%Y-%m-%d"), json.dumps(items), 0, total,
+                   sub["amount_received"] or 0, sub["payment_status"] or "Unpaid",
+                   None, db.now_iso(), db.now_iso()))
+        c.commit(); c.close()
+        flash(f"Invoice {iid} generated — review, tweak if needed, then send.", "ok")
+        return redirect(url_for("invoice_edit", iid=iid))
+    c.close()
+    return redirect(url_for("invoices"))
+
+
+def _save_invoice_form(c, iid, f):
+    try:
+        items = json.loads(f.get("items_json") or "[]")
+    except ValueError:
+        items = []
+    items = [{"desc": (i.get("desc") or "").strip(),
+              "qty": float(i.get("qty") or 1),
+              "rate": float(i.get("rate") or 0),
+              "amount": round(float(i.get("qty") or 1) * float(i.get("rate") or 0))}
+             for i in items if (i.get("desc") or "").strip()]
+    discount = float(f.get("discount") or 0)
+    total = max(sum(i["amount"] for i in items) - discount, 0)
+    received = float(f.get("received") or 0)
+    ps = "Paid" if received >= total and total > 0 else ("Partial" if received > 0 else "Unpaid")
+    c.execute("UPDATE invoices SET bill_name=?, bill_phone=?, bill_address=?, inv_date=?, "
+              "items=?, discount=?, total=?, received=?, payment_status=?, notes=?, updated_at=? "
+              "WHERE id=?",
+              (f.get("bill_name"), f.get("bill_phone"), f.get("bill_address"),
+               f.get("inv_date") or date.today().strftime("%Y-%m-%d"),
+               json.dumps(items), discount, total, received, ps,
+               (f.get("notes") or "").strip() or None, db.now_iso(), iid))
+    c.commit()
+
+
+@app.route("/invoices/<iid>/edit", methods=["GET", "POST"])
+def invoice_edit(iid):
+    c = conn()
+    inv = c.execute("SELECT * FROM invoices WHERE id=?", (iid,)).fetchone()
+    if not inv:
+        c.close(); abort(404)
+    if request.method == "POST":
+        _save_invoice_form(c, iid, request.form)
+        c.close()
+        flash("Invoice saved.", "ok")
+        return redirect(url_for("invoice_edit", iid=iid))
+    items = json.loads(inv["items"] or "[]")
+    public_url, wa_url = _invoice_share(inv)
+    c.close()
+    return render_template("invoice_form.html", inv=inv, items=items,
+                           public_url=public_url, wa_url=wa_url)
+
+
+def _invoice_share(inv):
+    public_url = request.url_root.rstrip("/") + url_for("invoice_public", token=inv["token"])
+    terms_url = request.url_root.rstrip("/") + url_for("terms")
+    wa_text = (f"Hi {inv['bill_name']}! 🌱 Here's your OG Gainz invoice {inv['id']} "
+               f"for {inr(inv['total'])}.\n\nView / download it here:\n{public_url}\n\n"
+               f"Your subscription is governed by our Terms & Conditions "
+               f"(delivery windows, skip & carry-forward, delivery fee):\n{terms_url}\n\n"
+               "Thank you for eating like it matters! 💚")
+    wa_url = (wa_link(inv["bill_phone"]) + "?text=" + urllib_quote(wa_text)) \
+        if inv["bill_phone"] else None
+    return public_url, wa_url
+
+
+def urllib_quote(s):
+    from urllib.parse import quote
+    return quote(s)
+
+
+@app.route("/invoices/<iid>/delete", methods=["POST"])
+def invoice_delete(iid):
+    c = conn()
+    c.execute("DELETE FROM invoices WHERE id=?", (iid,))
+    c.commit(); c.close()
+    flash(f"Invoice {iid} deleted.", "ok")
+    return redirect(url_for("invoices"))
+
+
+@app.route("/i/<token>")
+def invoice_public(token):
+    """Customer-facing invoice — no login, protected by the unguessable token."""
+    c = conn()
+    inv = c.execute("SELECT * FROM invoices WHERE token=?", (token,)).fetchone()
+    if not inv:
+        c.close(); abort(404)
+    items = json.loads(inv["items"] or "[]")
+    c.close()
+    return render_template("invoice_view.html", inv=inv, items=items, internal=False)
+
+
+@app.route("/invoices/<iid>")
+def invoice_view(iid):
+    c = conn()
+    inv = c.execute("SELECT * FROM invoices WHERE id=?", (iid,)).fetchone()
+    if not inv:
+        c.close(); abort(404)
+    items = json.loads(inv["items"] or "[]")
+    public_url, wa_url = _invoice_share(inv)
+    c.close()
+    return render_template("invoice_view.html", inv=inv, items=items, internal=True,
+                           public_url=public_url, wa_url=wa_url)
+
+
+@app.route("/terms")
+def terms():
+    return render_template("terms.html")
+
+
+# ---------------------------------------------------------------------------
+# Digital brochure — public page, editable any time, sendable to anyone
+# ---------------------------------------------------------------------------
+def _brochure_share():
+    """(public_url, wa_pick_url): the brochure's public link + a WhatsApp share
+    that lets Balaji pick any contact (or paste into a group)."""
+    public_url = request.url_root.rstrip("/") + url_for("brochure_public")
+    wa_text = ("🌱 *OG GAINZ — Eat like it matters.*\n"
+               "Macro-tracked, freshly cooked meal subscriptions in Chennai.\n\n"
+               f"Full brochure — plans, menus & pricing:\n{public_url}\n\n"
+               "Start with a trial! 💚")
+    return public_url, "https://wa.me/?text=" + urllib_quote(wa_text)
+
+
+@app.route("/brochure")
+def brochure_public():
+    """The customer-facing brochure. Public (shareable link, no login); when
+    Balaji himself is viewing, the edit/share toolbar appears on top."""
+    c = conn()
+    secs = [(s, brochure.render_body(s["body"])) for s in brochure.sections(c)]
+    c.close()
+    internal = (not APP_PASSWORD) or bool(session.get("authed"))
+    public_url, wa_url = _brochure_share()
+    return render_template("brochure_view.html", secs=secs, internal=internal,
+                           public_url=public_url, wa_url=wa_url)
+
+
+@app.route("/brochure/edit")
+def brochure_edit():
+    c = conn()
+    secs = brochure.sections(c, active_only=False)
+    c.close()
+    return render_template("brochure_edit.html", secs=secs)
+
+
+@app.route("/brochure/section", methods=["POST"])
+def brochure_section():
+    """Add / save / toggle / delete one brochure section."""
+    c = conn()
+    f = request.form
+    do = f.get("do", "save")
+    sid = f.get("id")
+    if do == "toggle" and sid:
+        c.execute("UPDATE brochure_sections SET active=1-active, updated_at=? WHERE id=?",
+                  (db.now_iso(), sid))
+        flash("Section visibility updated.", "ok")
+    elif do == "delete" and sid:
+        c.execute("DELETE FROM brochure_sections WHERE id=?", (sid,))
+        flash("Section deleted.", "ok")
+    else:
+        title = (f.get("title") or "").strip()
+        if not title:
+            c.close()
+            flash("Give the section a title.", "ok")
+            return redirect(url_for("brochure_edit"))
+        vals = (int(f.get("sort") or 100), title, (f.get("subtitle") or "").strip() or None,
+                f.get("body") or "", db.now_iso())
+        if sid:
+            c.execute("UPDATE brochure_sections SET sort=?, title=?, subtitle=?, body=?, "
+                      "updated_at=? WHERE id=?", vals + (sid,))
+        else:
+            c.execute("INSERT INTO brochure_sections(sort,title,subtitle,body,updated_at,active) "
+                      "VALUES(?,?,?,?,?,1)", vals)
+        flash("Brochure updated — the public link shows it immediately.", "ok")
+    c.commit(); c.close()
+    return redirect(url_for("brochure_edit"))
+
+
+# ---------------------------------------------------------------------------
+# OG Agent — chat, notifications, settings
+# ---------------------------------------------------------------------------
+@app.route("/agent")
+def agent_home():
+    c = conn()
+    msgs = c.execute("SELECT * FROM agent_messages ORDER BY id DESC LIMIT 40").fetchall()
+    ready = agent.ai_ready(c)
+    latest = c.execute("SELECT * FROM notifications ORDER BY id DESC LIMIT 5").fetchall()
+    learned = agent.facts(c)
+    c.close()
+    return render_template("agent.html", msgs=list(reversed(msgs)), ready=ready,
+                           latest=latest, facts=learned)
+
+
+@app.route("/agent/history")
+def agent_history():
+    """Recent chat as JSON — feeds the floating OG Agent chat on every page."""
+    c = conn()
+    msgs = c.execute("SELECT role, content FROM agent_messages "
+                     "ORDER BY id DESC LIMIT 30").fetchall()
+    ready = agent.ai_ready(c)
+    c.close()
+    return jsonify({"ok": True, "ready": ready,
+                    "msgs": [{"role": m["role"], "content": m["content"]}
+                             for m in reversed(msgs)]})
+
+
+@app.route("/agent/fact/<int:fid>/delete", methods=["POST"])
+def agent_fact_delete(fid):
+    c = conn()
+    agent.delete_fact(c, fid)
+    c.close()
+    flash("Forgotten — that fact was removed from OG Agent's memory.", "ok")
+    return redirect(request.referrer or url_for("agent_home"))
+
+
+@app.route("/agent/fact", methods=["POST"])
+def agent_fact_add():
+    """Teach OG Agent a fact directly (no chat needed)."""
+    c = conn()
+    saved = agent.add_fact(c, request.form.get("fact"), request.form.get("topic"),
+                           source="manual")
+    c.close()
+    flash("OG Agent learned it ✓" if saved else "Type the fact first.", "ok")
+    return redirect(request.referrer or url_for("agent_home"))
+
+
+@app.route("/agent/chat", methods=["POST"])
+def agent_chat():
+    text = (request.form.get("q") or "").strip()
+    if not text:
+        return jsonify({"ok": False, "error": "Say something first."})
+    c = conn()
+    reply, actions, err = agent.ai_chat(c, text)
+    c.close()
+    if err:
+        return jsonify({"ok": False, "error": err})
+    return jsonify({"ok": True, "reply": reply, "actions": actions})
+
+
+@app.route("/agent/action", methods=["POST"])
+def agent_action():
+    """Apply ONE confirmed agent-proposed action (rule / reminder)."""
+    try:
+        a = json.loads(request.form.get("action") or "{}")
+    except ValueError:
+        a = {}
+    c = conn()
+    result = agent.apply_action(c, a)
+    c.close()
+    return jsonify({"ok": bool(result), "message": result or "Couldn't apply that action."})
+
+
+@app.route("/agent/clear", methods=["POST"])
+def agent_clear():
+    c = conn()
+    c.execute("DELETE FROM agent_messages")
+    c.commit(); c.close()
+    flash("Chat cleared.", "ok")
+    return redirect(url_for("agent_home"))
+
+
+@app.route("/notifications")
+def notifications():
+    c = conn()
+    rows = c.execute("SELECT * FROM notifications ORDER BY id DESC LIMIT 100").fetchall()
+    c.execute("UPDATE notifications SET is_read=1 WHERE is_read=0")
+    c.commit(); c.close()
+    return render_template("notifications.html", rows=rows)
+
+
+@app.route("/settings/agent", methods=["POST"])
+def settings_agent():
+    c = conn()
+    f = request.form
+    for key, field in (("anthropic_api_key", "api_key"), ("agent_model", "model"),
+                       ("telegram_bot_token", "tg_token"), ("telegram_chat_id", "tg_chat")):
+        val = (f.get(field) or "").strip()
+        if val == "clear":
+            c.execute("DELETE FROM settings WHERE key=?", (key,))
+            c.commit()
+        elif val:
+            db.set_setting(c, key, val)
+    if f.get("test_telegram"):
+        ok = agent.send_telegram(c, "✅ OG Agent is connected to your Telegram!")
+        flash("Telegram test sent — check your phone." if ok
+              else "Telegram test failed — check the token & chat id.", "ok")
+    else:
+        flash("OG Agent settings saved.", "ok")
+    c.close()
+    return redirect(url_for("settings"))
 
 
 # ---------------------------------------------------------------------------

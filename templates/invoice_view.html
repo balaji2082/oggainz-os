@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Invoice {{ inv.id }} · OG Gainz</title>
+<link rel="icon" href="{{ url_for('static', filename='img/favicon.png') }}">
+<style>
+  :root{
+    --forest:#004030; --forest-2:#002B20; --lime:#1FA84A; --lime-e:#C5E84B;
+    --orange:#E9762B; --cream:#F8F5EC; --ink:#15241d; --muted:#6b7d75; --line:#e6ece8;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{font-family:'Roboto','Segoe UI',-apple-system,system-ui,sans-serif; background:#e9e6dc;
+       color:var(--ink); line-height:1.5; -webkit-font-smoothing:antialiased}
+  .toolbar{position:sticky; top:0; z-index:9; background:var(--forest); color:#fff;
+       display:flex; gap:8px; align-items:center; padding:10px 14px; flex-wrap:wrap}
+  .toolbar b{font-size:.9rem}
+  .tb-btn{border:none; border-radius:999px; padding:8px 15px; font-weight:700; font-size:.84rem;
+       cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px;
+       background:rgba(255,255,255,.14); color:#fff; font-family:inherit}
+  .tb-btn.hl{background:var(--lime); color:#04231a}
+  .tb-btn.wa{background:#25D366; color:#04231a}
+  .sheet{max-width:760px; margin:22px auto 60px; background:#fff; border-radius:18px;
+       overflow:hidden; box-shadow:0 16px 50px rgba(0,40,30,.18)}
+  .inv-head{background:linear-gradient(135deg,var(--forest) 0%,var(--forest-2) 100%);
+       color:#fff; padding:34px 36px 30px; position:relative}
+  .inv-head:after{content:''; position:absolute; left:0; right:0; bottom:0; height:5px;
+       background:linear-gradient(90deg,var(--lime) 0%,var(--lime-e) 55%,var(--orange) 100%)}
+  .inv-brand{display:flex; align-items:center; gap:16px}
+  .inv-brand img{height:44px}
+  .inv-brand .tag{font-size:.68rem; letter-spacing:.16em; text-transform:uppercase;
+       color:var(--lime-e); font-weight:700; margin-top:4px}
+  .inv-title{margin-left:auto; text-align:right}
+  .inv-title h1{font-size:1.5rem; font-weight:800; letter-spacing:.06em}
+  .inv-title .no{color:var(--lime-e); font-weight:700; font-size:.95rem}
+  .inv-meta{display:flex; gap:26px; flex-wrap:wrap; padding:24px 36px; border-bottom:1px solid var(--line)}
+  .im h4{font-size:.66rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted); margin-bottom:4px}
+  .im b{color:var(--forest); font-size:.98rem}
+  .im .sub{font-size:.84rem; color:var(--muted); white-space:pre-line}
+  .paychip{margin-left:auto; align-self:center; padding:8px 18px; border-radius:999px; font-weight:800; font-size:.85rem}
+  .paychip.paid{background:#e3f6ea; color:#147a37}
+  .paychip.unpaid{background:#fbeae8; color:#b13325}
+  .paychip.partial{background:#fdeede; color:#bc5a12}
+  table{width:100%; border-collapse:collapse}
+  .items{padding:10px 36px 0}
+  .items th{font-size:.66rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted);
+       text-align:left; padding:14px 8px 10px; border-bottom:2px solid var(--forest)}
+  .items td{padding:13px 8px; border-bottom:1px solid var(--line); font-size:.94rem}
+  .items .num{text-align:right; white-space:nowrap}
+  .items td.desc b{color:var(--forest)}
+  .totals{padding:16px 36px 8px; display:flex; justify-content:flex-end}
+  .totals table{width:auto; min-width:270px}
+  .totals td{padding:6px 8px; font-size:.94rem}
+  .totals .grand td{border-top:2px solid var(--forest); padding-top:12px; font-size:1.15rem; font-weight:800; color:var(--forest)}
+  .totals .due td{color:#b13325; font-weight:700}
+  .notes{margin:18px 36px; background:var(--cream); border-left:4px solid var(--lime);
+       border-radius:10px; padding:14px 16px; font-size:.9rem}
+  .notes h4{font-size:.66rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted); margin-bottom:4px}
+  .totals .paidrow td{color:#147a37; font-weight:700}
+  .termsbox{margin:20px 36px 0; border:1.5px solid var(--forest); border-radius:12px;
+       padding:16px 18px; background:#fbfdfb}
+  .termsbox .tb-head{font-weight:800; color:var(--forest); font-size:.95rem; margin-bottom:6px}
+  .termsbox p{font-size:.86rem; color:#33443c; margin-bottom:10px}
+  .termsbox b{color:var(--forest)}
+  .termsbtn{display:inline-block; background:var(--forest); color:#fff; font-weight:700;
+       font-size:.85rem; padding:9px 16px; border-radius:999px; text-decoration:none}
+  .termsbtn:hover{background:var(--forest-2)}
+  .inv-foot{background:var(--cream); margin-top:24px; padding:22px 36px 26px; border-top:1px solid var(--line)}
+  .inv-foot .thanks{font-weight:800; color:var(--forest); font-size:1.02rem; margin-bottom:6px}
+  .inv-foot .fine{font-size:.78rem; color:var(--muted); margin-top:10px}
+  .inv-foot a{color:var(--lime); font-weight:700; text-decoration:none}
+  .contact{display:flex; gap:20px; flex-wrap:wrap; margin-top:10px; font-size:.84rem}
+  .contact b{color:var(--forest)}
+  @media(max-width:600px){
+    .inv-head,.inv-meta,.items,.notes,.inv-foot{padding-left:18px; padding-right:18px}
+    .notes{margin-left:18px; margin-right:18px}
+    .totals{padding-right:18px}
+    .inv-title h1{font-size:1.15rem}
+  }
+  @media print{
+    body{background:#fff}
+    .toolbar{display:none}
+    .sheet{margin:0; max-width:none; border-radius:0; box-shadow:none}
+    .inv-head{-webkit-print-color-adjust:exact; print-color-adjust:exact}
+    .inv-foot,.paychip,.notes,.termsbox,.termsbtn{-webkit-print-color-adjust:exact; print-color-adjust:exact}
+    .termsbox{break-inside:avoid}
+    @page{size:A4; margin:0}
+  }
+</style>
+</head>
+<body>
+
+{% if internal %}
+<div class="toolbar">
+  <a class="tb-btn" href="{{ url_for('invoices') }}">‹ Invoices</a>
+  <b>{{ inv.id }}</b>
+  <span style="flex:1"></span>
+  <a class="tb-btn" href="{{ url_for('invoice_edit', iid=inv.id) }}">✏ Edit</a>
+  <a class="tb-btn" href="{{ url_for('terms') }}" target="_blank">📋 Terms</a>
+  <button class="tb-btn hl" onclick="window.print()">⬇ PDF</button>
+  {% if wa_url %}<a class="tb-btn wa" href="{{ wa_url }}" target="_blank">💬 Send on WhatsApp</a>{% endif %}
+  <button class="tb-btn" onclick="navigator.clipboard.writeText('{{ public_url }}');this.textContent='✓ Copied'">🔗 Copy link</button>
+</div>
+{% endif %}
+
+<div class="sheet">
+  <div class="inv-head">
+    <div class="inv-brand">
+      <img src="{{ url_for('static', filename='img/logo-white.svg') }}" alt="OG Gainz">
+      <div><div class="tag">Chennai · Since 2025</div>
+        <div style="font-size:.8rem; opacity:.85">Eat like it matters.</div></div>
+      <div class="inv-title">
+        <h1>INVOICE</h1>
+        <div class="no">{{ inv.id }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="inv-meta">
+    <div class="im">
+      <h4>Billed to</h4>
+      <b>{{ inv.bill_name or '—' }}</b>
+      {% if inv.bill_phone %}<div class="sub">{{ inv.bill_phone }}</div>{% endif %}
+      {% if inv.bill_address %}<div class="sub">{{ inv.bill_address }}</div>{% endif %}
+    </div>
+    <div class="im">
+      <h4>Invoice date</h4>
+      <b>{{ inv.inv_date|fdate('%d %B %Y') if inv.inv_date else '—' }}</b>
+      {% if inv.subscription_id %}<div class="sub">Subscription {{ inv.subscription_id }}</div>{% endif %}
+    </div>
+    <span class="paychip {{ (inv.payment_status or 'Unpaid')|lower }}">{{ inv.payment_status or 'Unpaid' }}</span>
+  </div>
+
+  <div class="items">
+    <table>
+      <tr><th>Description</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr>
+      {% for it in items %}
+      <tr>
+        <td class="desc"><b>{{ it.desc }}</b></td>
+        <td class="num">{{ it.qty|int if it.qty == it.qty|int else it.qty }}</td>
+        <td class="num">{{ it.rate|inr }}</td>
+        <td class="num"><b>{{ it.amount|inr }}</b></td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  {% set ns = namespace(delivery=0) %}
+  {% for it in items %}{% if 'delivery' in (it.desc or '')|lower %}{% set ns.delivery = ns.delivery + it.amount %}{% endif %}{% endfor %}
+  {% set gross = inv.total + (inv.discount or 0) %}
+  <div class="totals">
+    <table>
+      <tr><td>Food subscription</td><td class="num" style="text-align:right">{{ (gross - ns.delivery)|inr }}</td></tr>
+      {% if ns.delivery %}<tr><td>Delivery fee</td><td class="num" style="text-align:right">{{ ns.delivery|inr }}</td></tr>{% endif %}
+      {% if inv.discount %}
+      <tr><td>Subtotal</td><td class="num" style="text-align:right">{{ gross|inr }}</td></tr>
+      <tr><td>Discount</td><td style="text-align:right">− {{ inv.discount|inr }}</td></tr>
+      {% endif %}
+      <tr class="grand"><td>Total</td><td style="text-align:right">{{ inv.total|inr }}</td></tr>
+      {% if inv.received %}
+      <tr class="paidrow"><td>Amount paid</td><td style="text-align:right">{{ inv.received|inr }}</td></tr>
+      {% endif %}
+      {% if (inv.received or 0) < inv.total %}
+      <tr class="due"><td>Balance due</td><td style="text-align:right">{{ (inv.total - (inv.received or 0))|inr }}</td></tr>
+      {% endif %}
+    </table>
+  </div>
+
+  {% if inv.notes %}
+  <div class="notes"><h4>Note</h4>{{ inv.notes }}</div>
+  {% endif %}
+
+  <div class="termsbox">
+    <div class="tb-head">📋 Terms &amp; Conditions</div>
+    <p>This subscription is governed by the <b>OG Gainz Terms &amp; Conditions</b> — subscription
+      validity, skip &amp; carry-forward (inform before 6:00 PM the previous day), delivery windows
+      &amp; possible delays, the delivery fee and our no-refund-after-start policy. Agreed delivery
+      slots are served on a best-effort basis; occasional delays can occur due to traffic, weather
+      and other logistics factors.</p>
+    <a class="termsbtn" href="{{ url_for('terms') }}" target="_blank">Read the full Terms &amp; Conditions ›</a>
+  </div>
+
+  <div class="inv-foot">
+    <div class="thanks">Thank you for eating like it matters. 💚</div>
+    <div class="contact">
+      <span>📱 <b>+91 93617 98644</b> (WhatsApp / call)</span>
+      <span>📸 <b>@_oggainz</b></span>
+    </div>
+    <div class="fine">
+      Please report any issue with a meal on the same day of delivery so we can make it right.
+      Full terms: <a href="{{ url_for('terms') }}">{{ url_for('terms', _external=True) }}</a>
+    </div>
+  </div>
+</div>
+</body>
+</html>

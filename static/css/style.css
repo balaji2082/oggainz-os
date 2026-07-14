@@ -716,3 +716,263 @@ tr.rowlink:hover{background:var(--cream)}
   .mini-grid .mini-act{flex:1 1 100%}
   .mini-grid .mini-act .btn{width:100%}
 }
+
+/* ===========================================================================
+   v3 — Menu engine, prep list, backlog, invoices, OG Agent
+   =========================================================================== */
+
+/* ---------- Topbar bell ---------- */
+.bell{position:relative; margin-left:10px; display:inline-flex; align-items:center;
+  justify-content:center; width:38px; height:38px; border-radius:999px; color:#dbeee3;
+  transition:.15s; flex:none}
+.bell:hover{background:rgba(255,255,255,.12); color:#fff}
+.bell.on{background:var(--lime); color:#04231a}
+.bell svg{width:20px; height:20px}
+.bell-badge{position:absolute; top:1px; right:0; background:var(--orange); color:#fff;
+  font-size:.6rem; font-weight:800; border-radius:999px; padding:1px 5px; line-height:1.3;
+  border:2px solid var(--forest)}
+@media(max-width:760px){ .topnav{display:none} .bell{margin-left:auto} }
+
+/* ---------- Detailed prep list ---------- */
+.ing-list{display:flex; flex-direction:column}
+.ing-row{display:flex; align-items:center; gap:10px; padding:8px 2px;
+  border-bottom:1px dashed var(--line)}
+.ing-row:last-of-type{border-bottom:none}
+.ing-emoji{font-size:1.05rem; flex:none; width:26px; text-align:center}
+.ing-name{font-weight:700; color:var(--forest); font-size:.93rem}
+.ing-qty{font-weight:800; font-size:1.02rem; color:var(--forest); white-space:nowrap;
+  background:#eef7f1; border-radius:8px; padding:3px 10px}
+.ing-sub{font-size:.78rem; color:var(--muted); padding:0 2px 8px 38px; margin-top:-4px;
+  border-bottom:1px dashed var(--line)}
+.ing-note{color:var(--orange-d); font-weight:600}
+.prep-total{margin-top:14px; padding-top:10px; border-top:2px solid var(--forest)}
+.prep-packs{margin-top:10px; display:flex; flex-direction:column; gap:6px}
+.pack-line{border:1px solid var(--line); border-radius:var(--r-sm); background:#fbfdfb}
+.pack-line summary{display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer;
+  list-style:none; font-size:.9rem; font-weight:600; color:var(--ink)}
+.pack-line summary::-webkit-details-marker{display:none}
+.pack-line .qty{font-weight:800; color:var(--lime); background:#e7f6ec; border-radius:7px;
+  padding:1px 8px; font-size:.85rem}
+.pack-line .chev{margin-left:auto; color:var(--muted); transition:transform .15s}
+.pack-line[open] .chev{transform:rotate(90deg)}
+.pack-orders{padding:2px 12px 10px 12px}
+.pack-detail{font-size:.8rem; color:var(--muted); background:var(--cream); border-radius:8px;
+  padding:6px 10px; margin-bottom:6px}
+.pack-order{font-size:.85rem; padding:3px 0}
+.prep-unmapped{margin-top:14px; background:#fff7ee; border:1px solid #f3ddc2;
+  border-radius:var(--r-sm); padding:10px 12px; font-size:.85rem}
+.fixlink{color:var(--orange-d); font-weight:700; font-size:.8rem; margin-left:6px}
+
+/* ---------- Backlog (unmarked past orders) ---------- */
+.bl-day{margin-bottom:12px}
+.bl-date{font-weight:800; color:var(--forest); font-size:.85rem; margin-bottom:6px;
+  text-transform:uppercase; letter-spacing:.04em}
+.bl-row{display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--line);
+  border-radius:var(--r-sm); margin-bottom:6px; background:#fff}
+.bl-row.is-delivered{background:#f2fbf5}
+.bl-row.is-skipped{background:#fdf3f0}
+.bl-info{flex:1; min-width:0}
+
+/* ---------- Pack picker + composition builder (subscription form) ---------- */
+.packpick{display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px}
+.packcard{border:1.5px solid var(--line); background:#fff; border-radius:var(--r-sm);
+  padding:10px 12px; text-align:left; cursor:pointer; font-family:inherit; transition:.12s;
+  display:flex; flex-direction:column; gap:2px}
+.packcard b{color:var(--forest); font-size:.9rem}
+.packcard span{font-size:.76rem; color:var(--muted)}
+.packcard:hover{border-color:var(--lime)}
+.packcard.sel{border-color:var(--lime); background:#effaf2; box-shadow:0 0 0 2px #d9f2e1}
+.builder{display:flex; flex-direction:column; gap:6px}
+.b-row{display:flex; align-items:center; gap:9px; border:1px solid var(--line);
+  border-radius:var(--r-sm); padding:8px 10px; background:#fff}
+.b-emoji{font-size:1.05rem; flex:none; width:24px; text-align:center}
+.b-name{flex:1; min-width:0; font-weight:600; font-size:.9rem; color:var(--forest);
+  display:flex; flex-direction:column; gap:2px}
+.b-price{font-size:.72rem; color:var(--orange-d); font-weight:700}
+.b-note{border:none; border-bottom:1px dashed var(--line); font-size:.76rem; padding:2px 0;
+  color:var(--muted); font-family:inherit; background:transparent; outline:none; max-width:220px}
+.b-note:focus{border-color:var(--lime)}
+.stepper{display:inline-flex; align-items:center; gap:2px; flex:none}
+.stepper b{min-width:74px; text-align:center; font-size:.86rem; color:var(--forest)}
+.stepper button{width:32px; height:32px; border-radius:9px; border:1px solid var(--line);
+  background:var(--cream); font-size:1.05rem; font-weight:800; color:var(--forest);
+  cursor:pointer; font-family:inherit}
+.stepper button:active{background:var(--sage)}
+
+/* item picker sheet */
+.sheet{position:fixed; inset:0; background:rgba(0,25,18,.45); z-index:80; display:flex;
+  align-items:flex-end; justify-content:center; padding:12px}
+.sheet-card{background:#fff; border-radius:18px 18px 14px 14px; width:100%; max-width:520px;
+  max-height:72vh; overflow:auto; padding:16px; box-shadow:var(--shadow-lg)}
+.pick-row{display:flex; align-items:center; gap:10px; width:100%; padding:11px 10px;
+  border:none; border-bottom:1px solid var(--line); background:none; font-family:inherit;
+  font-size:.92rem; cursor:pointer; text-align:left}
+.pick-row:hover{background:var(--cream)}
+.pick-row b{color:var(--forest)}
+
+.chip-addon{background:#fdf1e3; color:#bc5a12}
+
+/* ---------- OG Agent suggestions + rules (subscription detail) ---------- */
+.agent-suggest{margin-top:12px; background:#f2f9ff; border:1px solid #d3e7f5;
+  border-radius:var(--r-sm); padding:10px 12px}
+.as-head{font-size:.86rem; margin-bottom:6px}
+.as-row{display:flex; align-items:center; gap:8px; padding:6px 0; border-top:1px dashed #d8e6ef}
+.as-label{font-size:.87rem; font-weight:600; color:var(--forest)}
+.rowform{display:flex; gap:6px; align-items:center; margin:0}
+.rules-box{margin-top:12px; border-top:1px solid var(--line); padding-top:10px}
+.rules-box summary{cursor:pointer; list-style:none; display:flex; align-items:center; gap:8px;
+  font-size:.9rem}
+.rules-box summary::-webkit-details-marker{display:none}
+.rules-box .chev{margin-left:auto; color:var(--muted); transition:transform .15s}
+.rules-box[open] .chev{transform:rotate(90deg)}
+.rule-form{margin-top:10px; background:var(--cream); border-radius:var(--r-sm); padding:10px 12px}
+.wk-picks{display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:8px}
+.wk-pick input{display:none}
+.wk-pick span{display:inline-block; padding:5px 10px; border-radius:999px; font-size:.78rem;
+  font-weight:700; border:1px solid var(--line); background:#fff; color:var(--muted); cursor:pointer}
+.wk-pick input:checked + span{background:var(--forest); border-color:var(--forest); color:#fff}
+
+/* ---------- Invoices ---------- */
+.inv-row{display:flex; align-items:center; gap:12px; padding:11px 6px;
+  border-bottom:1px solid var(--line)}
+.inv-row:last-child{border-bottom:none}
+.inv-row:hover{background:var(--cream)}
+.inv-ic{font-size:1.2rem}
+.inv-mid{flex:1; min-width:0}
+.inv-right{text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:3px}
+.inv-total{font-size:1.3rem; font-weight:800; color:var(--forest); padding:8px 0}
+.item-line{display:flex; align-items:center; gap:7px; margin-bottom:6px}
+.item-line .il-desc{flex:1; min-width:0}
+.item-line .il-qty{width:64px}
+.item-line .il-rate{width:84px}
+.item-line .il-amt{min-width:64px; text-align:right; font-weight:700; color:var(--forest);
+  font-size:.88rem}
+.share-strip{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+.btn-wa{background:#25D366; color:#04231a}
+
+/* ---------- Menu editor ---------- */
+.winrow.is-off{opacity:.55}
+.recipe-grid{display:flex; flex-direction:column; gap:4px}
+.recipe-row{display:flex; align-items:center; gap:8px; padding:4px 0}
+.recipe-row .b-name{flex:1}
+.recipe-qty{width:76px}
+.recipe-note{width:130px; font-size:.8rem}
+
+/* ---------- OG Agent chat ---------- */
+.agent-card{display:flex; flex-direction:column; min-height:60vh}
+.chat{flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px;
+  padding:6px 2px; max-height:62vh}
+.msg{display:flex}
+.msg.user{justify-content:flex-end}
+.msg-bubble{max-width:86%; padding:10px 14px; border-radius:16px; font-size:.92rem;
+  white-space:pre-wrap; word-wrap:break-word}
+.msg.user .msg-bubble{background:var(--forest); color:#fff; border-bottom-right-radius:5px}
+.msg.assistant .msg-bubble{background:var(--cream); border:1px solid var(--line);
+  border-bottom-left-radius:5px}
+.msg-bubble.thinking{color:var(--muted); font-style:italic;
+  animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.45}}
+.chat-input{display:flex; gap:8px; align-items:flex-end; margin-top:12px}
+.chat-input textarea{flex:1; resize:none; border-radius:14px; max-height:120px}
+.chat-input .btn{border-radius:14px; padding:11px 16px}
+.agent-hello{text-align:center; padding:26px 10px; color:var(--ink)}
+.agent-hello .big{font-size:2.2rem; margin-bottom:6px}
+.chip-suggests{display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:12px}
+.chip-suggests .chip{cursor:pointer; border:1px solid var(--line); background:#fff;
+  font-weight:600; padding:7px 13px; font-family:inherit; font-size:.8rem}
+.chip-suggests .chip:hover{border-color:var(--lime); color:var(--forest)}
+.action-box{margin-top:10px; background:#fff; border:1.5px dashed var(--lime);
+  border-radius:12px; padding:9px 12px; display:flex; align-items:center; gap:10px;
+  flex-wrap:wrap; font-size:.85rem}
+
+/* ---------- Notifications ---------- */
+.notif{display:flex; gap:12px; padding:12px 6px; border-bottom:1px solid var(--line)}
+.notif:last-child{border-bottom:none}
+.notif.unread{background:#f4faf6; border-radius:var(--r-sm)}
+.notif-ic{font-size:1.25rem; flex:none}
+.notif-body{flex:1; min-width:0}
+.notif-body b{color:var(--forest)}
+.notif-text{font-size:.88rem; white-space:pre-wrap; margin:4px 0}
+
+/* ---------- Revenue polish (premium pass) ---------- */
+.month-hero{border:none; box-shadow:0 14px 34px rgba(0,40,30,.22)}
+.month-hero .mh-figure{font-size:2.9rem; letter-spacing:-.03em;
+  background:linear-gradient(90deg,#fff 30%,var(--lime-e));
+  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent}
+.month-hero .mh-stat{backdrop-filter:blur(3px); border-radius:14px}
+.scopebar{position:sticky; top:58px; z-index:30; background:var(--cream);
+  padding:6px 0 10px; margin:0 0 10px}
+.seg{box-shadow:var(--shadow)}
+.seg-btn{transition:.15s}
+.seg-btn.on{background:var(--forest); color:var(--lime-e); box-shadow:0 3px 10px rgba(0,40,30,.3)}
+.daychart .col-bar i{border-radius:8px 8px 3px 3px}
+.rev-table.revx td{padding:11px 9px}
+.rev-table.revx tr.rowlink{transition:background .12s}
+.rev-table.revx tr.rowlink:hover{background:var(--cream)}
+.focus-card{border:none; box-shadow:var(--shadow-lg)}
+.focus-date{font-size:1.2rem; font-weight:800; color:var(--forest); letter-spacing:-.01em}
+
+/* ===========================================================================
+   v4 — Prep tick-offs, floating OG Agent, agent memory, brochure
+   =========================================================================== */
+
+/* ---------- Prep list checkboxes ---------- */
+.ing-check{display:inline-flex; align-items:center; flex:none; cursor:pointer; padding:2px}
+.ing-check input{width:20px; height:20px; accent-color:var(--lime); cursor:pointer; margin:0}
+.ing-row.ticked .ing-name{text-decoration:line-through; color:var(--muted)}
+.ing-row.ticked .ing-qty{opacity:.55; text-decoration:line-through}
+.ing-row.ticked .ing-emoji{opacity:.45}
+
+/* ---------- Floating OG Agent (every page) ---------- */
+.agent-fab{position:fixed; right:16px; bottom:calc(76px + env(safe-area-inset-bottom, 0px));
+  z-index:70; width:54px; height:54px; border-radius:999px; border:none; cursor:pointer;
+  background:linear-gradient(135deg,var(--forest) 0%,#00573f 100%); color:#C5E84B;
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:0 8px 24px rgba(0,40,30,.38), 0 0 0 2px rgba(197,232,75,.35)}
+.agent-fab svg{width:26px; height:26px}
+.agent-fab:active{transform:scale(.94)}
+@media(min-width:761px){ .agent-fab{bottom:22px; right:22px} }
+
+.agent-drawer{position:fixed; right:10px; bottom:calc(138px + env(safe-area-inset-bottom, 0px));
+  z-index:75; width:min(400px, calc(100vw - 20px)); max-height:min(560px, 72vh);
+  background:#fff; border-radius:18px; box-shadow:0 22px 60px rgba(0,25,18,.35);
+  display:flex; flex-direction:column; overflow:hidden; border:1px solid var(--line)}
+@media(min-width:761px){ .agent-drawer{bottom:88px; right:22px} }
+.ad-head{display:flex; align-items:center; gap:10px; padding:12px 14px;
+  background:linear-gradient(135deg,var(--forest) 0%,#002B20 100%); color:#fff}
+.ad-title{font-weight:800; font-size:.95rem}
+.ad-link{margin-left:auto; color:#C5E84B; font-size:.78rem; font-weight:700; text-decoration:none}
+.ad-close{border:none; background:rgba(255,255,255,.14); color:#fff; width:28px; height:28px;
+  border-radius:999px; cursor:pointer; font-size:.85rem}
+.ad-chat{flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px;
+  padding:12px; min-height:180px; background:#fbfdfb}
+.ad-empty,.ad-loading{padding:18px 8px; text-align:center}
+.ad-input{display:flex; gap:8px; align-items:flex-end; padding:10px 12px;
+  border-top:1px solid var(--line); background:#fff}
+.ad-input textarea{flex:1; resize:none; border-radius:12px; max-height:110px; font-size:.9rem}
+.ad-send{border:none; border-radius:12px; background:var(--forest); color:#fff; font-weight:800;
+  padding:10px 15px; cursor:pointer}
+.ad-send:disabled{opacity:.5}
+.ad-offline{padding:12px 14px; border-top:1px solid var(--line); background:var(--cream)}
+.ad-offline a{color:var(--forest); font-weight:700}
+
+/* ---------- OG Agent long-term memory (facts) ---------- */
+.fact-row{display:flex; align-items:flex-start; gap:9px; padding:8px 2px;
+  border-bottom:1px dashed var(--line); font-size:.88rem}
+.fact-row:last-child{border-bottom:none}
+.fact-topic{flex:none; background:var(--cream); color:var(--forest); font-weight:700;
+  font-size:.72rem; border-radius:999px; padding:3px 9px; margin-top:1px}
+.fact-text{flex:1; min-width:0}
+.fact-del{border:none; background:none; color:var(--muted); cursor:pointer; font-size:.85rem;
+  padding:2px 6px; border-radius:7px}
+.fact-del:hover{background:#fbeae8; color:#b13325}
+.fact-add{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap}
+.fact-add input[name=topic]{width:110px}
+.fact-add input[name=fact]{flex:1; min-width:200px}
+
+/* ---------- Brochure editor ---------- */
+.bro-sec-form textarea{min-height:150px; font-size:.86rem; font-family:ui-monospace,Consolas,monospace;
+  line-height:1.5}
+.bro-help{background:var(--cream); border-radius:var(--r-sm); padding:10px 12px; font-size:.8rem;
+  color:var(--muted); margin-bottom:12px}
+.bro-help code{background:#fff; border:1px solid var(--line); border-radius:5px; padding:0 5px}

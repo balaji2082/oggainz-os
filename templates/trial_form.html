@@ -12,6 +12,12 @@
     <div><label>Contact number</label><input name="phone" value="{{ trial.phone if trial }}" placeholder="10-digit number"></div>
     <div><label>Amount (₹)</label><input name="amount" type="number" step="1" value="{{ trial.amount if trial else 0 }}"></div>
     <div class="full"><label>Order</label><input name="order_text" value="{{ trial.order_text if trial }}" placeholder="Elite Meal Pack trial…"></div>
+    <div class="full"><label>Pack (for the prep list)</label>
+      <select name="plan_id">
+        <option value="">— not set (prep list shows it separately) —</option>
+        {% for p in plans %}<option value="{{ p.id }}" {{ 'selected' if trial and trial.plan_id==p.id }}>{{ p.name }}</option>{% endfor %}
+      </select>
+      <div class="small muted" style="margin-top:6px">Picking the pack lets the prep list count this trial's chicken/eggs/carbs automatically.</div></div>
 
     <div><label>Payment status</label>
       <select name="payment_status">

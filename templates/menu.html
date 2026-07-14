@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Menu · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head"><h1>🍱 Menu</h1><span class="spacer"></span>
+  <span class="small muted">the catalog behind packs, add-ons &amp; the prep list</span></div>
+
+{# ======================= Components (catalog) ======================= #}
+<div class="card">
+  <div class="card-title"><h3>Items</h3><span class="spacer"></span>
+    <span class="small muted">tap an item to edit</span></div>
+
+  {% for c in comps %}
+  <details class="winrow {{ 'is-off' if not c.active }}">
+    <summary>
+      <span class="b-emoji">{{ c.emoji or '🍽️' }}</span>
+      <b>{{ c.name }}</b>
+      <span class="muted small">{{ fmt_qty(c.default_qty, c.unit) }} std
+        {% if c.addon_price %} · add-on ₹{{ c.addon_price|int }}{% endif %}
+        {% if c.protein %} · {{ c.protein }}{% endif %}</span>
+      {% if not c.active %}<span class="chip chip-xs chip-completed">hidden</span>{% endif %}
+      <span class="spacer"></span><span class="chev">›</span>
+    </summary>
+    <form method="post" action="{{ url_for('menu_component') }}" class="mini-grid" style="margin-top:10px">
+      <input type="hidden" name="id" value="{{ c.id }}">
+      <div><label class="mini-l">Name</label><input name="name" value="{{ c.name }}" required></div>
+      <div><label class="mini-l">Emoji</label><input name="emoji" value="{{ c.emoji or '' }}" style="width:70px"></div>
+      <div><label class="mini-l">Unit</label>
+        <select name="unit">{% for u in ['g','pcs','serving'] %}<option {{ 'selected' if c.unit==u }}>{{ u }}</option>{% endfor %}</select></div>
+      <div><label class="mini-l">Step</label><input name="step" type="number" step="any" value="{{ c.step|int if c.step==c.step|int else c.step }}"></div>
+      <div><label class="mini-l">Standard qty</label><input name="default_qty" type="number" step="any" value="{{ c.default_qty|int if c.default_qty==c.default_qty|int else c.default_qty }}"></div>
+      <div><label class="mini-l">Add-on ₹/step</label><input name="addon_price" type="number" step="1" value="{{ c.addon_price|int if c.addon_price else '' }}" placeholder="not an add-on"></div>
+      <div><label class="mini-l">Protein tag</label><input name="protein" value="{{ c.protein or '' }}" placeholder="11g P / 50g"></div>
+      <div><label class="mini-l">Sort</label><input name="sort" type="number" value="{{ c.sort }}" style="width:80px"></div>
+      <div class="mini-act"><button class="btn btn-primary btn-sm">Save</button></div>
+    </form>
+    <div class="row" style="gap:8px; margin-top:8px">
+      <form method="post" action="{{ url_for('menu_component') }}">
+        <input type="hidden" name="id" value="{{ c.id }}"><input type="hidden" name="do" value="toggle">
+        <button class="btn btn-ghost btn-sm">{{ '👁 Show again' if not c.active else '🙈 Hide from pickers' }}</button></form>
+      <form method="post" action="{{ url_for('menu_component') }}"
+            onsubmit="return confirm('Delete {{ c.name|e }} from the menu?');">
+        <input type="hidden" name="id" value="{{ c.id }}"><input type="hidden" name="do" value="delete">
+        <button class="btn btn-danger btn-sm">🗑 Delete</button></form>
+    </div>
+  </details>
+  {% endfor %}
+
+  <details class="winrow" style="margin-top:10px">
+    <summary><b>＋ Add a new item</b><span class="spacer"></span><span class="chev">›</span></summary>
+    <form method="post" action="{{ url_for('menu_component') }}" class="mini-grid" style="margin-top:10px">
+      <div><label class="mini-l">Name</label><input name="name" required placeholder="e.g. Tofu"></div>
+      <div><label class="mini-l">Emoji</label><input name="emoji" placeholder="🍽️" style="width:70px"></div>
+      <div><label class="mini-l">Unit</label>
+        <select name="unit"><option>serving</option><option>g</option><option>pcs</option></select></div>
+      <div><label class="mini-l">Step</label><input name="step" type="number" step="any" value="1"></div>
+      <div><label class="mini-l">Standard qty</label><input name="default_qty" type="number" step="any" value="1"></div>
+      <div><label class="mini-l">Add-on ₹/step</label><input name="addon_price" type="number" step="1" placeholder="blank = not an add-on"></div>
+      <div><label class="mini-l">Protein tag</label><input name="protein" placeholder="optional"></div>
+      <div class="mini-act"><button class="btn btn-primary btn-sm">Add item</button></div>
+    </form>
+    <div class="small muted" style="margin-top:6px">For gram items (chicken, paneer…) set unit
+      <b>g</b> and step = the gram increment (50). “Add-on ₹/step” is the per-meal price for one step
+      (e.g. Chicken ₹60 per 50g).</div>
+  </details>
+</div>
+
+{# ======================= Pack recipes ======================= #}
+<div class="card">
+  <div class="card-title"><h3>Pack recipes</h3><span class="spacer"></span>
+    <span class="small muted">what each pack contains</span></div>
+  <div class="small muted" style="margin-bottom:10px">Changing a recipe applies to <b>new</b>
+    subscriptions. Running subscriptions keep their own contents (edit those on the subscription page).</div>
+
+  {% for p in plans %}
+  <details class="winrow">
+    <summary><b>{{ p.name }}</b>
+      <span class="muted small">
+        {% for r in recipes[p.id] %}{{ r.emoji }}{% endfor %}
+        {% if not recipes[p.id] %}(empty — built per order){% endif %}
+      </span>
+      <span class="spacer"></span><span class="chev">›</span></summary>
+    <form method="post" action="{{ url_for('menu_recipe', pid=p.id) }}" style="margin-top:10px">
+      <div class="recipe-grid">
+        {% set rec = {} %}
+        {% for r in recipes[p.id] %}{% set _ = rec.update({r.component_id: r}) %}{% endfor %}
+        {% for c in comps if c.active %}
+        <div class="recipe-row">
+          <span class="b-emoji">{{ c.emoji or '🍽️' }}</span>
+          <span class="b-name">{{ c.name }} <span class="muted small">({{ c.unit }})</span></span>
+          <input type="number" step="any" min="0" name="comp_{{ c.id }}"
+                 value="{{ rec[c.id].qty|int if c.id in rec and rec[c.id].qty == rec[c.id].qty|int else (rec[c.id].qty if c.id in rec else '') }}"
+                 placeholder="0" class="recipe-qty">
+          <input name="note_{{ c.id }}" value="{{ rec[c.id].note or '' if c.id in rec else '' }}"
+                 placeholder="note" class="recipe-note">
+        </div>
+        {% endfor %}
+      </div>
+      <button class="btn btn-primary btn-sm" style="margin-top:10px">Save {{ p.name }} recipe</button>
+    </form>
+  </details>
+  {% endfor %}
+</div>
+{% endblock %}

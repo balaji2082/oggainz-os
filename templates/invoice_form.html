@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ inv.id }} · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('invoices') }}">‹ Invoices</a>
+  <h1 style="margin:0 0 0 6px">{{ inv.id }}</h1>
+  <span class="spacer"></span>
+  <a class="btn btn-forest btn-sm" href="{{ url_for('invoice_view', iid=inv.id) }}">👁 Preview</a>
+</div>
+
+<div class="card share-strip">
+  <a class="btn btn-success btn-sm" href="{{ url_for('invoice_view', iid=inv.id) }}">⬇ PDF (from preview)</a>
+  {% if wa_url %}<a class="btn btn-sm btn-wa" href="{{ wa_url }}" target="_blank">💬 Send on WhatsApp</a>{% endif %}
+  <button type="button" class="btn btn-ghost btn-sm"
+          onclick="navigator.clipboard.writeText('{{ public_url }}');this.textContent='✓ Copied'">🔗 Copy client link</button>
+  <div class="small muted" style="flex-basis:100%; margin-top:4px">The client link opens without a password
+    (protected by a long secret code) and includes the T&amp;C.</div>
+</div>
+
+<form method="post" class="card" id="invform">
+  <input type="hidden" name="items_json" id="items_json">
+  <div class="form-grid">
+    <div><label>Billed to</label><input name="bill_name" value="{{ inv.bill_name or '' }}" required></div>
+    <div><label>Phone</label><input name="bill_phone" value="{{ inv.bill_phone or '' }}"></div>
+    <div><label>Invoice date</label><input name="inv_date" type="date" value="{{ inv.inv_date or '' }}"></div>
+    <div class="full"><label>Address</label><textarea name="bill_address" rows="2">{{ inv.bill_address or '' }}</textarea></div>
+
+    <div class="full">
+      <label>Line items</label>
+      <div id="item_rows"></div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addItem()" style="margin-top:8px">＋ Add line</button>
+    </div>
+
+    <div><label>Discount (₹)</label>
+      <input name="discount" type="number" step="1" id="f_discount" value="{{ inv.discount|int or 0 }}" oninput="totals()"></div>
+    <div><label>Received (₹)</label>
+      <input name="received" type="number" step="1" id="f_received" value="{{ inv.received|int or 0 }}" oninput="totals()"></div>
+    <div><label>Total</label><div class="inv-total" id="f_total">₹0</div></div>
+
+    <div class="full"><label>Note on the invoice <span class="muted small">(shows to the client)</span></label>
+      <textarea name="notes" rows="2" placeholder="e.g. Thanks for renewing! Meals start Monday.">{{ inv.notes or '' }}</textarea></div>
+  </div>
+  <div class="form-actions">
+    <button class="btn btn-primary">Save invoice</button>
+  </div>
+</form>
+
+<div class="card danger-zone" style="margin-top:0">
+  <form method="post" action="{{ url_for('invoice_delete', iid=inv.id) }}"
+        onsubmit="return confirm('Delete invoice {{ inv.id }}?');">
+    <button class="btn btn-danger btn-sm">🗑 Delete invoice</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let items = {{ items|tojson }};
+
+function render(){
+  const wrap = document.getElementById('item_rows');
+  wrap.innerHTML = '';
+  items.forEach((it, i) => {
+    const div = document.createElement('div');
+    div.className = 'item-line';
+    div.innerHTML = `
+      <input class="il-desc" placeholder="Description" value="${(it.desc||'').replace(/"/g,'&quot;')}">
+      <input class="il-qty" type="number" step="any" min="0" value="${it.qty ?? 1}" title="Qty">
+      <input class="il-rate" type="number" step="1" value="${it.rate ?? 0}" title="Rate ₹">
+      <span class="il-amt">₹${Math.round((it.qty||0)*(it.rate||0))}</span>
+      <button type="button" class="iconbtn" onclick="items.splice(${i},1);render()">🗑</button>`;
+    div.querySelector('.il-desc').addEventListener('input', e => { it.desc = e.target.value; });
+    div.querySelector('.il-qty').addEventListener('input', e => { it.qty = parseFloat(e.target.value)||0; totals(); div.querySelector('.il-amt').textContent = '₹'+Math.round(it.qty*it.rate); });
+    div.querySelector('.il-rate').addEventListener('input', e => { it.rate = parseFloat(e.target.value)||0; totals(); div.querySelector('.il-amt').textContent = '₹'+Math.round(it.qty*it.rate); });
+    wrap.appendChild(div);
+  });
+  totals();
+}
+function addItem(){ items.push({desc:'', qty:1, rate:0}); render(); }
+function totals(){
+  const sub = items.reduce((s,it) => s + Math.round((it.qty||0)*(it.rate||0)), 0);
+  const disc = parseFloat(document.getElementById('f_discount').value)||0;
+  document.getElementById('f_total').textContent = '₹' + Math.max(sub - disc, 0);
+}
+document.getElementById('invform').addEventListener('submit', () => {
+  document.getElementById('items_json').value = JSON.stringify(items);
+});
+render();
+</script>
+{% endblock %}
