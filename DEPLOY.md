@@ -173,3 +173,30 @@ updated pack prices, Royal retired). Your data is untouched; a backup is still t
 **Customer-facing links (no password needed, safe to share):**
 - Invoices: each invoice gets its own secret link (`/i/<code>`) — send it via the WhatsApp button.
 - Terms & Conditions: `https://oggainz.pythonanywhere.com/terms`
+- Brochure: `https://oggainz.pythonanywhere.com/brochure` — plans, menus & pricing.
+
+---
+
+## 14 July 2026 update — what's new (same 2-step deploy: `git pull` + Reload)
+
+All additive again — new tables create themselves on first load; **live customer data and
+subscriptions are untouched.**
+
+- **Prep list tick-offs:** every ingredient on Today → Prep list now has a checkbox — tick
+  items off as you prep them. Ticks are saved per day (and tidy themselves up after 2 weeks).
+- **Terms & Conditions:** new clause on agreed delivery slots (best effort; occasional delays
+  from traffic/weather/logistics) and a new **Delivery fee** section (free zone, ₹30–75 by
+  distance, fixed once agreed). Check the wording once at `/terms`.
+- **Invoices:** the totals now show *Food subscription / Delivery fee / Total / Amount paid /
+  Balance due* separately, and every invoice carries a prominent **Terms & Conditions** box
+  with a button to the full terms. The WhatsApp message includes the terms link too.
+- **OG Agent everywhere:** the round green 🤖 button floats on every page — tap it to chat
+  from wherever you are. It now answers from the live brochure + terms (a full FAQ), and it
+  **learns**: tell it something new and confirm the 🧠 suggestion — the fact is remembered
+  forever (see/teach/forget at the bottom of the OG Agent page). You confirm every action;
+  it never changes anything on its own.
+- **Digital brochure:** More → *Brochure*. Public shareable link (`/brochure`), editable any
+  time (`/brochure/edit` — bullets, tables, bold), **⬇ PDF** to download, **💬 Send on
+  WhatsApp** to share, and a one-tap **📘 Send brochure** button on every CRM lead.
+  It seeded itself from the app's live pack prices — give it one read and tweak any wording
+  you want.
