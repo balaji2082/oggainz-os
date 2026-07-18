@@ -1,0 +1,20 @@
+{% extends "content_base.html" %}
+{% block title %}Shoot Days · OG Gainz{% endblock %}
+{% block content %}
+<h1>Shoot days</h1>
+<p class="muted" style="margin-bottom:14px">Sunday cameraman batches — each shoot banks ~2 weeks of reels.
+Plans live in <code>_shoots/</code>; plan the next one with <code>/og-shoot</code>.</p>
+
+{% for s in shoots %}
+<div class="panel" style="margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+  <div>
+    <b>{{ s.date }}</b> — {{ s.title or s.id }}
+    {% if s.notes %}<div class="muted" style="margin-top:3px">{{ s.notes }}</div>{% endif %}
+  </div>
+  <span class="pill {{ 'st-PUBLISHED' if s.status=='DONE' else ('st-REVIEW' if s.status=='CANCELLED' else 'st-APPROVED') }}"
+        style="margin-left:auto">{{ s.status }}</span>
+</div>
+{% else %}
+<p class="muted">No shoots synced yet — run <code>/og-status</code> in Claude to sync.</p>
+{% endfor %}
+{% endblock %}

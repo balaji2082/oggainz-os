@@ -1,0 +1,93 @@
+{% extends "content_base.html" %}
+{% block title %}{{ p.id }} · OG Gainz Content{% endblock %}
+{% block content %}
+
+<a class="muted" href="{{ url_for('content_board') }}">← Board</a>
+<h1 style="margin-top:8px">{{ p.id }} — {{ p.title or '(untitled)' }}</h1>
+
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+  <span class="pill st-{{ p.status }}">{{ p.status }}</span>
+  <span class="chip {{ p.account or 'brand' }}">{{ p.account or '?' }}</span>
+  <span class="muted">{{ p.format }}{% if p.pillar %} · {{ p.pillar }}{% endif %}</span>
+  {% if p.editor %}<span class="muted">✂ editor: <b>{{ p.editor }}</b></span>{% endif %}
+  {% if p.due_date %}<span class="muted">draft due {{ p.due_date }}</span>{% endif %}
+  {% if p.post_date %}<span class="muted">📅 posts {{ p.post_date }}</span>{% endif %}
+</div>
+
+{# --- pipeline strip: where this card sits in its lane --- #}
+{% set cur = lane.index(p.status) if p.status in lane else -1 %}
+<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:16px">
+  {% for st in lane %}
+    <span class="pill {{ 'st-PUBLISHED' if st == p.status }}"
+          style="{{ 'opacity:.45' if cur >= 0 and loop.index0 > cur else '' }}">{{ st }}</span>
+    {% if not loop.last %}<span class="muted">→</span>{% endif %}
+  {% endfor %}
+</div>
+
+{% if p.hook %}
+<div class="panel" style="margin-bottom:12px">
+  <div class="muted" style="font-weight:700;text-transform:uppercase;font-size:11px">Hook</div>
+  <div style="font-size:16px;font-weight:700;margin-top:4px">“{{ p.hook }}”</div>
+</div>
+{% endif %}
+
+{% if p.body %}
+<div class="panel" style="margin-bottom:12px">
+  <div class="muted" style="font-weight:700;text-transform:uppercase;font-size:11px">Card details (from the pipeline)</div>
+  <pre style="white-space:pre-wrap;font:12.5px/1.5 ui-monospace,Consolas,monospace;
+       color:var(--ink-2);margin-top:6px">{{ p.body }}</pre>
+</div>
+{% endif %}
+{% if p.notes %}<p class="muted" style="margin-bottom:12px">📝 {{ p.notes }}</p>{% endif %}
+
+{# --- actions --- #}
+<div class="panel" style="margin-bottom:12px">
+  {% if moves %}
+  <form method="post" action="{{ url_for('content_post_status', pid=p.id) }}"
+        style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <b style="font-size:13.5px">Move to:</b>
+    {% if c_is_admin %}
+      <select name="status">
+        {% for st in moves %}<option {{ 'selected' if st==p.status }}>{{ st }}</option>{% endfor %}
+      </select>
+      <button>Update</button>
+    {% else %}
+      {% for st in moves %}
+        <button name="status" value="{{ st }}">
+          {{ '✂ Start editing' if st=='EDITING' else '✅ Draft done → Review' if st=='REVIEW' else st }}
+        </button>
+      {% endfor %}
+    {% endif %}
+  </form>
+  {% elif not c_is_admin %}
+  <p class="muted">{% if mine %}Nothing for you to move right now.{% else %}View-only —
+    this card isn’t assigned to you. You can still leave a note below.{% endif %}</p>
+  {% endif %}
+
+  {% if c_is_admin %}
+  <form method="post" action="{{ url_for('content_post_assign', pid=p.id) }}"
+        style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
+    <b style="font-size:13.5px">Assign:</b>
+    <input name="editor" placeholder="Editor name" value="{{ p.editor or '' }}">
+    <input name="due" type="date" value="{{ p.due_date or '' }}">
+    <button class="ghost">Save</button>
+  </form>
+  {% endif %}
+</div>
+
+{# --- activity + comments --- #}
+<h2>Activity</h2>
+<form method="post" action="{{ url_for('content_post_comment', pid=p.id) }}"
+      style="display:flex;gap:8px;margin-bottom:10px">
+  <input name="note" placeholder="Leave a note / question…" style="flex:1" required>
+  <button class="ghost">Post</button>
+</form>
+{% for a in acts %}
+<div style="display:flex;gap:8px;padding:7px 2px;border-bottom:1px solid var(--line);font-size:13px">
+  <b style="min-width:70px">{{ a.who }}</b>
+  <span style="color:var(--ink-2)">{{ '💬' if a.action=='comment' else '🔁' if a.action=='sync' else '⚙' }} {{ a.note }}</span>
+  <span class="muted" style="margin-left:auto;white-space:nowrap">{{ a.at }}</span>
+</div>
+{% else %}<p class="muted">No activity yet.</p>{% endfor %}
+
+{% endblock %}

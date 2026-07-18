@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}OG Gainz · Content{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.png') }}">
+  <style>
+    /* OG Gainz content theme — deliberately dark-brand, one look. */
+    :root{
+      --forest:#004030; --forest-2:#00553f; --panel:rgba(255,255,255,.055);
+      --panel-2:rgba(255,255,255,.09); --line:rgba(255,255,255,.13);
+      --ink:#F8F5EC; --ink-2:#c9d6cc; --ink-3:#93a89a;
+      --lime:#C5E84B; --green:#52C975; --orange:#E9762B; --red:#e4574f;
+      --r:14px;
+    }
+    *{box-sizing:border-box;margin:0}
+    body{background:linear-gradient(160deg,#00332a 0%,var(--forest) 55%,#062b22 100%);
+      min-height:100vh;color:var(--ink);
+      font:15px/1.45 "Segoe UI",Roboto,system-ui,-apple-system,sans-serif;}
+    a{color:inherit;text-decoration:none}
+    .wrap{max-width:1180px;margin:0 auto;padding:14px 14px 90px}
+    /* top bar */
+    .cnav{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+      padding:10px 0 14px;position:sticky;top:0;z-index:5;
+      background:linear-gradient(#00332a,#00332aee 70%,transparent)}
+    .cnav .brand{font-weight:800;letter-spacing:.4px;margin-right:8px}
+    .cnav .brand b{color:var(--lime)}
+    .cnav a.tab{padding:7px 13px;border-radius:999px;border:1px solid var(--line);
+      color:var(--ink-2);font-weight:600;font-size:13.5px}
+    .cnav a.tab.on{background:var(--lime);border-color:var(--lime);color:#0c2a1c}
+    .cnav .right{margin-left:auto;display:flex;gap:6px;align-items:center;
+      color:var(--ink-3);font-size:12.5px}
+    /* stat tiles */
+    .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+      gap:10px;margin-bottom:16px}
+    .tile{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+      padding:12px 14px}
+    .tile .k{font-size:11.5px;font-weight:700;letter-spacing:.6px;
+      text-transform:uppercase;color:var(--ink-3)}
+    .tile .v{font-size:26px;font-weight:800;margin-top:2px}
+    .tile .s{font-size:12.5px;color:var(--ink-2);margin-top:1px}
+    .tile.ok   .v{color:var(--green)}
+    .tile.warn .v{color:var(--orange)}
+    .tile.bad  .v{color:var(--red)}
+    /* generic panel + pills */
+    .panel{background:var(--panel);border:1px solid var(--line);
+      border-radius:var(--r);padding:14px}
+    .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;
+      font-weight:700;letter-spacing:.3px;border:1px solid var(--line);color:var(--ink-2)}
+    .pill.st-REVIEW{border-color:var(--orange);color:var(--orange)}
+    .pill.st-APPROVED,.pill.st-SCHEDULED{border-color:var(--green);color:var(--green)}
+    .pill.st-PUBLISHED{background:var(--green);border-color:var(--green);color:#0c2a1c}
+    .pill.st-EDITING{border-color:var(--lime);color:var(--lime)}
+    .chip{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700}
+    .chip.brand{background:rgba(82,201,117,.18);color:var(--green)}
+    .chip.personal{background:rgba(233,118,43,.18);color:var(--orange)}
+    .muted{color:var(--ink-3);font-size:12.5px}
+    button,.btn{background:var(--lime);color:#0c2a1c;border:0;border-radius:9px;
+      padding:8px 14px;font-weight:700;font-size:13.5px;cursor:pointer}
+    button.ghost,.btn.ghost{background:transparent;color:var(--ink-2);
+      border:1px solid var(--line)}
+    input,select,textarea{background:rgba(0,0,0,.25);border:1px solid var(--line);
+      color:var(--ink);border-radius:9px;padding:8px 10px;font:inherit}
+    h1{font-size:20px;margin-bottom:12px} h2{font-size:15px;margin:14px 0 8px}
+    .banner{background:rgba(197,232,75,.12);border:1px solid rgba(197,232,75,.4);
+      border-radius:var(--r);padding:10px 14px;margin-bottom:14px;font-size:13.5px}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="cnav">
+    <span class="brand">OG <b>GAINZ</b> <span class="muted">· content</span></span>
+    <a class="tab {{ 'on' if request.endpoint=='content_board' }}" href="{{ url_for('content_board') }}">Board</a>
+    <a class="tab {{ 'on' if request.endpoint=='content_shoots' }}" href="{{ url_for('content_shoots') }}">Shoots</a>
+    <a class="tab {{ 'on' if request.endpoint=='content_tasks' }}" href="{{ url_for('content_tasks') }}">Tasks</a>
+    <span class="right">
+      {{ c_name }}{% if not c_is_admin %} · editor{% endif %}
+      {% if c_is_admin %}<a class="tab" href="{{ url_for('today') }}">⌂ Command Center</a>{% endif %}
+      {% if login_active %}<a class="tab" href="{{ url_for('logout') }}">Logout</a>{% endif %}
+    </span>
+  </div>
+
+  {% if not c_is_admin and c_name == 'team' %}
+  <div class="banner">
+    <form method="post" action="{{ url_for('content_set_name') }}" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      👋 Who's this? <input name="name" placeholder="Your name" required>
+      <input type="hidden" name="back" value="{{ request.path }}">
+      <button>Save</button>
+      <span class="muted">So your edits + tasks show under your name.</span>
+    </form>
+  </div>
+  {% endif %}
+
+  {% block content %}{% endblock %}
+</div>
+</body>
+</html>

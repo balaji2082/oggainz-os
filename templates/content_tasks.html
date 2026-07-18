@@ -1,0 +1,31 @@
+{% extends "content_base.html" %}
+{% block title %}Tasks · OG Gainz Content{% endblock %}
+{% block content %}
+<h1>Tasks</h1>
+<p class="muted" style="margin-bottom:14px">What the humans owe the pipeline. Balaji's items are the
+approvals/shoots/publishing only he can do; editors see their own deliverables.</p>
+
+{% if c_is_admin %}
+<form method="post" class="panel" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+  <input name="title" placeholder="New task…" style="flex:2;min-width:180px" required>
+  <input name="owner" placeholder="Owner (Balaji / editor name)" value="Balaji" style="flex:1;min-width:120px">
+  <input name="due" type="date">
+  <button>Add</button>
+</form>
+{% endif %}
+
+{% for t in tasks %}
+<div class="panel" style="margin-bottom:8px;display:flex;gap:10px;align-items:center;
+     {{ 'opacity:.5' if t.done }}">
+  <form method="post" action="{{ url_for('content_task_toggle', tid=t.id) }}">
+    <button class="ghost" style="border-radius:8px;min-width:38px">{{ '✓' if t.done else '○' }}</button>
+  </form>
+  <div>
+    <div style="font-weight:600;{{ 'text-decoration:line-through' if t.done }}">{{ t.title }}</div>
+    <div class="muted">{{ t.owner }}{% if t.due %} · due {{ t.due }}{% endif %}</div>
+  </div>
+</div>
+{% else %}
+<p class="muted">No tasks yet.</p>
+{% endfor %}
+{% endblock %}

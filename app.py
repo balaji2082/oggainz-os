@@ -62,9 +62,14 @@ _c.close()
 # server). With no password configured, the app behaves exactly as before for
 # local use on your laptop — no login screen.
 APP_PASSWORD = os.environ.get("OG_PASSWORD")
+# Editor friends log in with this second password: they get role "team" and can
+# reach ONLY the /content pages (content_hub gates the rest). Optional.
+TEAM_PASSWORD = os.environ.get("OG_TEAM_PASSWORD")
 # invoice_public + terms + brochure are customer-facing pages (token-protected /
 # plain info), so they stay reachable without the app password.
-PUBLIC_ENDPOINTS = {"login", "static", "invoice_public", "terms", "brochure_public"}
+# content_sync_api is protected by its own token (OG_SYNC_TOKEN), not the session.
+PUBLIC_ENDPOINTS = {"login", "static", "invoice_public", "terms", "brochure_public",
+                    "content_sync_api"}
 
 
 @app.before_request
@@ -87,11 +92,17 @@ def login():
         if request.form.get("password") == APP_PASSWORD:
             session.permanent = True
             session["authed"] = True
+            session["role"] = "admin"
             # Only follow same-site relative paths (never an external URL).
             nxt = request.args.get("next") or ""
             if not nxt.startswith("/") or nxt.startswith("//"):
                 nxt = url_for("today")
             return redirect(nxt)
+        if TEAM_PASSWORD and request.form.get("password") == TEAM_PASSWORD:
+            session.permanent = True
+            session["authed"] = True
+            session["role"] = "team"          # content pages only (content_hub gate)
+            return redirect(url_for("content_board"))
         error = "Wrong password — try again."
     return render_template("login.html", error=error)
 
@@ -100,6 +111,11 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+# Content Hub (social-media production dashboard) — self-contained module.
+import content_hub                                            # noqa: E402
+content_hub.register(app)
 
 
 # ---------------------------------------------------------------------------

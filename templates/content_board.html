@@ -1,0 +1,62 @@
+{% extends "content_base.html" %}
+{% block title %}Content Board · OG Gainz{% endblock %}
+{% block content %}
+
+{% set q = stats.queue_days %}
+<div class="tiles">
+  <div class="tile {{ 'ok' if q >= stats.queue_floor else ('warn' if q >= 4 else 'bad') }}">
+    <div class="k">Queue depth</div>
+    <div class="v">{{ q }}<span style="font-size:14px;font-weight:600"> / {{ stats.queue_floor }} days</span></div>
+    <div class="s">{{ '✓ healthy' if q >= stats.queue_floor else ('⚠ getting low' if q >= 4 else '✖ below floor — approve content') }}</div>
+  </div>
+  <div class="tile {{ 'ok' if stats.wk_reels >= stats.wk_reel_target else '' }}">
+    <div class="k">Reels this week</div>
+    <div class="v">{{ stats.wk_reels }}<span style="font-size:14px;font-weight:600"> / {{ stats.wk_reel_target }}</span></div>
+    <div class="s">target 18–20 / month</div>
+  </div>
+  <div class="tile {{ 'ok' if stats.wk_posts >= stats.wk_post_target else '' }}">
+    <div class="k">Posts this week</div>
+    <div class="v">{{ stats.wk_posts }}<span style="font-size:14px;font-weight:600"> / {{ stats.wk_post_target }}</span></div>
+    <div class="s">carousels + statics</div>
+  </div>
+  <div class="tile {{ 'bad' if stats.overdue else 'ok' }}">
+    <div class="k">Overdue edits</div>
+    <div class="v">{{ stats.overdue|length }}</div>
+    <div class="s">{% if stats.overdue %}⚠ {% for r in stats.overdue %}{{ r.id }}{{ ", " if not loop.last }}{% endfor %}{% else %}✓ all on time{% endif %}</div>
+  </div>
+</div>
+
+<div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;align-items:flex-start">
+  {% for name, cards in cols %}
+  <div style="min-width:230px;flex:1">
+    <div class="muted" style="font-weight:700;letter-spacing:.5px;text-transform:uppercase;
+         font-size:11px;margin:0 2px 6px">{{ name }} · {{ cards|length }}</div>
+    {% for p in cards %}
+    <a href="{{ url_for('content_post', pid=p.id) }}" style="display:block">
+      <div class="panel" style="padding:10px 12px;margin-bottom:8px">
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+          <b style="font-size:12.5px">{{ p.id }}</b>
+          <span class="chip {{ p.account or 'brand' }}">{{ p.account or '?' }}</span>
+          <span class="muted" style="margin-left:auto">{{ p.format }}</span>
+        </div>
+        <div style="font-size:13.5px;font-weight:600;line-height:1.3">{{ p.title or '(untitled)' }}</div>
+        <div style="display:flex;gap:6px;margin-top:6px;align-items:center;flex-wrap:wrap">
+          <span class="pill st-{{ p.status }}">{{ p.status }}</span>
+          {% if p.editor %}<span class="muted">✂ {{ p.editor }}</span>{% endif %}
+          {% if p.due_date %}<span class="muted">due {{ p.due_date[5:] }}</span>{% endif %}
+          {% if p.post_date %}<span class="muted">📅 {{ p.post_date[5:] }}</span>{% endif %}
+        </div>
+      </div>
+    </a>
+    {% else %}
+    <div class="muted" style="padding:6px 2px">—</div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+
+<p class="muted" style="margin-top:10px">
+  Cards are synced from the agent pipeline (<code>_briefs/</code>). Statuses here mirror the
+  files — Balaji approves; editors move their own reels from SHOT → EDITING → REVIEW.
+</p>
+{% endblock %}
