@@ -339,7 +339,7 @@ Kitchen runs Monday–Friday. Payments in advance; skipped meals (informed befor
 previous day) carry forward within validity.
 
 TERMS SUMMARY: monthly packs = 20 meals (validity 40 days Signature / 50 days Elite & Athlete); \
-weekly packs = 5 meals, 15-day validity. Kitchen-closed days extend validity automatically. \
+weekly packs = 5 meals, 14-day validity. Kitchen-closed days extend validity automatically. \
 Delivery windows: lunch 11:00–13:45, dinner 17:30–20:00. Agreed delivery slots are honoured on a \
 best-effort basis — occasional delays can happen (traffic, weather, logistics). Delivery is free \
 in the free zone around Perumbakkam; beyond it a distance-based fee (₹30–₹75) applies, agreed at \
