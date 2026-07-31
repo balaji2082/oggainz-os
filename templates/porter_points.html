@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Porter points · OG Gainz{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <h1 style="margin:0">Porter handoff points</h1>
+</div>
+
+<p class="muted" style="margin:-4px 0 14px">
+  Spots where the rider hands a far order to a Porter instead of riding it himself.
+  Booking a Porter from the kitchen to Adyar is ~19 km; if the rider carries it to
+  Sholinganallur junction — somewhere he passes anyway — the Porter only runs the rest.
+  Same delivery, lower fare, no extra riding.
+</p>
+
+<div class="card">
+  <strong>How a point gets used</strong>
+  <ul class="small muted" style="margin:6px 0 0 0;padding-left:18px">
+    <li>An order under {{ 12 }} km on a corridor the rider is already riding — <strong>he delivers it</strong>.</li>
+    <li>A far order on a corridor he <em>is</em> riding — carried to the point here that serves
+        that corridor, and a Porter is booked from there.</li>
+    <li>A far order on a corridor he is <strong>not</strong> riding at all — Porter booked
+        direct from the kitchen, because a detour costs more of his time than it saves.</li>
+  </ul>
+  <p class="small muted" style="margin:8px 0 0">
+    Pick a spot that is safe to stop at, easy to describe to a Porter driver, well lit after
+    dark and next to a landmark. It only helps if it is on a route the rider already takes.
+  </p>
+</div>
+
+{% if uncovered %}
+<div class="card" style="border-left:4px solid #e9762b">
+  <strong>Far orders with no handoff point on their corridor</strong>
+  <p class="small muted" style="margin:4px 0 6px">
+    These are being booked direct from the kitchen right now — the expensive way. A point
+    covering their corridor would cut the fare.
+  </p>
+  {% for corr, names in uncovered.items() %}
+    <div class="small"><span class="pill">{{ corr }}</span> {{ names|join(', ') }}</div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% for r in rows %}
+<div class="card" style="border-left:4px solid {{ '#004030' if r.p.active else '#cfd8d4' }}">
+  <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">
+    <div style="flex:1">
+      <strong>{{ r.p.code or '—' }} · {{ r.p.name }}</strong>
+      {% if not r.p.active %}<span class="pill">off</span>{% endif %}
+      {% if not r.p.lat %}<span class="pill" style="background:#c0392b;color:#fff">no pin</span>{% endif %}
+      <div style="margin-top:3px">
+        {% for s in r.serves %}<span class="pill">{{ s }}</span> {% endfor %}
+        {% if not r.serves %}<span class="muted small">serves no corridor yet — it will never be used</span>{% endif %}
+      </div>
+      {% if r.p.note %}<div class="small muted" style="margin-top:3px">{{ r.p.note }}</div>{% endif %}
+      {% if r.km %}<div class="small" style="margin-top:3px">📍 {{ r.km }} km from the kitchen by road</div>{% endif %}
+    </div>
+    <button class="btn btn-ghost btn-sm" type="button"
+            onclick="var e=document.getElementById('pp-{{ r.p.id }}');e.style.display=e.style.display=='block'?'none':'block'">Edit</button>
+  </div>
+  <div id="pp-{{ r.p.id }}" style="display:none;margin-top:10px;border-top:1px solid #e3e8e6;padding-top:10px">
+    {{ pp_form(r.p, r.serves, corridors) }}
+  </div>
+</div>
+{% else %}
+<div class="card"><p class="muted" style="margin:0">
+  No porter points yet. Until one exists, every far order is booked direct from the kitchen.
+</p></div>
+{% endfor %}
+
+<div class="card">
+  <strong>Add a porter point</strong>
+  {{ pp_form(None, [], corridors) }}
+</div>
+
+{% endblock %}
+
+{% macro pp_form(p, serves, corridors) %}
+<form method="post" action="{{ url_for('porter_point_save') }}" class="form-grid">
+  {% if p %}<input type="hidden" name="id" value="{{ p.id }}">{% endif %}
+
+  <div><label>Code</label>
+    <input name="code" value="{{ p.code if p else '' }}" placeholder="PP-1"></div>
+  <div><label>Active</label>
+    <select name="active">
+      <option value="1" {{ 'selected' if not p or p.active }}>Yes</option>
+      <option value="" {{ 'selected' if p and not p.active }}>No</option>
+    </select></div>
+
+  <div class="full"><label>Name — what you would say to a Porter driver</label>
+    <input name="name" value="{{ p.name if p else '' }}" required
+           placeholder="Sholinganallur junction, opposite the Reliance store"></div>
+
+  <div class="full"><label>Map pin
+    {% if p and p.lat %}<span class="pill pill-ok">set</span>
+    {% else %}<span class="pill" style="background:#c0392b;color:#fff">missing</span>{% endif %}</label>
+    <input name="pin" placeholder="Plus code (V6R3+XM) · Maps link · 12.9010, 80.2279">
+    {% if p and p.lat %}<div class="small muted" style="margin-top:3px">Currently {{ p.lat }}, {{ p.lng }}</div>{% endif %}</div>
+
+  <div class="full"><label>Serves these corridors</label>
+    <div class="pickrow">
+      {% for code, desc in corridors.items() %}
+        <label title="{{ desc }}">
+          <input type="checkbox" name="serves" value="{{ code }}" {{ 'checked' if code in serves }}>
+          <span>{{ code }}</span></label>
+      {% endfor %}
+    </div>
+    <div class="pickhint">Which directions this point can take orders for. A point that serves
+      nothing will never be used.</div></div>
+
+  <div class="full"><label>Note</label>
+    <input name="note" value="{{ p.note if p and p.note else '' }}"
+           placeholder="Park on the service road side · well lit · easy for Porter to find"></div>
+
+  <div class="full form-actions" style="gap:8px">
+    <button class="btn btn-primary btn-sm">{{ 'Save changes' if p else 'Add point' }}</button>
+    {% if p %}
+      <button class="btn btn-ghost btn-sm" formaction="{{ url_for('porter_point_delete', pid=p.id) }}"
+              onclick="return confirm('Switch this point off?')">Switch off</button>
+    {% endif %}
+  </div>
+</form>
+{% endmacro %}

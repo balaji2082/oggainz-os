@@ -176,6 +176,34 @@ input,select,textarea{width:100%; padding:11px 13px; border:1.5px solid var(--li
   border-radius:10px; font-family:inherit; font-size:.95rem; background:#fff; color:var(--ink)}
 input:focus,select:focus,textarea:focus{outline:none; border-color:var(--lime)}
 textarea{min-height:70px; resize:vertical}
+
+/* Tick boxes must opt out of the full-width text-input styling above, or they
+   render as squashed wide rectangles instead of boxes. */
+input[type=checkbox],input[type=radio]{
+  width:20px; height:20px; min-width:0; padding:0; flex:none;
+  margin:0 7px 0 0; vertical-align:-4px; border-radius:5px;
+  accent-color:var(--forest); cursor:pointer}
+input[type=radio]{border-radius:50%}
+label.inline{display:inline-flex; align-items:center; margin:0; font-weight:600;
+  font-size:.88rem; color:var(--ink); cursor:pointer; white-space:nowrap}
+
+/* ---------- Day / chip picker ----------
+   Seven tick boxes in a row are miserable on a phone. These are proper tappable
+   toggles: the real checkbox stays in the form (so nothing about submitting
+   changes) but is visually replaced by a pill that fills in when selected. */
+.pickrow{display:flex; gap:7px; flex-wrap:wrap; margin-top:7px}
+.pickrow label{display:inline-flex; margin:0; position:relative; cursor:pointer}
+.pickrow input{position:absolute; inset:0; opacity:0; width:100%; height:100%;
+  margin:0; cursor:pointer}
+.pickrow span{display:inline-flex; align-items:center; justify-content:center;
+  min-width:46px; min-height:40px; padding:0 11px;
+  border:1.5px solid var(--line); border-radius:10px; background:#fff;
+  font-weight:700; font-size:.85rem; color:var(--muted);
+  user-select:none; transition:background .12s,border-color .12s,color .12s}
+.pickrow input:checked+span{background:var(--forest); border-color:var(--forest); color:#fff}
+.pickrow input:focus-visible+span{border-color:var(--lime); box-shadow:0 0 0 3px rgba(31,168,74,.18)}
+.pickrow label:hover span{border-color:var(--lime)}
+.pickhint{font-size:.78rem; color:var(--muted); margin-top:6px}
 .form-grid{display:grid; grid-template-columns:1fr 1fr; gap:0 16px}
 .form-grid .full{grid-column:1/-1}
 @media(max-width:560px){ .form-grid{grid-template-columns:1fr} }

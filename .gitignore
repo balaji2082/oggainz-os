@@ -2,7 +2,25 @@
 oggainz.db
 oggainz.db-wal
 oggainz.db-shm
+
+# Secrets. API keys and tokens must never reach the repo — the ORS, Google and
+# Anthropic keys live in the database (excluded above) or the server environment.
 .pa_token
+.notion_token
+*_token
+*.key
+.env
+.env.*
+
+# Leftovers from the OneDrive -> D: move
+.fuse_hidden*
+
+# Finance dashboard outputs. build_finance.py regenerates all three from Notion;
+# they hold real personal + business figures and have no business on the server.
+finance/data/
+finance/dashboard.html
+finance/OG-Gainz-Finance.xlsx
+
 *.bak
 backups/
 exports/

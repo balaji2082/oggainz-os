@@ -1,5 +1,76 @@
 {% extends "base.html" %}
 {% block title %}{{ cust.name }} · OG Gainz{% endblock %}
+
+{# One form, used for both editing an existing address and adding a new one. #}
+{% macro address_form(cust, a, wd, weekdays, corridors) %}
+<form method="post" action="{{ url_for('customer_address_save', cid=cust.id) }}" class="form-grid">
+  {% if a %}<input type="hidden" name="address_id" value="{{ a.id }}">{% endif %}
+
+  <div><label>Label</label>
+    <input name="label" value="{{ a.label if a else '' }}" placeholder="Home / Office / Gym" required></div>
+  <div><label>Drop type</label>
+    <select name="drop_type">
+      <option value="">—</option>
+      {% for t in ['Home','PG','Office','Gym'] %}
+        <option value="{{ t }}" {{ 'selected' if a and a.drop_type==t }}>{{ t }}</option>
+      {% endfor %}
+    </select></div>
+
+  <div class="full"><label>Address</label>
+    <textarea name="address" placeholder="Flat / building / landmark">{{ a.address if a else '' }}</textarea></div>
+
+  <div class="full"><label>Map pin
+    {% if a and a.lat %}<span class="pill pill-ok">set</span>
+    {% else %}<span class="pill" style="background:#c0392b;color:#fff">missing</span>{% endif %}</label>
+    <input name="pin" placeholder="Plus code (V6R3+XM) · Maps link · 12.8924, 80.2041">
+    <div class="small muted" style="margin-top:3px">
+      {% if a and a.lat %}Currently {{ a.lat }}, {{ a.lng }} — paste a new one to move it.
+      {% else %}Long-press the exact spot in Google Maps, copy, paste here.{% endif %}
+    </div></div>
+
+  <div class="full"><label>Use this address automatically on…</label>
+    <div class="pickrow">
+      {% for i in range(7) %}
+        <label><input type="checkbox" name="weekdays" value="{{ i }}" {{ 'checked' if i in wd }}>
+          <span>{{ weekdays[i] }}</span></label>
+      {% endfor %}
+    </div>
+    <div class="pickhint">Tap the days. Leave them all off to use this address only as the
+      default, or when you pick it by hand for a particular delivery.</div></div>
+
+  {% set cur_slot = (a.slot or '') if a else '' %}
+  <div class="full"><label>…for which meal</label>
+    <div class="pickrow">
+      {% for v, t in [('', 'Both meals'), ('Lunch', 'Lunch only'), ('Dinner', 'Dinner only')] %}
+        <label><input type="radio" name="slot" value="{{ v }}" {{ 'checked' if cur_slot == v }}>
+          <span>{{ t }}</span></label>
+      {% endfor %}
+    </div>
+    <div class="pickhint">Lets you say “lunch at home on Mon and Fri, office the rest” while
+      dinner always goes somewhere else. A rule for one meal beats a rule for both.</div></div>
+
+  <div><label>Corridor</label>
+    <select name="corridor">
+      <option value="">Auto from locality</option>
+      {% for code, desc in corridors.items() %}
+        <option value="{{ code }}" {{ 'selected' if a and a.corridor==code }}>{{ code }}</option>
+      {% endfor %}
+    </select></div>
+
+  <div><label>Delivery note (printed on the sheet)</label>
+    <input name="map_note" value="{{ a.map_note if a and a.map_note else '' }}"
+           placeholder="Gate 2 · call on arrival"></div>
+
+  <div class="full form-actions" style="gap:8px">
+    <button class="btn btn-primary btn-sm">{{ 'Save changes' if a else 'Add address' }}</button>
+    {% if a and not a.is_default %}
+      <button class="btn btn-ghost btn-sm" formaction="{{ url_for('customer_address_archive', cid=cust.id, aid=a.id) }}"
+              onclick="return confirm('Archive this address? Past deliveries keep their record of it.')">Archive</button>
+    {% endif %}
+  </div>
+</form>
+{% endmacro %}
+
 {% block content %}
 <div class="page-head">
   <a class="btn btn-ghost btn-sm" href="{{ url_for('customers') }}">‹ Back</a><span class="spacer"></span>
@@ -19,6 +90,59 @@
     {% if cust.address %}<div class="k">Address</div><div>{{ cust.address }}</div>{% endif %}
     {% if cust.notes %}<div class="k">Notes</div><div>{{ cust.notes }}</div>{% endif %}
     <div class="k">Lifetime paid</div><div><b>{{ spent|inr }}</b></div>
+  </div>
+</div>
+
+{# ---- Delivery addresses ------------------------------------------------- #}
+<div class="card">
+  <div class="card-title"><h3>Delivery addresses</h3><span class="spacer"></span>
+    {% if addrs|length > 1 %}
+      <a class="btn btn-ghost btn-sm" href="{{ url_for('customer_schedule', cid=cust.id) }}">📅 Schedule ›</a>
+    {% endif %}
+    <button class="btn btn-primary btn-sm" type="button"
+            onclick="document.getElementById('addr-new').style.display='block';this.style.display='none'">+ Add address</button></div>
+
+  <p class="small muted" style="margin:-2px 0 10px">
+    A customer can have more than one — office on some days, home on others. Give an address
+    a weekday schedule and it is used automatically on those days. Anything without a schedule
+    falls back to the default. You can still send a single day somewhere else from the Today list.
+  </p>
+
+  {% for x in addrs %}
+  <div class="card" style="margin:0 0 8px;padding:10px 12px;
+       border-left:4px solid {{ '#004030' if x.a.is_default else '#cfd8d4' }}">
+    <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">
+      <div style="flex:1">
+        <strong>{{ x.a.label }}</strong>
+        {% if x.a.is_default %}<span class="pill pill-ok">default</span>{% endif %}
+        {% if x.days %}<span class="pill">{{ x.days }}{% if x.a.slot %} · {{ x.a.slot }}{% endif %}</span>{% endif %}
+        {% if not x.a.lat %}<span class="pill" style="background:#c0392b;color:#fff">no pin</span>{% endif %}
+        <div class="small muted">{{ x.a.address or '—' }}</div>
+        {% if x.a.map_note %}<div class="small"><em>{{ x.a.map_note }}</em></div>{% endif %}
+        {% if x.km %}<div class="small">📍 {{ x.km }} km by road · {{ x.zone }}
+          {% if x.src == 'estimate' %}<span class="muted">(approx.)</span>{% endif %}</div>{% endif %}
+      </div>
+      <div class="row" style="gap:5px;flex-wrap:nowrap">
+        {% if not x.a.is_default %}
+        <form method="post" action="{{ url_for('customer_address_default', cid=cust.id, aid=x.a.id) }}">
+          <button class="btn btn-ghost btn-sm">Make default</button></form>
+        {% endif %}
+        <button class="btn btn-ghost btn-sm" type="button"
+                onclick="var e=document.getElementById('addr-{{ x.a.id }}');e.style.display=e.style.display=='block'?'none':'block'">Edit</button>
+      </div>
+    </div>
+
+    <div id="addr-{{ x.a.id }}" style="display:none;margin-top:10px;border-top:1px solid #e3e8e6;padding-top:10px">
+      {{ address_form(cust, x.a, x.wd, weekdays, corridors) }}
+    </div>
+  </div>
+  {% else %}
+  <div class="muted small">No addresses yet — add one so this customer can be routed.</div>
+  {% endfor %}
+
+  <div id="addr-new" style="display:none;border-top:1px solid #e3e8e6;padding-top:12px;margin-top:6px">
+    <strong class="small">New address</strong>
+    {{ address_form(cust, None, [], weekdays, corridors) }}
   </div>
 </div>
 

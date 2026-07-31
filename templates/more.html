@@ -8,6 +8,24 @@
   OG Agent — your AI assistant<span class="spacer"></span>
   {% if g_unread %}<span class="navbadge">{{ g_unread }}</span>{% endif %}›</a>
 
+<a class="linkrow" href="{{ url_for('sheet', d=today_str, slot='Dinner') }}">
+  <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/></svg>
+  Shift sheet — print for the kitchen<span class="spacer"></span>›</a>
+
+<a class="linkrow" href="{{ url_for('subscriptions_review') }}">
+  <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+  Review subscriptions — what the kitchen sees<span class="spacer"></span>
+  {% if g_sub_issues %}<span class="navbadge">{{ g_sub_issues }}</span>{% endif %}›</a>
+
+<a class="linkrow" href="{{ url_for('porter_points') }}">
+  <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M3 17h2l2-7h10l2 7h2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/><path d="M9 10V6h6v4"/></svg>
+  Porter points — where far orders hand off<span class="spacer"></span>›</a>
+
+<a class="linkrow" href="{{ url_for('pins') }}">
+  <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+  Map pins — delivery locations<span class="spacer"></span>
+  {% if g_unpinned %}<span class="navbadge">{{ g_unpinned }}</span>{% endif %}›</a>
+
 <a class="linkrow" href="{{ url_for('invoices') }}">
   <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M6 2h9l4 4v16l-2.5-1.5L14 22l-2.5-1.5L9 22l-2.5-1.5L4 22V4a2 2 0 0 1 2-2Z"/><path d="M9 8h6M9 12h6"/></svg>
   Invoices<span class="spacer"></span>›</a>

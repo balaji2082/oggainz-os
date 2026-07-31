@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}Map pins · OG Gainz{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <h1 style="margin:0">Map pins</h1>
+</div>
+
+<p class="muted" style="margin:-4px 0 16px">
+  Every delivery zone, the riding order, the total km and the ₹3/km petrol allowance are
+  measured from these pins. Chennai addresses like “Campus K school” don’t geocode, so each
+  one is dropped by hand — once, and it’s permanent.
+</p>
+
+{# ---- Kitchen pin: everything measures from here, so it leads ---- #}
+<div class="card" style="border-left:4px solid {{ '#004030' if kitchen_confirmed else '#c0392b' }}">
+  <h3 style="margin:0 0 4px">Kitchen{% if not kitchen_confirmed %}
+    <span class="pill" style="background:#c0392b;color:#fff">not set</span>{% endif %}</h3>
+  {% if kitchen_confirmed %}
+    <p class="muted" style="margin:0 0 10px">Currently {{ klat }}, {{ klng }} — origin and
+      destination of every route.</p>
+  {% else %}
+    <p style="margin:0 0 10px;color:#c0392b">
+      This is still the Perumbakkam area centre, <strong>not your kitchen</strong>. Until you set
+      the real pin, every distance and every rupee of petrol allowance is wrong.
+    </p>
+  {% endif %}
+  <form method="post" action="{{ url_for('pins_kitchen') }}" class="row" style="gap:8px">
+    <input name="pin" placeholder="Paste from Maps — 12.901234, 80.227891" style="flex:1;min-width:220px">
+    <button class="btn btn-primary">Save kitchen pin</button>
+  </form>
+  <p class="muted" style="margin:8px 0 0;font-size:.85em">
+    In Google Maps, long-press your kitchen → the coordinates appear at the top → tap to copy → paste here.
+    A full Maps link works too.
+  </p>
+</div>
+
+{# ---- Routing provider: this decides whether distances are real ---- #}
+<div class="card" style="border-left:4px solid {{ '#004030' if prov.ready else '#c0392b' }}">
+  <h3 style="margin:0 0 4px">Distance measurement
+    {% if prov.ready %}<span class="pill pill-ok">{{ prov.provider }}</span>
+    {% else %}<span class="pill" style="background:#c0392b;color:#fff">estimates only</span>{% endif %}</h3>
+  {% if prov.ready %}
+    <p class="muted" style="margin:0">Road distances come from <strong>{{ prov.provider }}</strong>
+      and are cached, so the same route is only ever measured once.</p>
+  {% else %}
+    <p style="margin:0 0 8px;color:#c0392b">{{ prov.why }}</p>
+    <p class="muted" style="margin:0;font-size:.9em">
+      Straight-line distance is badly wrong here — Sholinganallur is 3.2 km as the crow flies
+      but <strong>7 km by road</strong>, because the Pallikaranai marsh forces a detour. Until a
+      provider is set, every distance and every petrol allowance is an approximation.
+      <a href="{{ url_for('settings') }}#distance">Set one up ›</a>
+    </p>
+  {% endif %}
+</div>
+
+{# ---- Progress ---- #}
+<div class="card">
+  <div class="row" style="justify-content:space-between;align-items:center">
+    <div>
+      <strong>{{ pinned|length }} of {{ st.total }}</strong> addresses pinned
+      {% if st.blocking %}
+        · <span style="color:#c0392b">{{ st.blocking|length }} with live subscriptions still missing</span>
+      {% endif %}
+    </div>
+    {% if not st.missing %}<span class="pill pill-ok">All done</span>{% endif %}
+  </div>
+</div>
+
+{# ---- The work list ---- #}
+{% if missing %}
+<h3 style="margin:22px 0 8px">Needs a pin</h3>
+<p class="muted" style="margin:0 0 10px;font-size:.9em">
+  Tap <em>Find</em> to open Maps on that address, long-press the right spot, copy, then paste and save.
+  Customers with live subscriptions are listed first — they’re the ones that break tonight’s route.
+</p>
+{# A stacked list rather than a table: this gets used one-handed on a phone,
+   where a three-column table forces the whole page to scroll sideways. #}
+<div id="pinlist">
+  {% for cust, searchurl in missing %}
+  <div class="card pin-card" data-aid="{{ cust.id }}" style="margin-bottom:10px">
+    <div>
+      <strong>{{ cust.name }}</strong> <span class="pill">{{ cust.label }}</span>
+      {% if cust.active_subs %}<span class="pill pill-ok" title="has a live subscription">{{ cust.active_subs }} active</span>{% endif %}
+    </div>
+    <div class="muted" style="font-size:.85em;margin-top:2px">
+      {{ cust.customer_id }} · {{ cust.locality or '—' }}</div>
+    <div class="muted" style="font-size:.9em;margin:5px 0 8px">{{ cust.address or '—' }}</div>
+
+    <div class="row" style="gap:7px;flex-wrap:wrap;align-items:stretch">
+      <a class="btn btn-ghost btn-sm" href="{{ searchurl }}" target="_blank" rel="noopener"
+         style="flex:0 0 auto">🔎 Find in Maps ↗</a>
+      <input class="pin-in" placeholder="Plus code or 12.901234, 80.227891"
+             style="flex:1 1 190px;min-width:0">
+      <button class="btn btn-sm btn-primary pin-save" type="button" style="flex:0 0 auto">Save</button>
+    </div>
+    <div class="pin-msg muted" style="font-size:.85em;margin-top:5px"></div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ---- Already pinned ---- #}
+{% if pinned %}
+<h3 style="margin:22px 0 8px">Pinned</h3>
+<p class="muted" style="margin:0 0 10px;font-size:.9em">
+  Distances are <strong>road</strong> distance from the kitchen — the same number Google Maps
+  gives you, not straight-line.
+  {% if not prov.ready %}<span style="color:#c0392b">Right now there is no routing provider, so
+  these are estimates.</span>{% endif %}
+</p>
+<div class="card" style="padding:0">
+  <div class="table-wrap">
+  <table class="table">
+    <thead><tr><th>Customer</th><th>Locality</th><th>Road</th><th>Zone</th><th></th></tr></thead>
+    <tbody>
+    {% for cust, km, zone, src in pinned %}
+      <tr>
+        <td><strong>{{ cust.name }}</strong> <span class="pill">{{ cust.label }}</span>
+          <div class="muted" style="font-size:.85em">{{ cust.customer_id }}</div></td>
+        <td class="muted">{{ cust.locality or '—' }}</td>
+        <td style="white-space:nowrap">{{ km }} km
+          {% if src == 'estimate' %}<div class="muted" style="font-size:.8em">approx.</div>{% endif %}</td>
+        <td><span class="pill">{{ zone }}</span></td>
+        <td><a class="btn btn-ghost btn-sm" href="{{ url_for('customer_detail', cid=cust.customer_id) }}">Edit</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Paste → Save → row disappears. Built for one long sitting of pinning, so the
+// input keeps focus moving down the list and nothing needs a page reload.
+document.querySelectorAll('#pinlist .pin-save').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var tr  = btn.closest('.pin-card');
+    var inp = tr.querySelector('.pin-in');
+    var msg = tr.querySelector('.pin-msg');
+    var val = (inp.value || '').trim();
+    if (!val) { inp.focus(); return; }
+    btn.disabled = true; msg.textContent = 'Saving…';
+    var body = new FormData();
+    body.append('address_id', tr.dataset.aid);
+    body.append('pin', val);
+    fetch('{{ url_for("pins_save") }}', { method: 'POST', body: body })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        btn.disabled = false;
+        if (!d.ok) { msg.style.color = '#c0392b'; msg.textContent = d.err; return; }
+        // Confirm the distance before the card goes, so a pin that landed in the
+        // wrong place is visible rather than silently accepted.
+        msg.style.color = '';
+        msg.textContent = '✓ ' + d.km + ' km by road · ' + d.zone;
+        var next = tr.nextElementSibling;
+        setTimeout(function () {
+          tr.style.transition = 'opacity .3s'; tr.style.opacity = '0';
+          setTimeout(function () {
+            tr.remove();
+            if (next) { var n = next.querySelector('.pin-in'); if (n) n.focus(); }
+          }, 300);
+        }, 900);
+      })
+      .catch(function () {
+        btn.disabled = false; msg.style.color = '#c0392b'; msg.textContent = 'Save failed.';
+      });
+  });
+});
+// Enter saves, so it's paste → Enter → paste → Enter all the way down.
+document.querySelectorAll('#pinlist .pin-in').forEach(function (inp) {
+  inp.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); inp.closest('.pin-card').querySelector('.pin-save').click(); }
+  });
+});
+</script>
+{% endblock %}

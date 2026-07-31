@@ -330,6 +330,105 @@ CREATE TABLE IF NOT EXISTS brochure_sections (
     updated_at TEXT
 );
 
+-- ---------------------------------------------------------------------------
+-- Evening ops: geography, routing and the rider's shift record
+-- ---------------------------------------------------------------------------
+
+-- A customer can have more than one delivery location: home, office, gym. Some
+-- subscribers want the office Mon–Wed and home Thu–Fri, and sometimes a one-day
+-- change told the evening before. Each address carries its own pin, so the route,
+-- the zone and the petrol allowance follow whichever one is used that day.
+CREATE TABLE IF NOT EXISTS customer_addresses (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id TEXT NOT NULL,
+    label       TEXT,                      -- Home / Office / Gym / PG
+    address     TEXT,
+    lat         REAL,
+    lng         REAL,
+    zone        TEXT,                      -- override; otherwise computed from distance
+    corridor    TEXT,                      -- override; otherwise inferred from locality
+    drop_type   TEXT,                      -- Home / PG / Office / Gym
+    map_note    TEXT,                      -- 'gate 2, call on arrival'
+    weekdays    TEXT,                      -- standing schedule: '0,1,2' = Mon,Tue,Wed
+    is_default  INTEGER DEFAULT 0,
+    active      INTEGER DEFAULT 1,
+    sort        INTEGER DEFAULT 100,
+    created_at  TEXT,
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cust_addr ON customer_addresses(customer_id);
+
+-- Porter handoff points. A maintained list, never hardcoded — they move as
+-- orders and routes change. The rider carries a far order to one of these on a
+-- corridor he already rides, and a Porter is booked from there instead of from
+-- the kitchen, so the paid Porter leg is much shorter.
+CREATE TABLE IF NOT EXISTS porter_points (
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    code   TEXT,                      -- PP-1, PP-2 ...
+    name   TEXT NOT NULL,             -- 'Sholinganallur junction, opp. <landmark>'
+    lat    REAL,
+    lng    REAL,
+    serves TEXT,                      -- corridor codes this point covers, comma separated
+    note   TEXT,                      -- landmark wording spoken to the Porter driver
+    active INTEGER DEFAULT 1,
+    sort   INTEGER DEFAULT 100
+);
+
+-- One row per date+slot: the frozen record of a delivery shift. The route is
+-- snapshotted into route_json so the printed sheet always matches what actually
+-- ran, even if a subscription changes afterwards.
+CREATE TABLE IF NOT EXISTS shifts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    date       TEXT NOT NULL,               -- YYYY-MM-DD
+    slot       TEXT NOT NULL,               -- Lunch / Dinner
+    staff_name TEXT,
+    route_json TEXT,
+    maps_url   TEXT,
+    est_km     REAL,                        -- computed (api | estimate)
+    actual_km  REAL,                        -- rider-corrected at close-out; payroll uses this
+    km_source  TEXT,                        -- api | estimate | manual
+    allowance  REAL,                        -- km x petrol_rate
+    depart_at  TEXT,
+    return_at  TEXT,
+    issues     TEXT,
+    signed     INTEGER DEFAULT 0,
+    created_at TEXT,
+    updated_at TEXT,
+    UNIQUE(date, slot)
+);
+
+-- Per-stop assignment inside a shift. Note there is deliberately no `delivered`
+-- column: delivery state lives on deliveries.status so there is exactly one
+-- source of truth. packed/checked are shift-only micro-states.
+CREATE TABLE IF NOT EXISTS shift_stops (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    shift_id        INTEGER NOT NULL,
+    delivery_id     INTEGER,
+    seq             INTEGER,                -- 1..n, the printed riding order
+    zone            TEXT,                   -- Hyperlocal / Near / Mid / Long
+    mode            TEXT,                   -- rider | porter_handoff | porter_direct
+    porter_point_id INTEGER,
+    eta             TEXT,                   -- rough clock time, tells Balaji when to book
+    km_from_prev    REAL,
+    packed          INTEGER DEFAULT 0,
+    checked         INTEGER DEFAULT 0,
+    delivered_at    TEXT,
+    FOREIGN KEY (shift_id) REFERENCES shifts(id)
+);
+
+-- Distance cache keyed by the ordered stop signature, so a route shape that
+-- repeats daily is only ever measured once.
+CREATE TABLE IF NOT EXISTS route_km_cache (
+    signature TEXT PRIMARY KEY,
+    km        REAL,
+    source    TEXT,
+    at        TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_shift_stops_shift ON shift_stops(shift_id);
+CREATE INDEX IF NOT EXISTS idx_shifts_date       ON shifts(date);
+
 CREATE INDEX IF NOT EXISTS idx_sub_comps      ON subscription_components(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_plan_comps     ON plan_components(plan_id);
 CREATE INDEX IF NOT EXISTS idx_comp_rules_sub ON component_rules(subscription_id);
@@ -350,11 +449,34 @@ CREATE INDEX IF NOT EXISTS idx_slot_moves_sub  ON subscription_slot_moves(subscr
 # day_note = a one-off note for THIS specific day's order (slot swap, same-price plan
 # change, a customisation just for today, a food issue to remember). Distinct from the
 # subscription's standing `notes` and from deliveries.notes (which holds the plan label).
+#
+# Customer geography (added Jul 2026 for the evening delivery route system):
+# free-text addresses do not geocode reliably in Chennai, so every delivering
+# customer gets a hand-dropped lat/lng pin. Everything downstream — zone banding,
+# route order, total km, the ₹3/km petrol allowance — measures from those pins.
 MIGRATIONS = {
-    "deliveries":    [("trial_id", "TEXT"), ("day_note", "TEXT"), ("day_note_at", "TEXT")],
+    # address_id = "this particular day's delivery goes to this address instead of
+    # the usual one" — the one-off override that beats the weekday schedule.
+    "deliveries":    [("trial_id", "TEXT"), ("day_note", "TEXT"), ("day_note_at", "TEXT"),
+                      ("address_id", "INTEGER")],
     "trial_orders":  [("notes", "TEXT"), ("delivery_date", "TEXT"),
                       ("meal_type", "TEXT"), ("delivery_status", "TEXT"),
                       ("plan_id", "INTEGER")],   # which pack the trial is of → prep list
+    "customers":     [("lat", "REAL"), ("lng", "REAL"),
+                      ("zone", "TEXT"),          # auto from distance, overridable
+                      ("corridor", "TEXT"),      # OMR-N / West / OMR-S
+                      ("drop_type", "TEXT"),     # Home / PG / Office / Gym
+                      ("map_note", "TEXT")],     # 'gate 2, call on arrival'
+    # Hand edits made to a printed sheet before it is sent out: {element_key: html}.
+    # Kept separate from the generated data so regenerating never loses them, and
+    # so the underlying orders are never silently rewritten by a print-time tweak.
+    "shifts":        [("overrides", "TEXT")],
+    # Per-leg distances alongside the total, so the sheet can show both the
+    # distance to each stop and the distance of each hop without a second call.
+    "route_km_cache": [("legs", "TEXT")],
+    # slot: a schedule can apply to Lunch only, Dinner only, or both (NULL).
+    # "lunch at home on Mon and Fri, office the rest, dinner always home" needs it.
+    "customer_addresses": [("slot", "TEXT")],
 }
 
 
@@ -367,6 +489,41 @@ def migrate(conn):
     # indexes that depend on migrated columns
     conn.execute("CREATE INDEX IF NOT EXISTS idx_deliveries_trial ON deliveries(trial_id)")
     conn.commit()
+    backfill_addresses(conn)
+
+
+def backfill_addresses(conn):
+    """Give every customer who has an address a matching default address row.
+
+    Runs once. Multi-address support reads from customer_addresses, so without
+    this every existing customer would look like they had no delivery location
+    at all. The original columns on `customers` are left untouched as a safety
+    net — nothing is moved or deleted, only copied.
+    """
+    if get_setting(conn, "addresses_backfilled_v1"):
+        return
+    rows = conn.execute(
+        "SELECT id, address, locality, lat, lng, zone, corridor, drop_type, map_note "
+        "FROM customers").fetchall()
+    made = 0
+    for r in rows:
+        has_any = conn.execute(
+            "SELECT 1 FROM customer_addresses WHERE customer_id=?", (r["id"],)).fetchone()
+        if has_any:
+            continue
+        if not ((r["address"] or "").strip() or r["lat"] is not None):
+            continue                       # nothing worth copying
+        label = r["drop_type"] or "Home"
+        conn.execute(
+            "INSERT INTO customer_addresses(customer_id,label,address,lat,lng,zone,"
+            "corridor,drop_type,map_note,is_default,active,sort,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,1,1,10,?)",
+            (r["id"], label, r["address"], r["lat"], r["lng"], r["zone"],
+             r["corridor"], r["drop_type"], r["map_note"], now_iso()))
+        made += 1
+    set_setting(conn, "addresses_backfilled_v1", "1")
+    conn.commit()
+    return made
 
 
 def get_db(path=DB_PATH):

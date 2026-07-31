@@ -17,6 +17,42 @@
       <textarea name="address" placeholder="Flat / building / landmark">{{ cust.address if cust }}</textarea></div>
     <div class="full"><label>Notes / preferences</label>
       <textarea name="notes" placeholder="Diet preferences, allergies, timing notes…">{{ cust.notes if cust }}</textarea></div>
+
+    {# Delivery geography. The pin drives zone banding, riding order, total km
+       and the ₹3/km petrol allowance — free-text addresses can't do any of that. #}
+    <div class="full"><hr style="border:0;border-top:1px solid #e6e6e6;margin:6px 0 2px">
+      <strong style="font-size:.95em">Delivery location</strong></div>
+
+    <div class="full"><label>Map pin
+      {% if cust and cust.lat %}<span class="pill pill-ok">set</span>
+      {% else %}<span class="pill" style="background:#c0392b;color:#fff">missing</span>{% endif %}</label>
+      <input name="pin" placeholder="Paste from Google Maps — 12.901234, 80.227891">
+      <div class="muted" style="font-size:.85em;margin-top:4px">
+        {% if cust and cust.lat %}Currently {{ cust.lat }}, {{ cust.lng }}. Paste a new one to move it.
+        {% else %}Long-press the exact spot in Google Maps, copy the coordinates, paste here. A Maps link works too.
+        {% endif %}
+      </div>
+    </div>
+
+    <div><label>Corridor</label>
+      <select name="corridor">
+        <option value="">Auto from locality</option>
+        {% for code, desc in corridors.items() %}
+          <option value="{{ code }}" {{ 'selected' if cust and cust.corridor==code }}>{{ code }} — {{ desc }}</option>
+        {% endfor %}
+      </select></div>
+
+    <div><label>Drop type</label>
+      <select name="drop_type">
+        <option value="">—</option>
+        {% for t in ['Home','PG','Office','Gym'] %}
+          <option value="{{ t }}" {{ 'selected' if cust and cust.drop_type==t }}>{{ t }}</option>
+        {% endfor %}
+      </select></div>
+
+    <div class="full"><label>Delivery note (printed on the rider's sheet)</label>
+      <input name="map_note" value="{{ cust.map_note if cust and cust.map_note }}"
+             placeholder="Gate 2 · call on arrival · leave at reception"></div>
   </div>
   <div class="form-actions"><button class="btn btn-primary">{{ 'Save changes' if cust else 'Add customer' }}</button></div>
 </form>

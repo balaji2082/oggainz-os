@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ cust.name }} — delivery schedule · OG Gainz{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('customer_detail', cid=cust.id) }}">‹ {{ cust.name }}</a>
+  <h1 style="margin:0 0 0 6px">Delivery schedule</h1>
+</div>
+
+<p class="muted" style="margin:-4px 0 14px">
+  Where each upcoming delivery will go. <strong>Auto</strong> follows the weekday rules on the
+  customer's addresses; pick a specific address to change just that one delivery. Use this when
+  a customer tells you the night before — the change sticks to that date, so whoever prints the
+  sheet that evening gets it right without being told again.
+</p>
+
+{% if addrs|length < 2 %}
+  <div class="card">
+    <p style="margin:0">This customer only has one address, so there is nothing to schedule.
+      <a href="{{ url_for('customer_detail', cid=cust.id) }}">Add another ›</a></p>
+  </div>
+{% elif not rows %}
+  <div class="card"><p style="margin:0" class="muted">No upcoming deliveries in the next {{ days }} days.</p></div>
+{% else %}
+
+<div class="card" style="padding:0">
+  <table class="table">
+    <thead><tr>
+      <th style="width:110px">Day</th><th style="width:74px">Slot</th>
+      <th>Delivering to</th><th style="width:230px">Change</th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr {% if r.is_today %}style="background:#f4f8f6"{% endif %}>
+        <td><strong>{{ r.label }}</strong>
+          {% if r.is_today %}<div class="muted" style="font-size:.8em">today</div>{% endif %}</td>
+        <td><span class="chip chip-xs chip-{{ r.slot|lower }}">{{ r.slot }}</span></td>
+        <td>
+          {% if r.addr %}
+            <strong>{{ r.addr.label }}</strong>
+            {% if r.overridden %}
+              <span class="pill" style="background:#e9762b;color:#fff">changed</span>
+              <span class="muted" style="font-size:.82em">auto would be {{ r.auto.label if r.auto }}</span>
+            {% endif %}
+            {% if not r.addr.lat %}<span class="pill" style="background:#c0392b;color:#fff">no pin</span>{% endif %}
+            <div class="muted" style="font-size:.85em">{{ r.addr.address or '—' }}</div>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td>
+          <select class="sched-pick" data-id="{{ r.id }}" style="width:100%;font-size:.88em">
+            <option value="">Auto{% if r.auto %} — {{ r.auto.label }}{% endif %}</option>
+            {% for a in addrs %}
+              <option value="{{ a.id }}" {{ 'selected' if r.overridden and r.addr and r.addr.id == a.id }}>
+                {{ a.label }}{% if not a.lat %} (no pin){% endif %}</option>
+            {% endfor %}
+          </select>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="muted" style="font-size:.85em;margin-top:10px">
+  Changes save immediately. The route, the zone and the petrol allowance all follow the
+  address you pick.
+</p>
+{% endif %}
+
+<script>
+document.addEventListener('change', function (e) {
+  var sel = e.target.closest ? e.target.closest('.sched-pick') : null;
+  if (!sel) return;
+  var body = new FormData();
+  body.append('address_id', sel.value || '');
+  sel.disabled = true;
+  fetch('/api/delivery/' + sel.dataset.id + '/address', { method: 'POST', body: body })
+    .then(function (r) { return r.json(); })
+    .then(function () { location.reload(); })
+    .catch(function () { sel.disabled = false; });
+});
+</script>
+{% endblock %}

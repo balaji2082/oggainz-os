@@ -3,6 +3,74 @@
 {% block content %}
 <div class="page-head"><h1>Settings</h1></div>
 
+<!-- Distance measurement -->
+<div class="card" id="distance" style="border-left:4px solid {{ '#004030' if dist.prov.ready else '#c0392b' }}">
+  <div class="card-title"><h3>📏 Distance &amp; petrol allowance</h3><span class="spacer"></span>
+    {% if dist.prov.ready %}<span class="pill pill-ok">{{ dist.prov.provider }}</span>
+    {% else %}<span class="pill" style="background:#c0392b;color:#fff">estimates only</span>{% endif %}</div>
+
+  <p class="small muted">
+    Straight-line distance is not usable here. Measured from this kitchen, Sholinganallur is
+    <strong>3.2 km straight but 7.1 km by road</strong> (the Pallikaranai marsh forces a detour),
+    while a nearby stop is 1.2 km straight and 1.8 km by road. The ratio swings from 1.5× to 2.1×,
+    so no single multiplier works — real road distance has to be measured.
+    Results are cached ({{ dist.cached }} stored), so the same route is measured once, not once a day.
+  </p>
+
+  <form method="post" action="{{ url_for('settings_distance') }}" class="form-grid">
+    <div class="full"><label>How to measure road distance
+      <span class="muted small">tried in order — if the first doesn't answer, the next one is used automatically</span></label>
+      <select name="distance_provider">
+        <option value="" {{ 'selected' if not dist.provider }}>None — use estimates (not recommended)</option>
+        <option value="google,ors" {{ 'selected' if dist.provider=='google,ors' }}>Google first, OpenRouteService as backup (recommended once Google is set up)</option>
+        <option value="ors" {{ 'selected' if dist.provider=='ors' }}>OpenRouteService only — free, no card</option>
+        <option value="google" {{ 'selected' if dist.provider=='google' }}>Google only</option>
+        <option value="ors,google" {{ 'selected' if dist.provider=='ors,google' }}>OpenRouteService first, Google as backup</option>
+        <option value="osrm,ors" {{ 'selected' if dist.provider=='osrm,ors' }}>Self-hosted OSRM first, OpenRouteService as backup</option>
+      </select>
+      {% if dist.prov.ready %}
+        <div class="small muted" style="margin-top:4px">
+          Using <strong>{{ dist.prov.provider }}</strong>{% if dist.prov.backup %},
+          falling back to {{ dist.prov.backup|join(', ') }} if it fails{% endif %}.
+          {{ dist.prov.why }}
+        </div>
+      {% endif %}</div>
+
+    <div class="full"><label>Google Routes API key
+      <span class="muted small">{{ '(saved — leave blank to keep)' if dist.has_google else '' }}</span></label>
+      <input name="routes_api_key" type="password" autocomplete="off"
+             placeholder="{{ '********' if dist.has_google else 'AIza…' }}"></div>
+
+    <div class="full"><label>OpenRouteService key
+      <span class="muted small">{{ '(saved — leave blank to keep)' if dist.has_ors else 'openrouteservice.org → sign up → API key' }}</span></label>
+      <input name="ors_api_key" type="password" autocomplete="off"
+             placeholder="{{ '********' if dist.has_ors else 'eyJvcm…' }}"></div>
+
+    <div class="full"><label>Self-hosted OSRM base URL
+      <span class="muted small">only if you run your own — the public demo server is non-commercial</span></label>
+      <input name="osrm_base_url" value="{{ dist.osrm_url }}" placeholder="http://your-host:5000"></div>
+
+    <div><label>Petrol rate ₹/km</label>
+      <input name="petrol_rate" type="number" step="any" value="{{ dist.petrol_rate }}"></div>
+    <div><label>Hyperlocal ≤ km</label>
+      <input name="zone_hyperlocal_km" type="number" step="any" value="{{ dist.z1 }}"></div>
+    <div><label>Near ≤ km</label>
+      <input name="zone_near_km" type="number" step="any" value="{{ dist.z2 }}"></div>
+    <div><label>Mid ≤ km</label>
+      <input name="zone_mid_km" type="number" step="any" value="{{ dist.z3 }}"></div>
+
+    <div class="full form-actions" style="gap:8px">
+      <button class="btn btn-primary">Save</button>
+      <button class="btn" name="test" value="1">Save &amp; test connection</button>
+    </div>
+  </form>
+
+  <form method="post" action="{{ url_for('settings_distance_clear') }}"
+        onsubmit="return confirm('Forget all cached distances and re-measure them?')">
+    <button class="btn btn-ghost btn-sm">Clear distance cache ({{ dist.cached }})</button>
+  </form>
+</div>
+
 <!-- OG Agent -->
 <div class="card" id="agent">
   <div class="card-title"><h3>🤖 OG Agent</h3><span class="spacer"></span>

@@ -104,6 +104,18 @@
     <span class="amt">{{ prep.total.meals }} meals</span><span class="chev">›</span></summary>
   <div class="disc-body">
     <div class="small muted" style="margin-bottom:6px">Tick each item off as you prep it ✓</div>
+
+    {# The printable version of all this, for whoever is working the shift. #}
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      <a class="btn btn-sm btn-primary" href="{{ url_for('sheet', d=d, slot='Dinner') }}">🖨 Dinner sheet</a>
+      <a class="btn btn-sm btn-ghost" href="{{ url_for('sheet', d=d, slot='Lunch') }}">🖨 Lunch sheet</a>
+      <a class="btn btn-sm btn-ghost" href="{{ url_for('sheet', d=d, slot='Dinner', lang='ta') }}">தமிழ்</a>
+      {% if g_unpinned %}
+        <a class="btn btn-sm btn-ghost" href="{{ url_for('pins') }}"
+           style="border-color:#c0392b;color:#c0392b">📍 {{ g_unpinned }} without a map pin</a>
+      {% endif %}
+    </div>
+
     {{ prep_slot('☀ Lunch', prep.lunch, 'Lunch') }}
     {{ prep_slot('🌙 Dinner', prep.dinner, 'Dinner') }}
     {% if prep.total.meals and (prep.lunch.meals and prep.dinner.meals) %}
@@ -183,11 +195,11 @@
   {% if s.rows %}
     {% if view in ['all','lunch'] and lunch %}
       {% if view == 'all' %}<h3 class="sect">☀ Lunch <span class="muted small">({{ lunch|length }})</span></h3>{% endif %}
-      <div class="dlist" style="margin-bottom:14px">{% for r in lunch %}{{ m.drow(r) }}{% endfor %}</div>
+      <div class="dlist" style="margin-bottom:14px">{% for r in lunch %}{{ m.drow(r, addr_map.get(r.customer_id)) }}{% endfor %}</div>
     {% endif %}
     {% if view in ['all','dinner'] and dinner %}
       {% if view == 'all' %}<h3 class="sect">🌙 Dinner <span class="muted small">({{ dinner|length }})</span></h3>{% endif %}
-      <div class="dlist">{% for r in dinner %}{{ m.drow(r) }}{% endfor %}</div>
+      <div class="dlist">{% for r in dinner %}{{ m.drow(r, addr_map.get(r.customer_id)) }}{% endfor %}</div>
     {% endif %}
     {% if (view=='lunch' and not lunch) or (view=='dinner' and not dinner) %}
       <div class="empty">No {{ view }} orders for this day.</div>
@@ -196,5 +208,21 @@
   <div class="empty"><div class="big">🍽️</div>No deliveries scheduled for this day.</div>
   {% endif %}
 </div>
+
+<script>
+// Send one day's delivery to a different address. Saves immediately; the route,
+// the zone and the petrol allowance all follow the new pin.
+document.addEventListener('change', function (e) {
+  var sel = e.target.closest ? e.target.closest('.addr-pick') : null;
+  if (!sel) return;
+  var body = new FormData();
+  body.append('address_id', sel.value || '');
+  sel.disabled = true;
+  fetch('/api/delivery/' + sel.dataset.id + '/address', { method: 'POST', body: body })
+    .then(function (r) { return r.json(); })
+    .then(function () { location.reload(); })
+    .catch(function () { sel.disabled = false; });
+});
+</script>
 
 {% endblock %}

@@ -20,6 +20,22 @@
       </select>
       <div class="small muted" style="margin-top:6px">
         {% if sub %}Pick a different customer to move this subscription to them.{% else %}New customer? <a href="{{ url_for('customer_new') }}" style="color:var(--lime)">Add one first ›</a>{% endif %}</div>
+
+      {# Delivery location. Stored on the customer, shown here because this is
+         where a new order actually gets set up — an unpinned customer drops out
+         of the route and off the petrol allowance. #}
+      <div id="locbox" class="small" style="margin-top:8px;padding:8px 10px;border-radius:6px;
+           border:1px solid var(--line, #d9e0dd);background:var(--tint, #f6f8f7);display:none">
+        <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div style="flex:1;min-width:190px">
+            <label style="font-size:.82em">Map location</label>
+            <input id="locpin" placeholder="Plus code (V6R3+XM) · Maps link · 12.8924, 80.2041">
+          </div>
+          <button type="button" class="btn btn-sm" id="locsave">Attach</button>
+          <a class="btn btn-sm btn-ghost" id="locfind" target="_blank" rel="noopener">Find ↗</a>
+        </div>
+        <div id="locmsg" class="muted" style="margin-top:5px;font-size:.85em"></div>
+      </div>
     </div>
 
     <div class="full">
@@ -293,5 +309,66 @@ function feeHint(){
 {% if sub %}document.getElementById('f_price').dataset.touched = 1;
 document.getElementById('f_meals').dataset.touched = 1;{% endif %}
 renderPacks(); renderRows(); feeHint();
+
+// ---- delivery location -----------------------------------------------------
+// Shows whether the chosen customer has a map pin, and lets one be attached
+// without leaving the order. Distance and zone appear immediately so a pin that
+// landed in the wrong place is obvious straight away.
+(function () {
+  var sel  = document.querySelector('select[name="customer_id"]');
+  var box  = document.getElementById('locbox');
+  var pin  = document.getElementById('locpin');
+  var msg  = document.getElementById('locmsg');
+  var find = document.getElementById('locfind');
+  var save = document.getElementById('locsave');
+  if (!sel || !box) return;
+
+  function paint(d) {
+    if (!d || !d.ok) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    find.href = d.search;
+    if (d.pinned) {
+      msg.innerHTML = '📍 <strong>' + d.km + ' km</strong> from the kitchen · ' + d.zone +
+                      (d.corridor ? ' · ' + d.corridor : '') +
+                      ' <span style="opacity:.65">(' + d.lat + ', ' + d.lng + ')</span>';
+      msg.style.color = '';
+      pin.placeholder = 'Paste a new location to move this pin';
+    } else {
+      msg.innerHTML = '⚠ No map location yet — this customer will be left out of the ' +
+                      'delivery route and the petrol allowance.';
+      msg.style.color = '#c0392b';
+    }
+    if (!d.kitchen_set) {
+      msg.innerHTML += '<br>⚠ The kitchen location is not set, so distances are estimates.';
+    }
+  }
+
+  function load() {
+    var id = sel.value;
+    if (!id) { box.style.display = 'none'; return; }
+    fetch('/api/customer/' + encodeURIComponent(id) + '/location')
+      .then(function (r) { return r.json(); }).then(paint).catch(function () {});
+  }
+
+  save.addEventListener('click', function () {
+    var id = sel.value, v = (pin.value || '').trim();
+    if (!id || !v) { pin.focus(); return; }
+    var body = new FormData(); body.append('pin', v);
+    msg.textContent = 'Saving…'; msg.style.color = '';
+    fetch('/api/customer/' + encodeURIComponent(id) + '/location', { method: 'POST', body: body })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) { msg.textContent = '⚠ ' + d.err; msg.style.color = '#c0392b'; return; }
+        pin.value = ''; paint(d);
+      })
+      .catch(function () { msg.textContent = 'Save failed.'; msg.style.color = '#c0392b'; });
+  });
+  pin.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); save.click(); }
+  });
+
+  sel.addEventListener('change', load);
+  load();
+})();
 </script>
 {% endblock %}

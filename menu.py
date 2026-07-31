@@ -298,6 +298,132 @@ def _finish(agg):
     return rows
 
 
+def audit_subscription(conn, sub):
+    """Everything questionable about one subscription's composition.
+
+    Written because the pack structure changed and the old data never caught up:
+    extras were recorded by typing them into the *plan name* ("Elite Meal Pack +
+    100g Chicken") instead of as add-on components. The prep list can only count
+    what is in `subscription_components`, so those extras are silently missing
+    from the kitchen quantities every single day.
+
+    Returns [{level, code, msg, fix}] — `level` is 'high' when tonight's cooking
+    is actually wrong, 'low' when it is only untidy.
+    """
+    out = []
+    comps = sub_composition(conn, sub["id"])
+    base = [x for x in comps if x["kind"] != "addon"]
+    addons = [x for x in comps if x["kind"] == "addon"]
+    name = (sub["plan_name"] or "").strip()
+    plan = match_plan(conn, name)
+
+    if not comps:
+        out.append({"level": "high", "code": "no_composition",
+                    "msg": "No composition saved — this meal is missing from the prep totals entirely.",
+                    "fix": "apply_pack" if plan else None})
+
+    # "+ 100g Chicken" typed into the plan name, with nothing recorded to match.
+    if "+" in name and not addons:
+        extra = name.split("+", 1)[1].strip()
+        out.append({"level": "high", "code": "addon_not_modelled",
+                    "msg": f"Plan name says “+ {extra}”, but no add-on is recorded. "
+                           f"The kitchen is not being told to add it.",
+                    "fix": None})
+
+    # Base differs from the pack it claims to be.
+    if plan and base:
+        recipe = plan_recipe(conn, plan["id"])
+        rec = {(r["component_id"], float(r["qty"])) for r in recipe}
+        got = {(b["component_id"], float(b["qty"])) for b in base}
+        if rec and rec != got:
+            missing = rec - got
+            extra_i = got - rec
+            bits = []
+            if missing:
+                bits.append(f"{len(missing)} item(s) in the pack but not here")
+            if extra_i:
+                bits.append(f"{len(extra_i)} item(s) here but not in the pack")
+            out.append({"level": "low", "code": "differs_from_pack",
+                        "msg": f"Base differs from the {plan['name']} recipe — " + ", ".join(bits) +
+                               ". Fine if deliberate.",
+                        "fix": "apply_pack"})
+
+    # Notes that read like a composition change nobody encoded.
+    note = (sub["notes"] or "").lower()
+    triggers = ["instead of", "without", "no ", "extra", "less", "double", "swap", "add "]
+    if note and any(t in note for t in triggers) and not rules_for_sub(conn, sub["id"]):
+        out.append({"level": "low", "code": "note_may_hide_change",
+                    "msg": "The note describes a change to the meal, but no swap rule or "
+                           "add-on is recorded — the kitchen only sees it as free text.",
+                    "fix": None})
+
+    # Price sanity: what the pack plus recorded add-ons would come to.
+    if plan and plan["price_monthly"]:
+        calc = float(plan["price_monthly"])
+        for a in addons:
+            if a["addon_price"] and a["step"]:
+                calc += float(a["addon_price"]) * (float(a["qty"]) / float(a["step"]))
+        paid = float(sub["subscription_price"] or 0)
+        if paid and abs(paid - calc) >= 1:
+            out.append({"level": "info", "code": "price_differs",
+                        "msg": f"Price ₹{paid:,.0f} vs ₹{calc:,.0f} for this pack plus its "
+                               f"recorded add-ons. Only a problem if unintended.",
+                        "fix": None})
+    return out
+
+
+def audit_all(conn, live_only=True):
+    """Audit every subscription, worst first."""
+    q = "SELECT * FROM subscriptions"
+    if live_only:
+        q += " WHERE status IN ('Active','Ending Soon')"
+    rows = []
+    for s in conn.execute(q + " ORDER BY slot, customer_name"):
+        issues = audit_subscription(conn, s)
+        rows.append({"sub": s, "issues": issues,
+                     "comps": sub_composition(conn, s["id"]),
+                     "high": sum(1 for i in issues if i["level"] == "high")})
+    rows.sort(key=lambda r: (-r["high"], -len(r["issues"]), r["sub"]["customer_name"] or ""))
+    return rows
+
+
+def order_items(conn, r, day_iso, cache=None, plan_cache=None):
+    """What one order actually contains: ([items], label).
+
+    Resolves a subscription's saved composition (with any weekday swap/add/remove
+    rules applied for this date) or, for a trial, the recipe of the pack it maps to.
+    Returns ([], label) when the order can't be decomposed — the caller must still
+    show it, just without quantities.
+
+    Shared by the kitchen prep aggregate and the printed rider sheet so the two can
+    never disagree about what goes in a box.
+    """
+    cache = {} if cache is None else cache
+    plan_cache = {} if plan_cache is None else plan_cache
+    items, label = [], None
+    if r["subscription_id"]:
+        items = _composition_items(conn, r["subscription_id"], cache)
+        rules = rules_for_sub(conn, r["subscription_id"])
+        if rules:
+            items = apply_rules(items, rules, day_iso)
+        label = r["plan_name"] or "Meal"
+    elif r["trial_id"]:
+        t = conn.execute("SELECT * FROM trial_orders WHERE id=?", (r["trial_id"],)).fetchone()
+        label = "TRIAL · " + ((t["order_text"] if t else None) or "Trial meal")
+        pid = t["plan_id"] if t else None
+        if not pid and t:
+            p = match_plan(conn, t["order_text"])
+            pid = p["id"] if p else None
+        if pid:
+            if pid not in plan_cache:
+                plan_cache[pid] = [
+                    {"component_id": x["component_id"], "name": x["name"], "unit": x["unit"],
+                     "step": x["step"], "emoji": x["emoji"], "qty": x["qty"], "note": x["note"]}
+                    for x in plan_recipe(conn, pid)]
+            items = plan_cache[pid]
+    return items, label
+
+
 def prep_for_day(conn, day_iso, rows=None):
     """The full kitchen prep for one day.
 
@@ -324,27 +450,7 @@ def prep_for_day(conn, day_iso, rows=None):
         if r["status"] not in ("Pending", "Delivered"):
             continue
         slot = "Dinner" if (r["meal_type"] or "Lunch") == "Dinner" else "Lunch"
-        items, label = [], None
-        if r["subscription_id"]:
-            items = _composition_items(conn, r["subscription_id"], cache)
-            rules = rules_for_sub(conn, r["subscription_id"])
-            if rules:
-                items = apply_rules(items, rules, day_iso)
-            label = r["plan_name"] or "Meal"
-        elif r["trial_id"]:
-            t = conn.execute("SELECT * FROM trial_orders WHERE id=?", (r["trial_id"],)).fetchone()
-            label = "TRIAL · " + ((t["order_text"] if t else None) or "Trial meal")
-            pid = t["plan_id"] if t else None
-            if not pid and t:
-                p = match_plan(conn, t["order_text"])
-                pid = p["id"] if p else None
-            if pid:
-                if pid not in plan_cache:
-                    plan_cache[pid] = [
-                        {"component_id": x["component_id"], "name": x["name"], "unit": x["unit"],
-                         "step": x["step"], "emoji": x["emoji"], "qty": x["qty"], "note": x["note"]}
-                        for x in plan_recipe(conn, pid)]
-                items = plan_cache[pid]
+        items, label = order_items(conn, r, day_iso, cache, plan_cache)
         if items:
             _aggregate(agg[slot], items, r)
             _aggregate(agg["All"], items, r)

@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ T.sheet_title }} · {{ T[slot] }} · {{ d }}</title>
+<style>
+/* Printed on a home printer in black and white and written on with a pen.
+   Optimised for that, not the screen: heavy rules, big tick boxes, nothing that
+   needs colour to be understood. Tamil renders via Nirmala UI (standard on Windows).
+
+   Pagination is fixed on purpose:
+     page 1      batch prep    — what he cooks from, stays on the bench
+     pages 2..n  order cards   — what he packs from
+     last page   route + close-out — the only page he takes on the bike       */
+
+@page { size: A4; margin: 12mm 11mm 10mm; }
+
+* { box-sizing: border-box; }
+body {
+  font-family: "Segoe UI", "Nirmala UI", system-ui, sans-serif;
+  font-size: 10.2pt; line-height: 1.35; color: #000; margin: 0; background: #eceeed;
+}
+.page {
+  width: 210mm; min-height: 297mm; margin: 0 auto 14px; background: #fff;
+  padding: 12mm 11mm; position: relative;
+}
+@media print {
+  body { background: #fff; }
+  .page { width: auto; min-height: 0; margin: 0; padding: 0; page-break-after: always; }
+  .page:last-of-type { page-break-after: auto; }
+  .noprint { display: none !important; }
+  [contenteditable] { outline: none !important; background: none !important; }
+}
+
+h1,h2,h3 { margin: 0; font-weight: 700; }
+.muted { color: #555; }
+table { width: 100%; border-collapse: collapse; }
+td, th { padding: 3.4pt 5pt; vertical-align: top; }
+
+/* ---------- masthead ---------- */
+.mast { display: flex; align-items: flex-start; gap: 10pt;
+        border-bottom: 2.5pt solid #004030; padding-bottom: 7pt; margin-bottom: 9pt; }
+.mast img { height: 30pt; width: auto; }
+.mast .t { flex: 1; }
+.mast .slot { font-size: 21pt; font-weight: 800; line-height: 1.05; color: #004030; }
+.mast .day { font-size: 9.4pt; color: #555; }
+.mast .addr { font-size: 7.8pt; color: #777; margin-top: 1pt; max-width: 250pt; }
+.stats { display: flex; gap: 0; text-align: right; }
+.stats div { padding-left: 13pt; }
+.stats .k { font-size: 7.8pt; text-transform: uppercase; letter-spacing: .05em; color: #666; }
+.stats .v { font-size: 15pt; font-weight: 800; line-height: 1.1; }
+
+.timings { display: flex; border: 1pt solid #000; margin-bottom: 9pt; }
+.timings div { flex: 1; padding: 3pt 6pt; border-right: 1pt solid #000; font-size: 8.4pt; color: #444; }
+.timings div:last-child { border-right: 0; }
+.timings b { display: block; font-size: 11.5pt; color: #000; }
+
+.pagemark { position: absolute; top: 5mm; right: 11mm; font-size: 7.6pt; color: #999; }
+@media print { .pagemark { position: fixed; top: 3mm; right: 0; } }
+
+/* ---------- section headers ---------- */
+.sec { background: #004030; color: #fff; font-size: 11pt; font-weight: 700;
+       padding: 4pt 7pt; margin: 0 0 4pt; }
+.sechint { font-size: 8.4pt; color: #555; margin: 0 0 6pt; }
+
+/* ---------- warnings ---------- */
+.warn { border: 2pt solid #000; padding: 5pt 8pt; margin: 7pt 0; background: #ececec; font-size: 9.3pt; }
+.warn b { text-transform: uppercase; letter-spacing: .04em; }
+
+/* ---------- tick boxes ---------- */
+.box { display: inline-block; width: 13pt; height: 13pt; border: 1.4pt solid #000;
+       vertical-align: -2.5pt; margin-right: 4pt; }
+.box-lg { width: 16pt; height: 16pt; }
+
+/* ---------- prep ---------- */
+table.prep { border: 1.2pt solid #000; }
+table.prep th { background: #e2e6e4; border-bottom: 1.2pt solid #000; text-align: left;
+                font-size: 8.4pt; text-transform: uppercase; letter-spacing: .04em; }
+table.prep td { border-bottom: .6pt solid #aaa; }
+table.prep tr:last-child td { border-bottom: 0; }
+.qty { font-size: 14pt; font-weight: 800; white-space: nowrap; }
+
+/* ---------- order cards ---------- */
+.card { border: 1.3pt solid #000; margin-bottom: 7pt; page-break-inside: avoid; }
+.card-h { display: flex; align-items: center; gap: 7pt;
+          background: #e2e6e4; border-bottom: 1.3pt solid #000; padding: 3.5pt 7pt; }
+.card-h .seq { font-size: 13pt; font-weight: 800; border: 1.5pt solid #000; background: #fff;
+               min-width: 22pt; text-align: center; padding: 0 3pt; }
+.card-h .who { font-size: 12pt; font-weight: 800; flex: 1; }
+.card-h .plan { font-size: 8.6pt; color: #555; }
+.card-b { padding: 5pt 7pt; }
+.line { margin-bottom: 2.6pt; }
+.line .lbl { display: inline-block; min-width: 56pt; padding-right: 7pt; font-size: 8.2pt;
+             text-transform: uppercase; color: #555; letter-spacing: .03em; }
+.items { font-size: 11pt; font-weight: 600; }
+.note { border: 1.7pt solid #000; padding: 3.5pt 7pt; margin-top: 5pt; font-weight: 700; font-size: 10.5pt; }
+.ticks { border-top: 1pt solid #000; padding: 4pt 7pt; display: flex; gap: 20pt; font-size: 9.2pt; }
+
+/* ---------- route ---------- */
+table.route { border: 1.2pt solid #000; }
+table.route th { background: #e2e6e4; border-bottom: 1.2pt solid #000; text-align: left; font-size: 8.4pt; }
+table.route td { border-bottom: .6pt solid #aaa; font-size: 9.7pt; }
+.zone { font-size: 8pt; border: .8pt solid #000; padding: 0 3pt; white-space: nowrap; }
+.porter { font-weight: 700; }
+.routefoot { display: flex; gap: 12pt; align-items: center; margin-top: 8pt;
+             border: 1.2pt solid #000; padding: 7pt; }
+.routefoot img { width: 86pt; height: 86pt; }
+.bigkm { font-size: 19pt; font-weight: 800; line-height: 1.1; }
+
+/* ---------- close-out ---------- */
+.close { border: 1.2pt solid #000; padding: 8pt; }
+.fill { border-bottom: 1pt solid #000; display: inline-block; min-width: 92pt; height: 15pt; }
+.bigfill { border: 1pt solid #000; height: 54pt; margin-top: 4pt; }
+.sign { display: flex; gap: 26pt; margin-top: 12pt; }
+.sign > div { flex: 1; }
+.signline { border-bottom: 1.2pt solid #000; height: 32pt; }
+
+/* ---------- edit mode ---------- */
+.editing [contenteditable="true"] { background: #fffbe6; outline: 1px dashed #b8a44a;
+                                    outline-offset: 1px; border-radius: 2px; }
+.editing [contenteditable="true"]:focus { background: #fff5c2; outline: 1.5px solid #004030; }
+.addrow { display: none; }
+.editing .addrow { display: table-row; }
+.extra:empty::before { content: attr(data-ph); color: #aaa; }
+.editing .extra { min-height: 15pt; }
+.extra:empty { display: none; }
+.editing .extra:empty { display: block; }
+
+.bar { max-width: 210mm; margin: 12px auto 0; display: flex; gap: 8px; flex-wrap: wrap;
+       align-items: center; font-size: 14px; }
+.bar a, .bar button { font: inherit; padding: 7px 13px; border: 1px solid #004030;
+  background: #fff; color: #004030; border-radius: 6px; text-decoration: none; cursor: pointer; }
+.bar .on { background: #004030; color: #fff; }
+.bar .hint { color: #666; font-size: 12.5px; }
+#saveState { color: #004030; font-size: 12.5px; }
+</style>
+</head>
+<body>
+
+<div class="bar noprint">
+  <a href="{{ url_for('today') }}">‹ Command Center</a>
+  <a class="{{ 'on' if lang=='en' }}" href="{{ url_for('sheet', d=d, slot=slot, lang='en') }}">English</a>
+  <a class="{{ 'on' if lang=='ta' }}" href="{{ url_for('sheet', d=d, slot=slot, lang='ta') }}">தமிழ்</a>
+  <a class="{{ 'on' if slot=='Lunch' }}" href="{{ url_for('sheet', d=d, slot='Lunch', lang=lang) }}">Lunch</a>
+  <a class="{{ 'on' if slot=='Dinner' }}" href="{{ url_for('sheet', d=d, slot='Dinner', lang=lang) }}">Dinner</a>
+  <button id="editBtn" type="button">✎ Edit sheet</button>
+  <button id="printBtn" type="button">🖨 Print / Save as PDF</button>
+  <form method="post" action="{{ url_for('sheet_reset', d=d, slot=slot, lang=lang) }}"
+        style="display:inline" onsubmit="return confirm('Discard your edits and go back to the generated sheet?')">
+    <button type="submit">↺ Reset</button>
+  </form>
+  <span id="saveState"></span>
+  <span class="hint">Edit anything, then print. Your changes are saved and stay on this sheet.</span>
+</div>
+
+{# ============================ PAGE 1 — BATCH PREP ============================ #}
+<div class="page">
+  <div class="pagemark">1</div>
+
+  <div class="mast">
+    <img src="{{ url_for('static', filename='img/logo-forest.svg') }}" alt="OG Gainz">
+    <div class="t">
+      <div class="slot">{{ T[slot] }}</div>
+      <div class="day">{{ day_label }}</div>
+      {% if kitchen_addr %}<div class="addr">{{ kitchen_addr }}</div>{% endif %}
+    </div>
+    <div class="stats">
+      <div><div class="k">{{ T.orders }}</div><div class="v" data-k="s.orders" contenteditable="false">{{ cards|length }}</div></div>
+      <div><div class="k">{{ T.total_km }}</div><div class="v" data-k="s.km" contenteditable="false">{{ route.est_km }}</div></div>
+      <div><div class="k">{{ T.allowance }}</div><div class="v" data-k="s.allow" contenteditable="false">₹{{ route.allowance }}</div></div>
+    </div>
+  </div>
+
+  <div class="timings">
+    <div>{{ T.t_prep }}<b data-k="t.prep" contenteditable="false">{{ timings.prep }}</b></div>
+    <div>{{ T.t_pack }}<b data-k="t.pack" contenteditable="false">{{ timings.pack }}</b></div>
+    <div>{{ T.t_depart }}<b data-k="t.depart" contenteditable="false">{{ timings.depart }}</b></div>
+    <div>{{ T.t_done }}<b data-k="t.done" contenteditable="false">{{ timings.done }}</b></div>
+  </div>
+
+  <div style="margin-bottom:8pt">{{ T.staff }}: <span class="fill" data-k="s.staff" contenteditable="false">{{ staff }}</span></div>
+
+  {% if no_comp %}
+    <div class="warn"><b>!</b> {{ T.warn_nocomp }}<br><strong>{{ no_comp|join(', ') }}</strong></div>
+  {% endif %}
+  {% if not route.kitchen.confirmed %}
+    <div class="warn noprint"><b>!</b> {{ T.warn_kitchen }}</div>
+  {% endif %}
+
+  <div class="sec">{{ T.sec_prep }}</div>
+  <div class="sechint">{{ T.prep_note }}</div>
+
+  {% if comps %}
+  <table class="prep">
+    <thead><tr>
+      <th style="width:36pt">{{ T.prepped }}</th>
+      <th>{{ T.item }}</th>
+      <th style="width:92pt">{{ T.total }}</th>
+      <th style="width:145pt">{{ T.breakdown }}</th>
+    </tr></thead>
+    <tbody>
+      {% for x in comps %}
+      <tr>
+        <td><span class="box box-lg"></span></td>
+        <td><strong data-k="p{{ loop.index }}.name" contenteditable="false">{{ x.emoji }} {{ x.name }}</strong>
+            {% if x.notes %}<div class="muted" style="font-size:8.4pt">{{ x.notes }}</div>{% endif %}</td>
+        <td class="qty" data-k="p{{ loop.index }}.qty" contenteditable="false">{{ x.display }}</td>
+        <td class="muted" data-k="p{{ loop.index }}.br" contenteditable="false">{{ x.breakdown }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="addrow"><td><span class="box box-lg"></span></td>
+        <td colspan="3"><span data-k="p.extra1" contenteditable="false" class="extra" data-ph="add an item…"></span></td></tr>
+      <tr class="addrow"><td><span class="box box-lg"></span></td>
+        <td colspan="3"><span data-k="p.extra2" contenteditable="false" class="extra" data-ph="add an item…"></span></td></tr>
+    </tbody>
+  </table>
+  {% else %}<p class="muted">—</p>{% endif %}
+
+  <div class="extra" data-k="p.notes" contenteditable="false" data-ph="kitchen notes for tonight…"
+       style="margin-top:9pt;border:1pt solid #bbb;padding:5pt 7pt;font-size:9.6pt"></div>
+</div>
+
+{# ========================== PAGES 2..n — ORDER CARDS ========================== #}
+<div class="page">
+  <div class="pagemark">2</div>
+  <div class="sec">{{ T.sec_orders }}</div>
+  <div class="sechint">{{ T.order_note }}</div>
+
+  {% for o in cards %}
+  <div class="card">
+    <div class="card-h">
+      <span class="seq">{{ o.seq or '–' }}</span>
+      <span class="who" data-k="o{{ loop.index }}.name" contenteditable="false">{{ o.name }}</span>
+      <span class="plan" data-k="o{{ loop.index }}.plan" contenteditable="false">{{ o.plan }}</span>
+    </div>
+    <div class="card-b">
+      <div class="line"><span class="lbl">{{ T.phone }}</span><span data-k="o{{ loop.index }}.ph" contenteditable="false">{{ o.phone or '—' }}</span></div>
+      <div class="line"><span class="lbl">{{ T.address }}</span><span data-k="o{{ loop.index }}.ad" contenteditable="false">{% if o.address_label %}<strong>[{{ o.address_label }}{% if o.address_switched %} · changed{% endif %}]</strong> {% endif %}{{ o.address or '—' }}{% if o.locality %} · {{ o.locality }}{% endif %}</span>
+        {% if o.map_note %}<div style="margin-left:56pt"><em>{{ o.map_note }}</em></div>{% endif %}</div>
+      <div class="line"><span class="lbl">{{ T.contains }}</span><span class="items" data-k="o{{ loop.index }}.it" contenteditable="false">{% if o["items"] %}{% for i in o["items"] %}{{ i.qty }} {{ i.name }}{% if i.note %} <span class="muted">({{ i.note }})</span>{% endif %}{% if not loop.last %} + {% endif %}{% endfor %}{% else %}<em>{{ T.no_items }}</em>{% endif %}</span></div>
+
+      <div class="note" data-k="o{{ loop.index }}.nt" contenteditable="false"
+           {% if not o.note %}style="display:none"{% endif %}>{% if o.note %}{{ T.note }}: {{ o.note }}{% endif %}</div>
+      {% if o.stop and o.stop.mode == 'porter_handoff' %}
+        <div class="note">{{ T.porter_handoff }}: {{ o.stop.porter_point.name }}{% if o.stop.eta %} · {{ o.stop.eta }}{% endif %}</div>
+      {% elif not o.stop %}
+        <div class="note">{{ T.warn_unpinned }}</div>
+      {% endif %}
+    </div>
+    <div class="ticks">
+      <span><span class="box"></span>{{ T.packed }}</span>
+      <span><span class="box"></span>{{ T.checked }}</span>
+      <span><span class="box"></span>{{ T.delivered }}</span>
+    </div>
+  </div>
+  {% endfor %}
+
+  <div class="extra" data-k="o.extra" contenteditable="false" data-ph="extra order or instruction…"
+       style="border:1.3pt solid #000;padding:6pt 7pt;font-size:10pt"></div>
+</div>
+
+{# ====================== LAST PAGE — ROUTE + CLOSE-OUT ====================== #}
+<div class="page">
+  <div class="pagemark">3</div>
+
+  <div class="sec">{{ T.sec_route }}</div>
+  <div class="sechint">{{ T.route_note }}</div>
+  {% if route.over_waypoint_limit %}<div class="warn"><b>!</b> {{ T.warn_waypoints }}</div>{% endif %}
+  {% if route.late_by > 10 %}
+    <div class="warn"><b>!</b> {{ T.warn_late % {'end': route.shift_end, 'mins': route.late_by} }}</div>
+  {% endif %}
+  {# An estimate must never be mistaken for a measured distance — the petrol
+     allowance is paid on this number. #}
+  {% if route.stops and not route.measured %}
+    <div class="warn"><b>!</b> {{ T.warn_estimate }}</div>
+  {% endif %}
+
+  {% if route.stops %}
+  <table class="route">
+    <thead><tr>
+      <th style="width:28pt">{{ T.stop }}</th><th>{{ T.customer }}</th>
+      <th style="width:64pt">{{ T.zone }}</th><th style="width:44pt">km</th>
+      <th style="width:54pt">{{ T.eta }}</th><th style="width:132pt">{{ T.who }}</th>
+    </tr></thead>
+    <tbody>
+      {% for s in route.stops %}
+      <tr>
+        <td><strong>{{ s.seq }}</strong></td>
+        <td><strong data-k="r{{ loop.index }}.n" contenteditable="false">{{ s.name }}</strong>
+            <span class="muted">{{ s.locality }}</span></td>
+        <td><span class="zone">{{ T[s.zone] }}</span></td>
+        <td data-k="r{{ loop.index }}.km" contenteditable="false">{{ s.km }}</td>
+        <td data-k="r{{ loop.index }}.eta" contenteditable="false">{{ s.eta }}</td>
+        <td>{% if s.mode == 'porter_handoff' %}<span class="porter">{{ T.porter_handoff }}<br>{{ s.porter_point.name }}</span>
+            {% else %}{{ T.rider }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+      {% for s in route.porter_direct %}
+      <tr>
+        <td>–</td>
+        <td><strong>{{ s.name }}</strong> <span class="muted">{{ s.locality }}</span></td>
+        <td><span class="zone">{{ T[s.zone] }}</span></td>
+        <td>{{ s.km }}</td><td>–</td>
+        <td class="porter">{{ T.porter_direct }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if route.unpinned %}
+    <div class="warn"><b>!</b> {{ T.warn_missing }}<br>
+      {% for s in route.unpinned %}<strong>{{ s.name }}</strong> — {{ s.address }}<br>{% endfor %}</div>
+  {% endif %}
+
+  <div class="routefoot">
+    {% if qr %}<img src="{{ qr }}" alt="route QR">{% endif %}
+    <div>
+      <div style="font-size:8.6pt;text-transform:uppercase;letter-spacing:.05em;color:#666">{{ T.scan }}</div>
+      <div class="bigkm">{% if not route.measured %}<span style="font-size:11pt">{{ T.est_mark }}</span> {% endif %}{{ route.est_km }} km &nbsp;·&nbsp; ₹{{ route.allowance }}</div>
+      <div class="muted" style="font-size:8.2pt">
+        {%- if route.measured %}{{ T.measured_by % {'src': route.km_source} }}
+        {%- else %}{{ T.est_mark }}{% endif -%}
+      </div>
+      {% if route.return_eta %}<div class="muted" style="font-size:9.2pt">{{ T.back_by }} ≈ {{ route.return_eta }}</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="sec" style="margin-top:12pt">{{ T.sec_closeout }}</div>
+  <div class="close">
+    <div style="display:flex;gap:18pt;flex-wrap:wrap">
+      <div>{{ T.depart_time }} <span class="fill" style="min-width:66pt"></span></div>
+      <div>{{ T.return_time }} <span class="fill" style="min-width:66pt"></span></div>
+      <div>{{ T.km_ridden }} <span class="fill" style="min-width:66pt">{{ route.est_km }}</span></div>
+      <div>{{ T.allowance }} <span class="fill" style="min-width:66pt">₹{{ route.allowance }}</span></div>
+    </div>
+    <div class="muted" style="font-size:8.4pt;margin-top:4pt">{{ T.km_hint }}</div>
+    <div style="margin-top:8pt">{{ T.issues }}<div class="bigfill"></div></div>
+    <div class="sign">
+      <div><div class="signline"></div><div style="font-size:8.8pt">{{ T.signature }}</div></div>
+      <div><div class="signline"></div><div style="font-size:8.8pt">OG Gainz</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---- saved hand edits, applied over the generated content --------------------
+var OV = {{ ov|tojson }};
+Object.keys(OV).forEach(function (k) {
+  var el = document.querySelector('[data-k="' + CSS.escape(k) + '"]');
+  if (!el) return;
+  el.innerHTML = OV[k];
+  // A note that was hidden because the order had none must appear once edited.
+  if (el.classList.contains('note') && el.innerHTML.trim()) el.style.display = '';
+});
+
+// ---- edit mode --------------------------------------------------------------
+// Everything with a data-k becomes editable together. Edits are saved against
+// this date+slot only, so tomorrow's sheet regenerates clean.
+var editing = false;
+var btn = document.getElementById('editBtn');
+var state = document.getElementById('saveState');
+var fields = Array.prototype.slice.call(document.querySelectorAll('[data-k]'));
+
+function setEditing(on) {
+  editing = on;
+  document.body.classList.toggle('editing', on);
+  fields.forEach(function (el) { el.setAttribute('contenteditable', on ? 'true' : 'false'); });
+  btn.textContent = on ? '✔ Done editing' : '✎ Edit sheet';
+  btn.classList.toggle('on', on);
+  if (!on) save();
+}
+btn.addEventListener('click', function () { setEditing(!editing); });
+
+var timer = null;
+function queueSave() { clearTimeout(timer); timer = setTimeout(save, 900); }
+fields.forEach(function (el) { el.addEventListener('input', queueSave); });
+
+function save() {
+  var edits = {};
+  fields.forEach(function (el) {
+    var h = el.innerHTML.trim();
+    if (h) edits[el.getAttribute('data-k')] = h;
+  });
+  state.textContent = 'Saving…';
+  var body = new FormData();
+  body.append('edits', JSON.stringify(edits));
+  fetch('{{ url_for("sheet_save", d=d, slot=slot, lang=lang) }}', { method: 'POST', body: body })
+    .then(function (r) { return r.json(); })
+    .then(function (j) { state.textContent = j.ok ? 'Saved ✓' : 'Save failed'; })
+    .catch(function () { state.textContent = 'Save failed'; });
+}
+
+// ---- print ------------------------------------------------------------------
+// Leaving edit mode first, so the yellow editing highlight never prints.
+document.getElementById('printBtn').addEventListener('click', function () {
+  if (editing) setEditing(false);
+  setTimeout(function () { window.print(); }, 250);
+});
+{% if autoprint %}window.addEventListener('load', function () { window.print(); });{% endif %}
+</script>
+</body>
+</html>

@@ -19,6 +19,8 @@ import db
 import core
 import crm
 import menu
+import ops
+import sheet_i18n
 import agent
 import brochure
 
@@ -35,6 +37,12 @@ app = Flask(__name__)
 # Secret key signs the login cookie. On the public server it is supplied via the
 # OG_SECRET_KEY environment variable; the fallback is only ever used for local runs.
 app.secret_key = os.environ.get("OG_SECRET_KEY", "og-gainz-local-dev-only")
+
+# Jinja prints a None as the literal text "None". In an edit form that means an
+# empty column comes back as the four characters N-o-n-e, and saving writes that
+# string into the database — so a blank note becomes "None", and a blank address
+# would print "ADDRESS: None" on the rider's sheet. Render None as empty instead.
+app.jinja_env.finalize = lambda v: "" if v is None else v
 # Pick up template edits on the next page refresh (no app restart needed for HTML changes).
 # Note: changes to the Python files (app.py / core.py) still require restarting the app.
 app.config["TEMPLATES_AUTO_RELOAD"] = True
@@ -221,11 +229,18 @@ def inject_globals():
     due = crm.followups_due_count(c)            # CRM follow-ups due → nav badge
     unread = agent.unread_count(c)              # OG Agent bell badge
     agent_ready = agent.ai_ready(c)             # floating chat: online or key missing
+    # Customers with a live subscription but no map pin — they break the route.
+    unpinned = len(ops.pin_status(c)["blocking"])
+    # Subscriptions whose composition the kitchen cannot see — these make the
+    # prep list wrong, so they are worth a standing badge rather than a one-off.
+    sub_issues = sum(1 for r in menu.audit_all(c) if r["high"])
     c.close()
     return {"g_stats": stats, "g_due": due, "g_unread": unread,
-            "g_agent_ready": agent_ready,
+            "g_agent_ready": agent_ready, "g_unpinned": unpinned,
+            "g_sub_issues": sub_issues,
             "active_page": request.endpoint,
             "today": date.today().strftime("%Y-%m-%d"),
+            "today_str": date.today().strftime("%Y-%m-%d"),
             "login_active": bool(APP_PASSWORD), "authed": session.get("authed"),
             "deployed": bool(APP_PASSWORD)}
 
@@ -262,10 +277,16 @@ def today():
     ticks = {r["key"] for r in c.execute("SELECT key FROM prep_ticks WHERE date=?", (d,))}
     prev_d = (datetime.strptime(d, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
     next_d = (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+    # Address lists, so a customer with more than one can be switched for today.
+    addr_map = {}
+    for r in summary["rows"]:
+        cid = r["customer_id"]
+        if cid and cid not in addr_map:
+            addr_map[cid] = ops.customer_addresses(c, cid)
     c.close()
     return render_template("today.html", d=d, s=summary, ending=ending, unpaid=unpaid,
                            prev_d=prev_d, next_d=next_d, view=view, override=override,
-                           prep=prep, backlog=backlog, ticks=ticks,
+                           prep=prep, backlog=backlog, ticks=ticks, addr_map=addr_map,
                            day_label=fmt_date(d, "%A, %d %b %Y"))
 
 
@@ -764,8 +785,42 @@ def customer_detail(cid):
     subs = c.execute("SELECT * FROM subscriptions WHERE customer_id=? ORDER BY id DESC", (cid,)).fetchall()
     spent = c.execute("SELECT COALESCE(SUM(amount_received),0) s FROM subscriptions WHERE customer_id=?",
                       (cid,)).fetchone()["s"]
+    addrs = []
+    for a in ops.customer_addresses(c, cid):
+        km = src = None
+        if a["lat"] is not None:
+            km, src = ops.road_km_from_kitchen(c, a["lat"], a["lng"])
+        addrs.append({"a": a, "km": round(km, 1) if km else None, "src": src,
+                      "zone": ops.zone_for_km(c, km) if km else None,
+                      "days": ops.weekday_label(a["weekdays"]),
+                      "wd": ops.weekday_list(a["weekdays"])})
     c.close()
-    return render_template("customer_detail.html", cust=cust, subs=subs, spent=spent)
+    return render_template("customer_detail.html", cust=cust, subs=subs, spent=spent,
+                           addrs=addrs, weekdays=ops.WEEKDAYS,
+                           corridors=ops.CORRIDORS)
+
+
+def _parse_pin(text):
+    """(lat, lng) from a plus code, Maps URL or coordinate pair. See ops.parse_location."""
+    lat, lng, _ = ops.parse_location(text)
+    return lat, lng
+
+
+def _save_customer_geo(c, f, cid):
+    """Save the map pin and delivery hints. Shared by new + edit."""
+    lat, lng = _parse_pin(f.get("pin"))
+    if lat is None and (f.get("lat") or "").strip():
+        try:
+            lat, lng = float(f.get("lat")), float(f.get("lng"))
+        except (TypeError, ValueError):
+            lat = lng = None
+    if lat is not None:
+        c.execute("UPDATE customers SET lat=?, lng=? WHERE id=?", (lat, lng, cid))
+    c.execute("UPDATE customers SET corridor=?, drop_type=?, map_note=? WHERE id=?",
+              ((f.get("corridor") or "").strip() or None,
+               (f.get("drop_type") or "").strip() or None,
+               (f.get("map_note") or "").strip() or None, cid))
+    return lat is not None
 
 
 @app.route("/customers/new", methods=["GET", "POST"])
@@ -778,11 +833,12 @@ def customer_new():
                   "VALUES(?,?,?,?,?,?,?)",
                   (cid, f.get("name"), f.get("phone"), f.get("locality"),
                    f.get("address"), f.get("notes"), db.now_iso()))
+        _save_customer_geo(c, f, cid)
         c.commit(); c.close()
         flash(f"Customer {cid} added.", "ok")
         return redirect(url_for("customer_detail", cid=cid))
     c.close()
-    return render_template("customer_form.html", cust=None)
+    return render_template("customer_form.html", cust=None, corridors=ops.CORRIDORS)
 
 
 @app.route("/customers/<cid>/edit", methods=["GET", "POST"])
@@ -796,11 +852,550 @@ def customer_edit(cid):
         c.execute("UPDATE customers SET name=?,phone=?,locality=?,address=?,notes=? WHERE id=?",
                   (f.get("name"), f.get("phone"), f.get("locality"), f.get("address"),
                    f.get("notes"), cid))
+        pinned = _save_customer_geo(c, f, cid)
         c.commit(); c.close()
-        flash("Customer updated.", "ok")
+        if (f.get("pin") or "").strip() and not pinned:
+            flash("Customer updated — but that pin wasn't readable, so it was ignored. "
+                  "Paste coordinates like 12.901234, 80.227891.", "")
+        else:
+            flash("Customer updated.", "ok")
         return redirect(url_for("customer_detail", cid=cid))
     c.close()
-    return render_template("customer_form.html", cust=cust)
+    return render_template("customer_form.html", cust=cust, corridors=ops.CORRIDORS)
+
+
+# ---------------------------------------------------------------------------
+# Subscription audit — find compositions the kitchen can't see
+# ---------------------------------------------------------------------------
+@app.route("/subscriptions/review")
+def subscriptions_review():
+    """Every live subscription checked against the current pack structure.
+
+    The prep list can only count what is recorded as components, so an extra
+    typed into the plan name never reaches the kitchen. This page surfaces those,
+    worst first, and lets each one be fixed without leaving the list.
+    """
+    c = conn()
+    rows = menu.audit_all(c)
+    comps = menu.all_components(c)
+    plans = c.execute("SELECT * FROM plans WHERE active=1 ORDER BY id").fetchall()
+    counts = {
+        "high": sum(1 for r in rows if r["high"]),
+        "any": sum(1 for r in rows if r["issues"]),
+        "clean": sum(1 for r in rows if not r["issues"]),
+    }
+    c.close()
+    return render_template("subscriptions_review.html", rows=rows, comps=comps,
+                           plans=plans, counts=counts)
+
+
+@app.route("/subscriptions/<sid>/apply-pack", methods=["POST"])
+def subscription_apply_pack(sid):
+    """Reset a subscription's base to the chosen pack's recipe, keeping add-ons."""
+    c = conn()
+    pid = request.form.get("plan_id", type=int)
+    plan = c.execute("SELECT * FROM plans WHERE id=?", (pid,)).fetchone() if pid else None
+    if not plan:
+        c.close()
+        flash("Pick a pack first.", "")
+        return redirect(url_for("subscriptions_review"))
+    keep = [(a["component_id"], float(a["qty"]), a["note"] or "")
+            for a in menu.sub_composition(c, sid) if a["kind"] == "addon"]
+    base = [(r["component_id"], float(r["qty"]), r["note"] or "")
+            for r in menu.plan_recipe(c, pid)]
+    menu.save_sub_composition(c, sid, base, keep)
+    if request.form.get("set_name"):
+        c.execute("UPDATE subscriptions SET plan_name=? WHERE id=?", (plan["name"], sid))
+    c.commit(); c.close()
+    flash(f"Applied the {plan['name']} recipe.", "ok")
+    return redirect(request.referrer or url_for("subscriptions_review"))
+
+
+@app.route("/subscriptions/<sid>/addon", methods=["POST"])
+def subscription_addon(sid):
+    """Add (or clear) one add-on component on a subscription, from the review list."""
+    c = conn()
+    cid = request.form.get("component_id", type=int)
+    qty = request.form.get("qty", type=float)
+    existing = menu.sub_composition(c, sid)
+    base = [(x["component_id"], float(x["qty"]), x["note"] or "")
+            for x in existing if x["kind"] != "addon"]
+    addons = [(x["component_id"], float(x["qty"]), x["note"] or "")
+              for x in existing if x["kind"] == "addon" and x["component_id"] != cid]
+    if cid and qty and qty > 0:
+        addons.append((cid, qty, (request.form.get("note") or "").strip()))
+    menu.save_sub_composition(c, sid, base, addons)
+    c.commit(); c.close()
+    flash("Add-on saved. It is now counted in the prep list.", "ok")
+    return redirect(request.referrer or url_for("subscriptions_review"))
+
+
+# ---------------------------------------------------------------------------
+# Shift sheet — the printed page the evening runs on
+# ---------------------------------------------------------------------------
+@app.route("/sheet")
+def sheet_pick():
+    """Small chooser so the sheet is reachable without typing a URL."""
+    d = today_iso()
+    return redirect(url_for("sheet", d=d, slot="Dinner"))
+
+
+@app.route("/sheet/<d>/<slot>")
+def sheet(d, slot):
+    """One slot's complete working sheet: what to cook, what goes in each box,
+    where it goes, and the close-out. Designed for A4 paper and a pen —
+    `?lang=ta` renders the whole thing in Tamil, `?print=1` opens the print dialog.
+    """
+    slot = "Dinner" if (slot or "").lower().startswith("d") else "Lunch"
+    lang = "ta" if request.args.get("lang") == "ta" else "en"
+    c = conn()
+
+    rows = core.deliveries_for_day(c, d)
+    prep = menu.prep_for_day(c, d, rows=rows)
+    route = ops.build_route(c, d, slot, rows=rows)   # distances already road-based
+
+    slot_key = "dinner" if slot == "Dinner" else "lunch"
+    prep_slot = prep[slot_key]
+
+    # Per-order cards, in the same sequence the rider will ride.
+    by_delivery = {s["delivery_id"]: s for s in route["stops"]}
+    cache, plan_cache = {}, {}
+    cards, no_comp = [], []
+    ordered_rows = sorted(
+        [r for r in rows
+         if (r["meal_type"] or "Lunch") == slot and r["status"] in ("Pending", "Delivered")],
+        key=lambda r: by_delivery[r["id"]]["seq"] if r["id"] in by_delivery else 999)
+    unpinned_by_id = {s["delivery_id"]: s for s in route["unpinned"]}
+    for r in ordered_rows:
+        items, label = menu.order_items(c, r, d, cache, plan_cache)
+        stop = by_delivery.get(r["id"]) or unpinned_by_id.get(r["id"])
+        card = {
+            "seq": by_delivery[r["id"]]["seq"] if r["id"] in by_delivery else None,
+            "name": r["name"], "phone": r["phone"],
+            # The address resolved for THIS day — office, home, or a one-off. The
+            # label is only worth printing when the customer actually has more
+            # than one; otherwise "[Home]" on every card is just noise.
+            "address": (stop["address"] if stop else r["address"]) or "",
+            "address_label": (stop["address_label"] if stop else None)
+                             if (r["n_addresses"] or 0) > 1 else None,
+            "address_switched": bool(r["address_id"]),
+            "locality": r["locality"] or "",
+            "map_note": (stop["map_note"] if stop else r["map_note"]),
+            "plan": label or "Meal",
+            "items": [{"name": sheet_i18n.component_name(i["name"], lang),
+                       "qty": menu.fmt_qty(i["qty"], i["unit"]),
+                       "note": i.get("note")} for i in items],
+            # The one line that loses a customer if it's missed.
+            "note": " · ".join(x for x in [(r["sub_notes"] or "").strip(),
+                                           (r["day_note"] or "").strip()] if x),
+            "stop": by_delivery.get(r["id"]),
+        }
+        cards.append(card)
+        if not items:
+            no_comp.append(r["name"])
+
+    comps = [{"name": sheet_i18n.component_name(x["name"], lang), "emoji": x["emoji"],
+              "display": x["display"], "breakdown": x["breakdown"], "notes": x["notes"]}
+             for x in prep_slot["components"]]
+
+    ov = _sheet_overrides(c, d, slot, lang)
+    timings = {
+        "prep":   ops.setting(c, "prep_start_time") or "4:00 PM",
+        "pack":   ops.setting(c, "pack_done_time") or "6:15 PM",
+        "depart": _ampm(ops.setting(c, "depart_time")),
+        "done":   _ampm(ops.setting(c, "shift_end")),
+    }
+    staff = request.args.get("staff") or ops.setting(c, "staff_name") or ""
+    kitchen_addr = ops.setting(c, "kitchen_address")
+    c.close()
+    return render_template(
+        "sheet.html", d=d, slot=slot, lang=lang, T=sheet_i18n.t(lang),
+        comps=comps, cards=cards, route=route, no_comp=no_comp, ov=ov,
+        qr=ops.qr_data_uri(route["maps_url"]), timings=timings,
+        staff=staff, kitchen_addr=kitchen_addr,
+        day_label=fmt_date(d, "%A, %d %b %Y"),
+        autoprint=request.args.get("print") == "1")
+
+
+def _ampm(hhmm):
+    """'21:00' → '9:00 PM'. Written out because %-I/%#I differ per platform."""
+    try:
+        h, m = str(hhmm).split(":")
+        h, m = int(h), int(m)
+        return f"{h % 12 or 12}:{m:02d} {'AM' if h < 12 else 'PM'}"
+    except (ValueError, AttributeError):
+        return str(hhmm)
+
+
+def _sheet_overrides(c, d, slot, lang):
+    """Hand edits saved against this sheet, as {element_key: html}."""
+    row = c.execute("SELECT overrides FROM shifts WHERE date=? AND slot=?", (d, slot)).fetchone()
+    if not row or not row["overrides"]:
+        return {}
+    try:
+        return json.loads(row["overrides"]).get(lang, {})
+    except (ValueError, AttributeError):
+        return {}
+
+
+@app.route("/sheet/<d>/<slot>/save", methods=["POST"])
+def sheet_save(d, slot):
+    """Persist hand edits made to a sheet before it goes out.
+
+    Stored per language, keyed by element, and applied on top of freshly generated
+    data — so regenerating tomorrow's sheet never inherits today's corrections, and
+    editing a printed quantity never silently rewrites the actual order.
+    """
+    import re
+    slot = "Dinner" if (slot or "").lower().startswith("d") else "Lunch"
+    lang = "ta" if request.args.get("lang") == "ta" else "en"
+    try:
+        edits = json.loads(request.form.get("edits") or "{}")
+    except ValueError:
+        return jsonify({"ok": False, "err": "bad payload"}), 400
+    # The content is the owner's own, but strip anything executable so a stray
+    # paste can never break every future render of this sheet.
+    clean = {}
+    for k, v in list(edits.items())[:400]:
+        v = re.sub(r"(?is)<(script|style|iframe)\b.*?</\1>", "", str(v))[:8000]
+        v = re.sub(r"(?i)\son\w+\s*=\s*\"[^\"]*\"", "", v)
+        clean[str(k)[:120]] = v
+
+    c = conn()
+    row = c.execute("SELECT id, overrides FROM shifts WHERE date=? AND slot=?",
+                    (d, slot)).fetchone()
+    blob = {}
+    if row and row["overrides"]:
+        try:
+            blob = json.loads(row["overrides"])
+        except ValueError:
+            blob = {}
+    blob[lang] = clean
+    if row:
+        c.execute("UPDATE shifts SET overrides=?, updated_at=? WHERE id=?",
+                  (json.dumps(blob), db.now_iso(), row["id"]))
+    else:
+        c.execute("INSERT INTO shifts(date, slot, overrides, created_at, updated_at) "
+                  "VALUES(?,?,?,?,?)", (d, slot, json.dumps(blob), db.now_iso(), db.now_iso()))
+    c.commit(); c.close()
+    return jsonify({"ok": True, "n": len(clean)})
+
+
+@app.route("/sheet/<d>/<slot>/reset", methods=["POST"])
+def sheet_reset(d, slot):
+    """Drop hand edits and go back to exactly what the app generated."""
+    slot = "Dinner" if (slot or "").lower().startswith("d") else "Lunch"
+    c = conn()
+    c.execute("UPDATE shifts SET overrides=NULL WHERE date=? AND slot=?", (d, slot))
+    c.commit(); c.close()
+    flash("Sheet reset to the generated version.", "ok")
+    return redirect(url_for("sheet", d=d, slot=slot, lang=request.args.get("lang", "en")))
+
+
+# ---------------------------------------------------------------------------
+# Customer addresses — home / office / gym, with an optional weekday schedule
+# ---------------------------------------------------------------------------
+@app.route("/customers/<cid>/schedule")
+def customer_schedule(cid):
+    """The next two weeks of this customer's deliveries, with the address each
+    will go to and a way to change any of them ahead of time.
+
+    This is the answer to "I'll tell you the day before" — the change is recorded
+    against that specific future delivery, so whoever prints the sheet that
+    evening gets the right address without having to remember the conversation.
+    """
+    c = conn()
+    cust = c.execute("SELECT * FROM customers WHERE id=?", (cid,)).fetchone()
+    if not cust:
+        c.close(); abort(404)
+    days = int(request.args.get("days", 14))
+    start = date.today()
+    addrs = ops.customer_addresses(c, cid)
+    acache = {cid: addrs}
+    rows = []
+    for i in range(days):
+        d = (start + timedelta(days=i)).strftime("%Y-%m-%d")
+        if not core.is_operating_day(c, d):
+            continue
+        for dl in c.execute(
+                "SELECT * FROM deliveries WHERE customer_id=? AND date=? "
+                "AND status IN ('Pending','Delivered') ORDER BY (meal_type='Dinner')",
+                (cid, d)).fetchall():
+            slot = dl["meal_type"] or "Lunch"
+            chosen = ops.resolve_address(c, cid, d, dl["address_id"], acache, slot)
+            auto = ops.resolve_address(c, cid, d, None, acache, slot)
+            rows.append({
+                "id": dl["id"], "date": d, "slot": slot, "status": dl["status"],
+                "label": fmt_date(d, "%a %d %b"),
+                "addr": chosen, "auto": auto,
+                "overridden": bool(dl["address_id"]),
+                "is_today": d == start.strftime("%Y-%m-%d"),
+            })
+    c.close()
+    return render_template("customer_schedule.html", cust=cust, rows=rows,
+                           addrs=addrs, days=days)
+
+
+@app.route("/customers/<cid>/address", methods=["POST"])
+def customer_address_save(cid):
+    """Add or update one of a customer's delivery addresses."""
+    c = conn()
+    f = request.form
+    aid = f.get("address_id", type=int)
+    lat, lng, how = ops.parse_location(f.get("pin"))
+    weekdays = ",".join(sorted(f.getlist("weekdays")))
+    fields = ((f.get("label") or "").strip() or "Address",
+              (f.get("address") or "").strip(),
+              (f.get("drop_type") or "").strip() or None,
+              (f.get("map_note") or "").strip() or None,
+              (f.get("corridor") or "").strip() or None,
+              weekdays or None,
+              (f.get("slot") or "").strip() or None)
+
+    if aid:
+        c.execute("UPDATE customer_addresses SET label=?, address=?, drop_type=?, "
+                  "map_note=?, corridor=?, weekdays=?, slot=? WHERE id=? AND customer_id=?",
+                  (*fields, aid, cid))
+        if lat is not None:
+            c.execute("UPDATE customer_addresses SET lat=?, lng=? WHERE id=?", (lat, lng, aid))
+    else:
+        first = not c.execute("SELECT 1 FROM customer_addresses WHERE customer_id=?",
+                              (cid,)).fetchone()
+        cur = c.execute(
+            "INSERT INTO customer_addresses(customer_id,label,address,drop_type,map_note,"
+            "corridor,weekdays,slot,lat,lng,is_default,active,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?)",
+            (cid, *fields, lat, lng, 1 if first else 0, db.now_iso()))
+        aid = cur.lastrowid
+    c.commit()
+    if c.execute("SELECT is_default FROM customer_addresses WHERE id=?",
+                 (aid,)).fetchone()["is_default"]:
+        ops.set_default_address(c, cid, aid)      # keep the mirror on customers in step
+    c.close()
+    if (f.get("pin") or "").strip() and lat is None:
+        flash(f"Address saved, but the pin wasn't readable — {how}.", "")
+    else:
+        flash("Address saved.", "ok")
+    return redirect(url_for("customer_detail", cid=cid))
+
+
+@app.route("/customers/<cid>/address/<int:aid>/default", methods=["POST"])
+def customer_address_default(cid, aid):
+    c = conn()
+    ops.set_default_address(c, cid, aid)
+    c.close()
+    flash("Default address updated.", "ok")
+    return redirect(url_for("customer_detail", cid=cid))
+
+
+@app.route("/customers/<cid>/address/<int:aid>/archive", methods=["POST"])
+def customer_address_archive(cid, aid):
+    """Hide an address without deleting it — past deliveries still reference it."""
+    c = conn()
+    c.execute("UPDATE customer_addresses SET active=0, is_default=0 "
+              "WHERE id=? AND customer_id=?", (aid, cid))
+    c.commit()
+    left = ops.customer_addresses(c, cid)
+    if left and not any(a["is_default"] for a in left):
+        ops.set_default_address(c, cid, left[0]["id"])
+    c.close()
+    flash("Address archived. Past deliveries keep their record of it.", "ok")
+    return redirect(url_for("customer_detail", cid=cid))
+
+
+@app.route("/api/delivery/<int:did>/address", methods=["POST"])
+def api_delivery_address(did):
+    """Send just this one day's delivery to a different address."""
+    c = conn()
+    aid = request.form.get("address_id", type=int)
+    c.execute("UPDATE deliveries SET address_id=? WHERE id=?", (aid or None, did))
+    c.commit()
+    row = c.execute("SELECT * FROM deliveries WHERE id=?", (did,)).fetchone()
+    addr = ops.resolve_address(c, row["customer_id"], row["date"], row["address_id"])
+    c.close()
+    return jsonify({"ok": True,
+                    "label": addr["label"] if addr else None,
+                    "address": (addr["address"] if addr else "") or "",
+                    "override": bool(aid)})
+
+
+# ---------------------------------------------------------------------------
+# Porter handoff points
+# ---------------------------------------------------------------------------
+@app.route("/porter-points")
+def porter_points():
+    """The handoff spots where a far order is passed to a Porter.
+
+    The saving is real: a Porter booked from the kitchen to Adyar runs ~19 km,
+    but if the rider carries it to Sholinganallur junction — a stop he passes
+    anyway — the Porter only runs the remainder. Cost falls, the rider loses
+    nothing.
+    """
+    c = conn()
+    klat, klng, kok = ops.kitchen(c)
+    rows = []
+    for p in c.execute("SELECT * FROM porter_points ORDER BY active DESC, sort, id"):
+        km = src = None
+        if p["lat"] is not None:
+            km, src = ops.road_km_from_kitchen(c, p["lat"], p["lng"])
+        rows.append({"p": p, "km": round(km, 1) if km else None,
+                     "serves": [x.strip() for x in (p["serves"] or "").split(",") if x.strip()]})
+    # Which far stops currently have nowhere to hand off — the gap worth filling.
+    uncovered = {}
+    for d in (today_iso(), (date.today() + timedelta(days=1)).strftime("%Y-%m-%d")):
+        for slot in ("Lunch", "Dinner"):
+            r = ops.build_route(c, d, slot)
+            for s in r["porter_direct"]:
+                uncovered.setdefault(s["corridor"], set()).add(s["name"])
+    c.close()
+    return render_template("porter_points.html", rows=rows, corridors=ops.CORRIDORS,
+                           kitchen_ok=kok, klat=klat, klng=klng,
+                           uncovered={k: sorted(v) for k, v in uncovered.items()})
+
+
+@app.route("/porter-points/save", methods=["POST"])
+def porter_point_save():
+    c = conn()
+    f = request.form
+    pid = f.get("id", type=int)
+    lat, lng, how = ops.parse_location(f.get("pin"))
+    serves = ",".join(f.getlist("serves"))
+    vals = ((f.get("code") or "").strip() or None,
+            (f.get("name") or "").strip(),
+            serves or None,
+            (f.get("note") or "").strip() or None,
+            1 if f.get("active") else 0)
+    if pid:
+        c.execute("UPDATE porter_points SET code=?, name=?, serves=?, note=?, active=? "
+                  "WHERE id=?", (*vals, pid))
+        if lat is not None:
+            c.execute("UPDATE porter_points SET lat=?, lng=? WHERE id=?", (lat, lng, pid))
+    else:
+        c.execute("INSERT INTO porter_points(code,name,serves,note,active,lat,lng,sort) "
+                  "VALUES(?,?,?,?,?,?,?,100)", (*vals, lat, lng))
+    c.commit(); c.close()
+    if (f.get("pin") or "").strip() and lat is None:
+        flash(f"Saved, but the pin wasn't readable — {how}.", "")
+    else:
+        flash("Porter point saved.", "ok")
+    return redirect(url_for("porter_points"))
+
+
+@app.route("/porter-points/<int:pid>/delete", methods=["POST"])
+def porter_point_delete(pid):
+    """Deactivate rather than delete — past sheets refer to these by name."""
+    c = conn()
+    c.execute("UPDATE porter_points SET active=0 WHERE id=?", (pid,))
+    c.commit(); c.close()
+    flash("Porter point switched off. Past sheets keep their record of it.", "ok")
+    return redirect(url_for("porter_points"))
+
+
+# ---------------------------------------------------------------------------
+# Map pins — the setup step the whole delivery route depends on
+# ---------------------------------------------------------------------------
+@app.route("/pins")
+def pins():
+    """Who still needs a map pin. Customers with live subscriptions come first,
+    because an unpinned active customer is the thing that breaks tonight's route."""
+    c = conn()
+    st = ops.pin_status(c)
+    klat, klng, confirmed = ops.kitchen(c)
+    rows = [(r, ops.maps_search_url(r)) for r in st["missing"]]
+    pinned = []
+    for r in st["pinned"]:
+        km, src = ops.road_km_from_kitchen(c, r["lat"], r["lng"])
+        pinned.append((r, round(km, 1), ops.zone_for_km(c, km), src))
+    pinned.sort(key=lambda x: x[1])
+    prov = ops.provider_status(c)
+    c.close()
+    return render_template("pins.html", missing=rows, pinned=pinned, st=st,
+                           kitchen_confirmed=confirmed, klat=klat, klng=klng,
+                           prov=prov)
+
+
+@app.route("/pins/save", methods=["POST"])
+def pins_save():
+    """Inline save straight from the pins list — paste, save, next.
+
+    Returns the distance and zone immediately so a pin that landed in the wrong
+    place is obvious right there (a Perumbakkam neighbour showing 14 km is a typo,
+    not a customer).
+    """
+    c = conn()
+    aid = request.form.get("address_id", type=int)
+    lat, lng, how = ops.parse_location(request.form.get("pin"))
+    if lat is None:
+        c.close()
+        return jsonify({"ok": False, "err": how})
+    c.execute("UPDATE customer_addresses SET lat=?, lng=? WHERE id=?", (lat, lng, aid))
+    a = c.execute("SELECT * FROM customer_addresses WHERE id=?", (aid,)).fetchone()
+    c.commit()
+    if a and a["is_default"]:
+        ops.set_default_address(c, a["customer_id"], aid)   # mirror onto the customer row
+    km, src = ops.road_km_from_kitchen(c, lat, lng)      # road, not straight-line
+    zone = ops.zone_for_km(c, km)
+    left = len(ops.pin_status(c)["missing"])
+    c.close()
+    return jsonify({"ok": True, "lat": round(lat, 6), "lng": round(lng, 6), "how": how,
+                    "km": round(km, 1), "km_source": src, "zone": zone, "left": left})
+
+
+@app.route("/api/customer/<cid>/location", methods=["GET", "POST"])
+def api_customer_location(cid):
+    """Read or set one customer's map pin, with the distance and zone it implies.
+
+    Used from the subscription form so a location can be attached at the moment
+    an order is set up, rather than being discovered missing at 6:40 PM.
+    """
+    c = conn()
+    cust = c.execute("SELECT * FROM customers WHERE id=?", (cid,)).fetchone()
+    if not cust:
+        c.close()
+        return jsonify({"ok": False, "err": "no such customer"}), 404
+
+    if request.method == "POST":
+        lat, lng, how = ops.parse_location(request.form.get("pin"))
+        if lat is None:
+            c.close()
+            return jsonify({"ok": False, "err": how})
+        c.execute("UPDATE customers SET lat=?, lng=? WHERE id=?", (lat, lng, cid))
+        c.commit()
+        cust = c.execute("SELECT * FROM customers WHERE id=?", (cid,)).fetchone()
+
+    klat, klng, kok = ops.kitchen(c)
+    out = {"ok": True, "id": cust["id"], "name": cust["name"],
+           "address": cust["address"] or "", "locality": cust["locality"] or "",
+           "search": ops.maps_search_url(cust), "kitchen_set": kok,
+           "pinned": cust["lat"] is not None}
+    if cust["lat"] is not None:
+        km, src = ops.road_km_from_kitchen(c, cust["lat"], cust["lng"])
+        out.update({"lat": round(cust["lat"], 6), "lng": round(cust["lng"], 6),
+                    "km": round(km, 1), "km_source": src, "zone": ops.zone_for_km(c, km),
+                    "corridor": cust["corridor"] or ops.corridor_for(cust["locality"],
+                                                                    cust["address"])})
+    c.close()
+    return jsonify(out)
+
+
+@app.route("/pins/kitchen", methods=["POST"])
+def pins_kitchen():
+    """Set the kitchen pin. Everything measures from here, so it is confirmed explicitly."""
+    c = conn()
+    lat, lng, how = ops.parse_location(request.form.get("pin"))
+    if lat is None:
+        c.close()
+        flash(f"Couldn't set the kitchen pin — {how}. "
+              f"Paste a plus code like V6R3+XM Chennai, or 12.892438, 80.204187.", "")
+        return redirect(url_for("pins"))
+    db.set_setting(c, "kitchen_lat", lat)
+    db.set_setting(c, "kitchen_lng", lng)
+    db.set_setting(c, "kitchen_pin_confirmed", "1")
+    if (request.form.get("address") or "").strip():
+        db.set_setting(c, "kitchen_address", request.form.get("address").strip())
+    c.commit(); c.close()
+    flash(f"Kitchen pin saved ({how}). Zones and petrol allowance now measure from it.", "ok")
+    return redirect(url_for("pins"))
 
 
 # ---------------------------------------------------------------------------
@@ -1192,6 +1787,45 @@ WEEKDAYS = [("0", "Mon"), ("1", "Tue"), ("2", "Wed"), ("3", "Thu"),
             ("4", "Fri"), ("5", "Sat"), ("6", "Sun")]
 
 
+@app.route("/settings/distance", methods=["POST"])
+def settings_distance():
+    """Choose how road distance is measured. This decides whether the petrol
+    allowance is a real figure or an approximation, so it gets its own screen."""
+    c = conn()
+    f = request.form
+    db.set_setting(c, "distance_provider", (f.get("distance_provider") or "").strip())
+    for k in ("routes_api_key", "ors_api_key", "osrm_base_url"):
+        v = (f.get(k) or "").strip()
+        if v != "********":                     # unchanged masked value
+            db.set_setting(c, k, v)
+    for k in ("petrol_rate", "zone_hyperlocal_km", "zone_near_km", "zone_mid_km"):
+        if (f.get(k) or "").strip():
+            db.set_setting(c, k, f.get(k).strip())
+    c.commit()
+    if f.get("test"):
+        res = ops.check_provider(c)
+        # Any cached estimates are now stale — drop them so real distances are fetched.
+        if res["ok"]:
+            c.execute("DELETE FROM route_km_cache WHERE source='estimate'")
+            c.commit()
+        flash(res["msg"], "ok" if res["ok"] else "")
+    else:
+        flash("Distance settings saved.", "ok")
+    c.close()
+    return redirect(url_for("settings") + "#distance")
+
+
+@app.route("/settings/distance/clear-cache", methods=["POST"])
+def settings_distance_clear():
+    """Forget every cached distance and re-measure from scratch."""
+    c = conn()
+    n = c.execute("SELECT COUNT(*) n FROM route_km_cache").fetchone()["n"]
+    c.execute("DELETE FROM route_km_cache")
+    c.commit(); c.close()
+    flash(f"Cleared {n} cached distance(s). They will be re-measured as needed.", "ok")
+    return redirect(url_for("settings") + "#distance")
+
+
 @app.route("/settings")
 def settings():
     c = conn()
@@ -1203,8 +1837,20 @@ def settings():
     bdir = os.path.join(APP_DIR, "backups")
     if os.path.isdir(bdir):
         backups = sorted(os.listdir(bdir), reverse=True)[:10]
+    dist = {
+        "prov": ops.provider_status(c),
+        "provider": ops.setting(c, "distance_provider"),
+        "has_google": bool(ops.setting(c, "routes_api_key")),
+        "has_ors": bool(ops.setting(c, "ors_api_key")),
+        "osrm_url": ops.setting(c, "osrm_base_url"),
+        "petrol_rate": ops.setting(c, "petrol_rate"),
+        "z1": ops.setting(c, "zone_hyperlocal_km"),
+        "z2": ops.setting(c, "zone_near_km"),
+        "z3": ops.setting(c, "zone_mid_km"),
+        "cached": c.execute("SELECT COUNT(*) n FROM route_km_cache").fetchone()["n"],
+    }
     c.close()
-    return render_template("settings.html", plans=plans, overrides=overrides,
+    return render_template("settings.html", plans=plans, overrides=overrides, dist=dist,
                            threshold=threshold, backups=backups,
                            weekdays=WEEKDAYS, op_days=op_days,
                            today=date.today().strftime("%Y-%m-%d"))

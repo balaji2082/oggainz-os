@@ -1,4 +1,6 @@
-{% macro drow(r) %}
+{# `addrs` is the customer's address list; passed only where a one-day switch
+   makes sense (the Today list). Omitted elsewhere and the row renders as before. #}
+{% macro drow(r, addrs=None) %}
 {% set slot = r.meal_type or 'Lunch' %}
 <div class="drow {{ 'is-delivered' if r.status=='Delivered' }}{{ 'is-skipped' if r.status=='Skipped' }}"
      data-status="{{ r.status }}" data-id="{{ r.id }}">
@@ -27,6 +29,20 @@
   </div>
   {% endif %}
   {% if r.sub_notes %}<div class="drow-note">📋 {{ r.sub_notes }}</div>{% endif %}
+
+  {# Where tonight's box actually goes. Only shown when there is a real choice. #}
+  {% if addrs and addrs|length > 1 %}
+  <div class="drow-line" style="align-items:center;gap:6px">
+    <span class="mi">🏠</span>
+    <select class="addr-pick" data-id="{{ r.id }}" style="font-size:.85em;padding:2px 6px;max-width:230px">
+      <option value="">Usual for this day</option>
+      {% for a in addrs %}
+        <option value="{{ a.id }}" {{ 'selected' if r.address_id == a.id }}>{{ a.label }}{% if not a.lat %} (no pin){% endif %}</option>
+      {% endfor %}
+    </select>
+    {% if r.address_id %}<span class="chip chip-xs" style="background:#e9762b;color:#fff">changed today</span>{% endif %}
+  </div>
+  {% endif %}
 
   <div class="daynote" data-note {{ 'hidden' if not r.day_note }}>📝 <span class="daynote-text">{{ r.day_note or '' }}</span></div>
   <div class="note-editor" hidden>

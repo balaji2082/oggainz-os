@@ -487,7 +487,10 @@ def deliveries_for_day(conn, day_iso):
     return conn.execute(
         "SELECT d.*, COALESCE(c.phone, t.phone) AS phone, c.locality, "
         "       COALESCE(c.address, t.address) AS address, s.preferred_timing, "
+        "       c.lat, c.lng, c.zone, c.corridor, c.drop_type, c.map_note, "
         "       COALESCE(s.notes,'') AS sub_notes, "
+        "       (SELECT COUNT(*) FROM customer_addresses ca "
+        "          WHERE ca.customer_id=d.customer_id AND ca.active=1) AS n_addresses, "
         "       COALESCE(s.plan_name, d.notes) AS plan_name, s.remaining_meals, "
         "       t.id AS trial_ref, t.order_text AS trial_order "
         "FROM deliveries d "
