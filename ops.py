@@ -361,8 +361,19 @@ def _stop_from_row(conn, r, klat, klng, day_iso=None, acache=None):
     if addr is not None and lat is None:          # address on file but not pinned
         lat = lng = None
 
+    # Where this order is handed over, if it has been decided by hand.
+    # Most specific wins: this one order tonight, then the standing rule on the
+    # address. NULL at both levels means "let the automatic rule decide".
+    assigned = r["porter_point_id"] if "porter_point_id" in keys else None
+    assigned_from = "order" if assigned is not None else None
+    if assigned is None and addr is not None and "porter_point_id" in addr.keys():
+        assigned = addr["porter_point_id"]
+        assigned_from = "address" if assigned is not None else None
+
     name = r["name"] or "—"
     base = {
+        "assigned_point": assigned,
+        "assigned_from": assigned_from,
         "delivery_id": r["id"],
         "name": name,
         "phone": r["phone"],
@@ -411,21 +422,49 @@ def assign_modes(conn, stops):
     tonight — so carrying this one costs him nothing extra. A handoff is only
     ever offered at a porter point on a corridor he is genuinely riding; a
     detour to reach one costs more rider time than the Porter fare it saves.
+
+    A MANUAL ASSIGNMENT ALWAYS WINS. Balaji knows things the rule cannot: that
+    tonight the rider is passing Medavakkam anyway, or that a particular Porter
+    driver is reliable at that junction. `assigned_point` on a stop (from the
+    delivery row, or standing on the address) overrides every heuristic below.
     """
     rider_max = fnum(conn, "rider_max_km")
     porter_min = fnum(conn, "porter_min_km")
-    points = [dict(p) for p in conn.execute(
-        "SELECT * FROM porter_points WHERE active=1 ORDER BY sort, id")]
+    points = {p["id"]: dict(p) for p in conn.execute(
+        "SELECT * FROM porter_points ORDER BY sort, id")}
+    active = [p for p in points.values() if p["active"]]
 
     # Corridors the rider is definitely riding: those with a stop he must deliver
-    # himself (short enough to be unambiguous).
+    # himself (short enough to be unambiguous). Manually-assigned handoffs do not
+    # count — he is going to the porter point, not to the customer.
     ridden = {s["corridor"] for s in stops
-              if s.get("pinned") and s["km"] is not None and s["km"] <= rider_max}
+              if s.get("pinned") and s["km"] is not None and s["km"] <= rider_max
+              and not s.get("assigned_point")}
 
     for s in stops:
+        # --- manual assignment, set on the order or standing on the address ---
+        # Checked BEFORE the pin, deliberately: handing an order over at a porter
+        # point does not need the customer's own pin at all. That is much of the
+        # point of a porter point, and most customers are still unpinned.
+        forced = s.get("assigned_point")
+        if forced is not None:
+            if forced == 0:                                  # "rider does this one"
+                s["mode"], s["porter_point"] = "rider", None
+                s["assigned"] = True
+                continue
+            pp = points.get(forced)
+            if pp:
+                s["mode"], s["porter_point"] = "porter_handoff", pp
+                s["assigned"] = True
+                continue
+            # Assigned to a point that has since been deleted — fall through to
+            # the automatic rule rather than silently dropping the instruction.
+            s["assign_missing"] = True
+
         if not s.get("pinned"):
             s["mode"], s["porter_point"] = "rider", None
             continue
+
         km, corr = s["km"], s["corridor"]
         on_corridor = corr in ridden
 
@@ -438,7 +477,7 @@ def assign_modes(conn, stops):
 
         # Far. A handoff only pays off at a point he is already passing, so it
         # needs a pinned porter point on a corridor he is genuinely riding.
-        pp = next((p for p in points
+        pp = next((p for p in active
                    if p["lat"] is not None
                    and corr in [x.strip() for x in (p["serves"] or "").split(",")]),
                   None)
@@ -449,6 +488,17 @@ def assign_modes(conn, stops):
             # time than the Porter fare it would save. Book direct and accept it.
             s["mode"], s["porter_point"] = "porter_direct", None
     return stops
+
+
+def _group_by_point(handoffs):
+    """[(porter_point_id, [stops])] — several orders to one point are one visit."""
+    groups = {}
+    for s in handoffs:
+        pp = s.get("porter_point")
+        if pp is None:
+            continue
+        groups.setdefault(pp["id"], []).append(s)
+    return sorted(groups.items())
 
 
 def build_route(conn, day_iso, slot, rows=None):
@@ -475,10 +525,48 @@ def build_route(conn, day_iso, slot, rows=None):
         s = _stop_from_row(conn, r, klat, klng, day_iso, acache)
         (stops if s["pinned"] else unpinned).append(s)
 
-    assign_modes(conn, stops)
+    # Unpinned stops are included so an explicit porter assignment still applies
+    # to them — a handoff needs the porter point's pin, not the customer's.
+    assign_modes(conn, stops + unpinned)
+    # An unpinned order that has been assigned a handoff is no longer a problem
+    # to solve: it has somewhere to go. Move it out of the warning list.
+    handed = [s for s in unpinned if s["mode"] == "porter_handoff"]
+    unpinned = [s for s in unpinned if s["mode"] != "porter_handoff"]
 
-    riding = [s for s in stops if s["mode"] != "porter_direct"]
     porter_direct = [s for s in stops if s["mode"] == "porter_direct"]
+    handoffs = [s for s in stops + handed if s["mode"] == "porter_handoff"]
+    riding = [s for s in stops
+              if s["mode"] != "porter_direct" and s["mode"] != "porter_handoff"]
+
+    # A handoff stop is NOT ridden to the customer — the rider goes to the porter
+    # point and hands the bag over there. So the porter point is the waypoint,
+    # and several orders going to the same point are ONE visit, not several.
+    # Routing to the customer instead would send him 13 km to Nanganallur for a
+    # bag that only ever needed to reach Medavakkam, 3.8 km away, and would
+    # overpay the km allowance by the same margin.
+    for pp_id, group in _group_by_point(handoffs):
+        pp = group[0]["porter_point"]
+        if pp is None or pp["lat"] is None:
+            continue                      # unpinned porter point: cannot be ridden to
+        km, _src = road_km_from_kitchen(conn, pp["lat"], pp["lng"])
+        riding.append({
+            "is_handoff_point": True,
+            "porter_point": pp,
+            "orders": group,
+            "name": pp["name"],
+            "locality": pp["note"] or "",
+            "lat": pp["lat"], "lng": pp["lng"],
+            "km": round(km, 2),
+            "zone": zone_for_km(conn, km),
+            "corridor": (pp["serves"] or "").split(",")[0].strip() or "Local",
+            "mode": "porter_handoff", "pinned": True,
+            "delivery_id": None, "phone": None, "address": "",
+            "plan_name": f"{len(group)} order{'s' if len(group) != 1 else ''} to hand over",
+            "day_note": None, "sub_notes": "", "status": "Pending",
+            "map_note": pp["note"], "drop_type": "Porter point",
+        })
+        for o in group:
+            o["handoff_km"] = round(km, 2)
 
     bands = {z: [s for s in riding if s["zone"] == z] for z in ZONES}
     ordered = []
@@ -503,10 +591,16 @@ def build_route(conn, day_iso, slot, rows=None):
     t = _parse_hhmm(setting(conn, "depart_time"))
     for i, s in enumerate(ordered, 1):
         leg = legs[i - 1] if i - 1 < len(legs) else 0.0
-        t += timedelta(minutes=(leg / speed) * 60 + dwell)
+        # Handing several bags over at one point takes a little longer than a
+        # single drop, but not once per order — one conversation, several bags.
+        n_here = len(s.get("orders") or []) or 1
+        t += timedelta(minutes=(leg / speed) * 60 + dwell * (1 + 0.4 * (n_here - 1)))
         s["seq"] = i
         s["km_from_prev"] = round(leg, 2)
         s["eta"] = _clock(t)
+        for o in (s.get("orders") or []):
+            o["seq"] = i
+            o["eta"] = s["eta"]
     back = legs[-1] if legs else 0.0
     t += timedelta(minutes=(back / speed) * 60)
 
@@ -525,6 +619,8 @@ def build_route(conn, day_iso, slot, rows=None):
         "day": day_iso, "slot": slot,
         "stops": ordered,
         "porter_direct": porter_direct,
+        "handoffs": handoffs,          # the ORDERS handed over, not the points
+        "handoff_points": [s for s in ordered if s.get("is_handoff_point")],
         "unpinned": unpinned,
         "kitchen": {"lat": klat, "lng": klng, "confirmed": confirmed},
         "maps_url": maps_url(klat, klng, ordered),
@@ -539,8 +635,7 @@ def build_route(conn, day_iso, slot, rows=None):
         "shift_end": _clock(end),
         "over_waypoint_limit": len(ordered) > 9,
         "n_riding": len(ordered),
-        "n_porter": len(porter_direct) + sum(
-            1 for s in ordered if s["mode"] == "porter_handoff"),
+        "n_porter": len(porter_direct) + len(handoffs),
     }
 
 

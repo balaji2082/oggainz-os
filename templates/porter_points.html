@@ -41,6 +41,79 @@
 </div>
 {% endif %}
 
+{# ---------------- Assign orders to a point ---------------- #}
+<div class="card" id="assign">
+  <strong>Who hands over where</strong>
+  <p class="small muted" style="margin:4px 0 10px">
+    Pick a point for any order. This only changes <em>where the bag changes hands</em> —
+    the customer&rsquo;s address stays exactly as it is. Tick <b>every time</b> to make it
+    the standing rule for that address instead of just today.
+  </p>
+
+  <form method="get" action="{{ url_for('porter_points') }}" class="row"
+        style="align-items:flex-end;gap:10px;margin-bottom:12px">
+    <div><label>Day</label><input type="date" name="d" value="{{ day }}"></div>
+    <div><label>Slot</label>
+      <select name="slot">
+        <option value="Lunch" {{ 'selected' if slot=='Lunch' }}>Lunch</option>
+        <option value="Dinner" {{ 'selected' if slot=='Dinner' }}>Dinner</option>
+      </select></div>
+    <button class="btn btn-ghost btn-sm">Show</button>
+  </form>
+
+  {% if not points %}
+    <p class="small" style="color:#a52e20;margin:0">
+      No active porter point with a pin yet — add one below first.</p>
+  {% elif not board %}
+    <p class="muted small" style="margin:0">No orders on {{ day }} {{ slot }}.</p>
+  {% else %}
+  <form method="post" action="{{ url_for('porter_points_assign') }}">
+    <input type="hidden" name="d" value="{{ day }}">
+    <input type="hidden" name="slot" value="{{ slot }}">
+    <div class="list">
+      {% for b in board %}
+      <div class="litem" style="box-shadow:none;align-items:flex-start;flex-wrap:wrap;gap:8px">
+        <div class="grow" style="min-width:180px">
+          <div class="t">{{ b.name }}
+            {% if b.assigned %}<span class="pill pill-ok">assigned{{ ' · every time' if b.assigned_from=='address' }}</span>{% endif %}
+            {% if not b.pinned %}<span class="pill" style="background:#fdeede;color:#9c4a0f">no pin</span>{% endif %}
+          </div>
+          <div class="s">{{ b.locality }}
+            {% if b.km %} · {{ b.km }} km{% endif %}
+            {% if b.zone %} · {{ b.zone }}{% endif %}
+            {% if b.corridor %} · {{ b.corridor }}{% endif %}
+          </div>
+          <div class="s muted">{{ b.plan }}</div>
+        </div>
+        <div style="min-width:210px">
+          <select name="pp_{{ b.delivery_id }}" style="width:100%">
+            <option value="" {{ 'selected' if not b.assigned }}>
+              Decide automatically{% if not b.assigned %} — now: {{ 'Porter direct' if b.mode=='porter_direct' else ('Hand off · ' ~ b.point.name if b.mode=='porter_handoff' else 'Rider delivers') }}{% endif %}
+            </option>
+            <option value="rider" {{ 'selected' if b.assigned and b.mode=='rider' }}>Rider delivers it</option>
+            {% for p in points %}
+              <option value="{{ p.id }}"
+                {{ 'selected' if b.assigned and b.point and b.point.id==p.id }}>
+                Hand over at {{ p.code or '' }} {{ p.name }}</option>
+            {% endfor %}
+          </select>
+          {% if b.address_id %}
+            <input type="hidden" name="addr_{{ b.delivery_id }}" value="{{ b.address_id }}">
+            <label class="small muted" style="display:flex;align-items:center;gap:6px;margin-top:5px">
+              <input type="checkbox" name="always_{{ b.delivery_id }}" value="1">
+              every time for this address</label>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary btn-sm">Save assignments</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+
 {% for r in rows %}
 <div class="card" style="border-left:4px solid {{ '#004030' if r.p.active else '#cfd8d4' }}">
   <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">

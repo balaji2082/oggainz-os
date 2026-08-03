@@ -457,8 +457,13 @@ CREATE INDEX IF NOT EXISTS idx_slot_moves_sub  ON subscription_slot_moves(subscr
 MIGRATIONS = {
     # address_id = "this particular day's delivery goes to this address instead of
     # the usual one" — the one-off override that beats the weekday schedule.
+    # porter_point_id = hand this order to a Porter at that point instead of
+    # letting the automatic rule decide. NULL = decide automatically (the default,
+    # so nothing changes for orders that were never touched); 0 = the rider
+    # definitely delivers it himself; >0 = hand off at that porter point.
+    # This is a routing instruction only — the customer's address is untouched.
     "deliveries":    [("trial_id", "TEXT"), ("day_note", "TEXT"), ("day_note_at", "TEXT"),
-                      ("address_id", "INTEGER")],
+                      ("address_id", "INTEGER"), ("porter_point_id", "INTEGER")],
     "trial_orders":  [("notes", "TEXT"), ("delivery_date", "TEXT"),
                       ("meal_type", "TEXT"), ("delivery_status", "TEXT"),
                       ("plan_id", "INTEGER")],   # which pack the trial is of → prep list
@@ -476,7 +481,11 @@ MIGRATIONS = {
     "route_km_cache": [("legs", "TEXT")],
     # slot: a schedule can apply to Lunch only, Dinner only, or both (NULL).
     # "lunch at home on Mon and Fri, office the rest, dinner always home" needs it.
-    "customer_addresses": [("slot", "TEXT")],
+    #
+    # porter_point_id: the STANDING handoff for this address — "anything going to
+    # Nanganallur is handed over at Medavakkam". Saves re-assigning the same
+    # customer every single evening. A per-delivery value overrides it for one day.
+    "customer_addresses": [("slot", "TEXT"), ("porter_point_id", "INTEGER")],
 }
 
 

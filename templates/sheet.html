@@ -243,8 +243,11 @@ table.route td { border-bottom: .6pt solid #aaa; font-size: 9.7pt; }
       <div class="note" data-k="o{{ loop.index }}.nt" contenteditable="false"
            {% if not o.note %}style="display:none"{% endif %}>{% if o.note %}{{ T.note }}: {{ o.note }}{% endif %}</div>
       {% if o.stop and o.stop.mode == 'porter_handoff' %}
-        <div class="note">{{ T.porter_handoff }}: {{ o.stop.porter_point.name }}{% if o.stop.eta %} · {{ o.stop.eta }}{% endif %}</div>
-      {% elif not o.stop %}
+        <div class="note"><strong>{{ T.porter_handoff }}: {{ o.stop.porter_point.name }}</strong>{% if o.stop.eta %} · {{ o.stop.eta }}{% endif %}
+        {%- if o.stop.porter_point.note %}<br>{{ o.stop.porter_point.note }}{% endif %}</div>
+      {% elif o.stop and o.stop.mode == 'porter_direct' %}
+        <div class="note"><strong>{{ T.porter_direct }}</strong></div>
+      {% elif not o.stop or not o.stop.pinned %}
         <div class="note">{{ T.warn_unpinned }}</div>
       {% endif %}
     </div>

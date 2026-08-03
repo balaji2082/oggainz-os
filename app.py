@@ -962,19 +962,26 @@ def sheet(d, slot):
     prep_slot = prep[slot_key]
 
     # Per-order cards, in the same sequence the rider will ride.
-    by_delivery = {s["delivery_id"]: s for s in route["stops"]}
+    # Every order needs its stop, whichever list it ended up in: ridden, handed
+    # to a Porter at a point, booked direct, or still unpinned. Looking only at
+    # `stops` would print a handed-over order as though it had no location.
+    by_delivery = {}
+    for group in (route["stops"], route["handoffs"], route["porter_direct"],
+                  route["unpinned"]):
+        for s in group:
+            if s.get("delivery_id"):
+                by_delivery[s["delivery_id"]] = s
     cache, plan_cache = {}, {}
     cards, no_comp = [], []
     ordered_rows = sorted(
         [r for r in rows
          if (r["meal_type"] or "Lunch") == slot and r["status"] in ("Pending", "Delivered")],
-        key=lambda r: by_delivery[r["id"]]["seq"] if r["id"] in by_delivery else 999)
-    unpinned_by_id = {s["delivery_id"]: s for s in route["unpinned"]}
+        key=lambda r: (by_delivery.get(r["id"], {}).get("seq") or 999))
     for r in ordered_rows:
         items, label = menu.order_items(c, r, d, cache, plan_cache)
-        stop = by_delivery.get(r["id"]) or unpinned_by_id.get(r["id"])
+        stop = by_delivery.get(r["id"])
         card = {
-            "seq": by_delivery[r["id"]]["seq"] if r["id"] in by_delivery else None,
+            "seq": (stop or {}).get("seq"),
             "name": r["name"], "phone": r["phone"],
             # The address resolved for THIS day — office, home, or a one-off. The
             # label is only worth printing when the customer actually has more
@@ -1251,10 +1258,82 @@ def porter_points():
             r = ops.build_route(c, d, slot)
             for s in r["porter_direct"]:
                 uncovered.setdefault(s["corridor"], set()).add(s["name"])
+
+    # --- the assignment board: one day + slot, every order, who takes it --------
+    day = request.args.get("d") or today_iso()
+    slot = "Dinner" if request.args.get("slot") == "Dinner" else "Lunch"
+    route = ops.build_route(c, day, slot)
+    board = []
+    for s in (route["stops"] + route["handoffs"] + route["porter_direct"]
+              + route["unpinned"]):
+        if s.get("is_handoff_point") or not s.get("delivery_id"):
+            continue                      # the grouped point row is not an order
+        board.append({
+            "delivery_id": s["delivery_id"],
+            "name": s["name"],
+            "locality": s["locality"],
+            "plan": s["plan_name"],
+            "km": s.get("km"),
+            "zone": s.get("zone"),
+            "corridor": s.get("corridor"),
+            "pinned": s.get("pinned"),
+            "mode": s["mode"],
+            "point": s.get("porter_point"),
+            "assigned": bool(s.get("assigned")),
+            "assigned_from": s.get("assigned_from"),
+            "address_id": s.get("address_id"),
+        })
+    board.sort(key=lambda b: (-(b["km"] or 0), b["name"].lower()))
     c.close()
     return render_template("porter_points.html", rows=rows, corridors=ops.CORRIDORS,
                            kitchen_ok=kok, klat=klat, klng=klng,
-                           uncovered={k: sorted(v) for k, v in uncovered.items()})
+                           uncovered={k: sorted(v) for k, v in uncovered.items()},
+                           board=board, day=day, slot=slot,
+                           points=[r["p"] for r in rows if r["p"]["active"]])
+
+
+@app.route("/porter-points/assign", methods=["POST"])
+def porter_points_assign():
+    """Say who hands over where, for one day's orders.
+
+    Deliberately one form for the whole list: assigning four orders to a point
+    should be four taps and one save, not four round trips. The customer's
+    address is never touched — this only decides where the bag changes hands.
+    """
+    c = conn()
+    f = request.form
+    day = f.get("d") or today_iso()
+    slot = "Dinner" if f.get("slot") == "Dinner" else "Lunch"
+    changed = standing = 0
+    for key in f:
+        if not key.startswith("pp_"):
+            continue
+        did = key[3:]
+        raw = (f.get(key) or "").strip()
+        # "" = decide automatically, "rider" = he takes it, otherwise a point id
+        val = None if raw == "" else (0 if raw == "rider" else int(raw))
+        cur = c.execute("SELECT porter_point_id FROM deliveries WHERE id=?",
+                        (did,)).fetchone()
+        if cur is None:
+            continue
+        if (cur["porter_point_id"] if cur["porter_point_id"] is not None else None) != val:
+            c.execute("UPDATE deliveries SET porter_point_id=? WHERE id=?", (val, did))
+            changed += 1
+        # "every time" — store the same choice on the address this order goes to
+        if f.get(f"always_{did}"):
+            aid = f.get(f"addr_{did}", type=int)
+            if aid:
+                c.execute("UPDATE customer_addresses SET porter_point_id=? WHERE id=?",
+                          (val, aid))
+                standing += 1
+    c.commit(); c.close()
+    bits = []
+    if changed:
+        bits.append(f"{changed} order{'s' if changed != 1 else ''} updated")
+    if standing:
+        bits.append(f"{standing} set for every delivery")
+    flash(", ".join(bits) + "." if bits else "Nothing changed.", "ok" if bits else "")
+    return redirect(url_for("porter_points", d=day, slot=slot))
 
 
 @app.route("/porter-points/save", methods=["POST"])
