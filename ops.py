@@ -70,6 +70,12 @@ DEFAULTS = {
     # ORS silently covers a quota cap, an outage or a revoked key — the sheet is
     # never blocked on one service being up.
     "distance_provider":    "",
+    # Which route ORS should measure. 'recommended' is the default on purpose:
+    # the sheet hands the rider a GOOGLE MAPS link, so he rides Google's
+    # recommended route — main roads, not the theoretical shortest path. Paying
+    # a per-km allowance on a route he never takes underpays him by ~8%.
+    # 'shortest' is kept available for comparison.
+    "ors_preference":       "recommended",
     "routes_api_key":       "",       # Google Routes API key
     "ors_api_key":          "",       # openrouteservice.org key
     "osrm_base_url":        "",       # a self-hosted OSRM, e.g. http://host:5000
@@ -715,8 +721,12 @@ def qr_data_uri(url):
 # figure is labelled an estimate everywhere it appears — it is never presented as
 # measured, because the petrol allowance is paid on it.
 
-def _sig(points):
+def _sig(points, flavour=""):
+    """Cache key. `flavour` folds in the routing preference, so changing from
+    shortest to recommended re-measures instead of serving the old answer."""
     raw = "|".join(f"{lat:.5f},{lng:.5f}" for lat, lng in points)
+    if flavour:
+        raw += "#" + flavour
     return hashlib.sha1(raw.encode()).hexdigest()
 
 
@@ -739,7 +749,7 @@ def road_path(conn, points, use_cache=True):
     if len(points) < 2:
         return {"total_km": 0.0, "legs": [], "source": "none"}
 
-    sig = _sig(points)
+    sig = _sig(points, setting(conn, "ors_preference"))
     if use_cache:
         hit = conn.execute(
             "SELECT km, source FROM route_km_cache WHERE signature=?", (sig,)).fetchone()
@@ -753,7 +763,8 @@ def road_path(conn, points, use_cache=True):
         if provider == "google":
             got = _google_path(setting(conn, "routes_api_key"), points)
         elif provider == "ors":
-            got = _ors_path(setting(conn, "ors_api_key"), points)
+            got = _ors_path(setting(conn, "ors_api_key"), points,
+                            preference=setting(conn, "ors_preference"))
         elif provider == "osrm":
             got = _osrm_path(setting(conn, "osrm_base_url"), points)
         else:
@@ -831,20 +842,27 @@ def _google_path(api_key, points):
         return None
 
 
-def _ors_path(api_key, points, preference="shortest"):
+def _ors_path(api_key, points, preference="recommended"):
     """openrouteservice.org directions. Free tier, no card — see the ops doc.
 
-    `preference=shortest` on purpose. ORS defaults to 'recommended', which favours
-    bigger/faster roads and read ~11% long against Google for these routes; the
-    shortest-distance route came within 1%. That is also the honest basis for a
-    per-kilometre allowance — a rider on a two-wheeler takes the short way, and
-    the allowance is paid on distance ridden rather than on time saved.
+    `preference` decides WHICH route is measured, and that is the whole story
+    behind "the app says 44 km but Google Maps says 48":
 
-    ORS has no motorcycle profile; driving-car is the closest match and matches
-    what Google Maps reports for the same trips.
+      shortest    — the least-distance path. Reads ~8% under Google Maps because
+                    Google shows its *recommended* route, not the shortest one.
+      recommended — main roads, what Google Maps actually draws. The default,
+                    because the printed sheet gives the rider a Google Maps link,
+                    so this is the route he genuinely rides.
+
+    They are two different routes, not two measurements of one route. Paying a
+    per-kilometre allowance on a shortest path nobody rides underpays the rider.
+
+    ORS has no motorcycle profile; driving-car is the closest match.
     """
     if not api_key:
         return None
+    if preference not in ("shortest", "recommended", "fastest"):
+        preference = "recommended"
     body = {"coordinates": [[p[1], p[0]] for p in points],   # ORS wants lng,lat
             "preference": preference}
     req = urllib.request.Request(

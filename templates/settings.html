@@ -46,6 +46,13 @@
       <input name="ors_api_key" type="password" autocomplete="off"
              placeholder="{{ '********' if dist.has_ors else 'eyJvcm…' }}"></div>
 
+    <div class="full"><label>Which route to measure
+      <span class="muted small">the sheet hands the rider a Google Maps link, so measure the route he actually rides</span></label>
+      <select name="ors_preference">
+        <option value="recommended" {{ 'selected' if dist.ors_pref != 'shortest' }}>Recommended — main roads, matches what Google Maps shows you</option>
+        <option value="shortest" {{ 'selected' if dist.ors_pref == 'shortest' }}>Shortest — least distance, reads about 8% lower</option>
+      </select></div>
+
     <div class="full"><label>Self-hosted OSRM base URL
       <span class="muted small">only if you run your own — the public demo server is non-commercial</span></label>
       <input name="osrm_base_url" value="{{ dist.osrm_url }}" placeholder="http://your-host:5000"></div>

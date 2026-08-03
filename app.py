@@ -1877,6 +1877,9 @@ def settings_distance():
     c = conn()
     f = request.form
     db.set_setting(c, "distance_provider", (f.get("distance_provider") or "").strip())
+    pref = (f.get("ors_preference") or "").strip()
+    if pref in ("shortest", "recommended", "fastest"):
+        db.set_setting(c, "ors_preference", pref)
     for k in ("routes_api_key", "ors_api_key", "osrm_base_url"):
         v = (f.get(k) or "").strip()
         if v != "********":                     # unchanged masked value
@@ -1925,6 +1928,7 @@ def settings():
         "provider": ops.setting(c, "distance_provider"),
         "has_google": bool(ops.setting(c, "routes_api_key")),
         "has_ors": bool(ops.setting(c, "ors_api_key")),
+        "ors_pref": ops.setting(c, "ors_preference"),
         "osrm_url": ops.setting(c, "osrm_base_url"),
         "petrol_rate": ops.setting(c, "petrol_rate"),
         "z1": ops.setting(c, "zone_hyperlocal_km"),
