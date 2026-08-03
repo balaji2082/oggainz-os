@@ -234,10 +234,14 @@ def inject_globals():
     # Subscriptions whose composition the kitchen cannot see — these make the
     # prep list wrong, so they are worth a standing badge rather than a one-off.
     sub_issues = sum(1 for r in menu.audit_all(c) if r["high"])
+    # Until the real kitchen pin is set, EVERY distance, zone and allowance is
+    # measured from a placeholder ~2.7 km away — silently wrong on every screen.
+    # This warns everywhere, not just on the two pages that happen to check.
+    kitchen_unset = not ops.kitchen(c)[2]
     c.close()
     return {"g_stats": stats, "g_due": due, "g_unread": unread,
             "g_agent_ready": agent_ready, "g_unpinned": unpinned,
-            "g_sub_issues": sub_issues,
+            "g_sub_issues": sub_issues, "g_kitchen_unset": kitchen_unset,
             "active_page": request.endpoint,
             "today": date.today().strftime("%Y-%m-%d"),
             "today_str": date.today().strftime("%Y-%m-%d"),

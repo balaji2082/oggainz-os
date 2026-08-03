@@ -244,6 +244,13 @@ h3.sect{margin:4px 0 10px; padding-bottom:6px; border-bottom:2px solid var(--lin
 .botnav a.on svg{stroke:var(--lime)}
 @media(min-width:761px){ .botnav{display:none} body{padding-bottom:0} }
 
+/* ---------- Kitchen pin warning (shown on every page until it is set) ---------- */
+.kitchen-warn{background:#fbeae8; color:#8d2a1d; border-bottom:2px solid #e3b7b0;
+  padding:11px 16px; font-size:.86rem; line-height:1.45}
+.kitchen-warn b{color:#a52e20}
+.kitchen-warn a{color:#a52e20; font-weight:700; text-decoration:underline; white-space:nowrap}
+@media print{ .kitchen-warn{display:none} }
+
 /* ---------- Misc ---------- */
 .empty{text-align:center; color:var(--muted); padding:40px 18px}
 .empty .big{font-size:2.4rem; margin-bottom:6px}
