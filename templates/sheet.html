@@ -161,7 +161,7 @@ table.route td { border-bottom: .6pt solid #aaa; font-size: 9.7pt; }
   <div class="mast">
     <img src="{{ url_for('static', filename='img/logo-forest.svg') }}" alt="OG Gainz">
     <div class="t">
-      <div class="slot">{{ T[slot] }}</div>
+      <div class="slot">{{ T[slot] }}{% if batch %} · {{ batch_row.name if batch_row and batch_row.name else 'Route ' ~ batch }}{% endif %}</div>
       <div class="day">{{ day_label }}</div>
       {% if kitchen_addr %}<div class="addr">{{ kitchen_addr }}</div>{% endif %}
     </div>
@@ -179,13 +179,17 @@ table.route td { border-bottom: .6pt solid #aaa; font-size: 9.7pt; }
     <div>{{ T.t_done }}<b data-k="t.done" contenteditable="false">{{ timings.done }}</b></div>
   </div>
 
-  <div style="margin-bottom:8pt">{{ T.staff }}: <span class="fill" data-k="s.staff" contenteditable="false">{{ staff }}</span></div>
+  <div style="margin-bottom:8pt">{{ T.staff }}: <span class="fill" data-k="s.staff" contenteditable="false">{{ (batch_row.rider if batch_row and batch_row.rider else staff) }}</span></div>
 
   {% if no_comp %}
     <div class="warn"><b>!</b> {{ T.warn_nocomp }}<br><strong>{{ no_comp|join(', ') }}</strong></div>
   {% endif %}
   {% if not route.kitchen.confirmed %}
     <div class="warn noprint"><b>!</b> {{ T.warn_kitchen }}</div>
+  {% endif %}
+  {% if unrouted %}
+    <div class="warn"><b>!</b> Not on any route yet — decide who carries these:<br>
+      <strong>{{ unrouted|join(', ') }}</strong></div>
   {% endif %}
 
   <div class="sec">{{ T.sec_prep }}</div>

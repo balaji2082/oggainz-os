@@ -375,6 +375,28 @@ CREATE TABLE IF NOT EXISTS porter_points (
     sort   INTEGER DEFAULT 100
 );
 
+-- A slot can be split into several routes ridden by different people — Balaji
+-- takes the West run while his father takes OMR, and a hired rider takes one
+-- whole batch. One row per (date, slot, batch). Everything that used to be
+-- per-shift — km, allowance, who rode it — is per BATCH once a slot is split,
+-- because two people riding two directions must be paid on their own distance.
+CREATE TABLE IF NOT EXISTS route_batches (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    date       TEXT NOT NULL,               -- YYYY-MM-DD
+    slot       TEXT NOT NULL,               -- Lunch / Dinner
+    batch_no   INTEGER NOT NULL,            -- 1..n, the printed run number
+    name       TEXT,                        -- 'West run', 'OMR run'
+    rider      TEXT,                        -- free text; a datalist keeps spelling steady
+    est_km     REAL,                        -- computed for this batch alone
+    actual_km  REAL,                        -- rider-corrected; payroll uses this
+    allowance  REAL,
+    depart_at  TEXT,
+    notes      TEXT,
+    created_at TEXT,
+    UNIQUE(date, slot, batch_no)
+);
+CREATE INDEX IF NOT EXISTS idx_batches_day ON route_batches(date, slot);
+
 -- One row per date+slot: the frozen record of a delivery shift. The route is
 -- snapshotted into route_json so the printed sheet always matches what actually
 -- ran, even if a subscription changes afterwards.
@@ -462,8 +484,11 @@ MIGRATIONS = {
     # so nothing changes for orders that were never touched); 0 = the rider
     # definitely delivers it himself; >0 = hand off at that porter point.
     # This is a routing instruction only — the customer's address is untouched.
+    # batch_no = which of the slot's routes this order rides on. NULL = not split
+    # (one route, exactly as before), so existing days are untouched.
     "deliveries":    [("trial_id", "TEXT"), ("day_note", "TEXT"), ("day_note_at", "TEXT"),
-                      ("address_id", "INTEGER"), ("porter_point_id", "INTEGER")],
+                      ("address_id", "INTEGER"), ("porter_point_id", "INTEGER"),
+                      ("batch_no", "INTEGER")],
     "trial_orders":  [("notes", "TEXT"), ("delivery_date", "TEXT"),
                       ("meal_type", "TEXT"), ("delivery_status", "TEXT"),
                       ("plan_id", "INTEGER")],   # which pack the trial is of → prep list
@@ -485,7 +510,10 @@ MIGRATIONS = {
     # porter_point_id: the STANDING handoff for this address — "anything going to
     # Nanganallur is handed over at Medavakkam". Saves re-assigning the same
     # customer every single evening. A per-delivery value overrides it for one day.
-    "customer_addresses": [("slot", "TEXT"), ("porter_point_id", "INTEGER")],
+    # batch_no here is the STANDING preference — "Nanganallur always rides with
+    # the West run" — so only the exceptions need touching each evening.
+    "customer_addresses": [("slot", "TEXT"), ("porter_point_id", "INTEGER"),
+                           ("batch_no", "INTEGER")],
 }
 
 

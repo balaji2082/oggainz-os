@@ -952,11 +952,31 @@ def sheet(d, slot):
     """
     slot = "Dinner" if (slot or "").lower().startswith("d") else "Lunch"
     lang = "ta" if request.args.get("lang") == "ta" else "en"
+    batch = request.args.get("batch", type=int)
     c = conn()
 
     rows = core.deliveries_for_day(c, d)
     prep = menu.prep_for_day(c, d, rows=rows)
-    route = ops.build_route(c, d, slot, rows=rows)   # distances already road-based
+    # `batch` prints one rider's run. The prep list deliberately stays whole-slot:
+    # the kitchen cooks everything once, however many people carry it out.
+    route = ops.build_route(c, d, slot, rows=rows, batch=batch)
+
+    batch_row = None
+    unrouted = []
+    if batch is not None:
+        batch_row = c.execute(
+            "SELECT * FROM route_batches WHERE date=? AND slot=? AND batch_no=?",
+            (d, slot, batch)).fetchone()
+        # An order nobody has put on a route would otherwise appear on no sheet
+        # at all. It still has to be cooked and delivered, so it is printed here
+        # as a warning rather than silently dropped.
+        for r in rows:
+            if (r["meal_type"] or "Lunch") != slot:
+                continue
+            if r["status"] not in ("Pending", "Delivered"):
+                continue
+            if r["batch_no"] is None:
+                unrouted.append(r["name"])
 
     slot_key = "dinner" if slot == "Dinner" else "lunch"
     prep_slot = prep[slot_key]
@@ -975,7 +995,9 @@ def sheet(d, slot):
     cards, no_comp = [], []
     ordered_rows = sorted(
         [r for r in rows
-         if (r["meal_type"] or "Lunch") == slot and r["status"] in ("Pending", "Delivered")],
+         if (r["meal_type"] or "Lunch") == slot and r["status"] in ("Pending", "Delivered")
+         # printing one run shows only that run's orders
+         and (batch is None or r["id"] in by_delivery)],
         key=lambda r: (by_delivery.get(r["id"], {}).get("seq") or 999))
     for r in ordered_rows:
         items, label = menu.order_items(c, r, d, cache, plan_cache)
@@ -1024,6 +1046,7 @@ def sheet(d, slot):
         comps=comps, cards=cards, route=route, no_comp=no_comp, ov=ov,
         qr=ops.qr_data_uri(route["maps_url"]), timings=timings,
         staff=staff, kitchen_addr=kitchen_addr,
+        batch=batch, batch_row=batch_row, unrouted=unrouted,
         day_label=fmt_date(d, "%A, %d %b %Y"),
         autoprint=request.args.get("print") == "1")
 
@@ -1228,6 +1251,123 @@ def api_delivery_address(did):
                     "label": addr["label"] if addr else None,
                     "address": (addr["address"] if addr else "") or "",
                     "override": bool(aid)})
+
+
+# ---------------------------------------------------------------------------
+# Route batches — splitting a slot between riders
+# ---------------------------------------------------------------------------
+@app.route("/routes")
+def routes_board():
+    """Split one slot into several runs, one per rider.
+
+    Ten lunch orders are not one person's run: Tambaram and Sholinganallur are
+    opposite directions. Each batch gets its own route, its own km and its own
+    ₹3/km allowance, because two people riding two directions must be paid on
+    their own distance.
+    """
+    c = conn()
+    day = request.args.get("d") or today_iso()
+    slot = "Dinner" if request.args.get("slot") == "Dinner" else "Lunch"
+    n = request.args.get("n", type=int) or None
+
+    saved = ops.batch_rows(c, day, slot)
+    if n is None:
+        n = max(len(saved), 2)
+    n = max(1, min(n, 6))
+    ops.ensure_batches(c, day, slot, n)
+    saved = ops.batch_rows(c, day, slot)
+
+    whole = ops.build_route(c, day, slot, split=False)
+    orders = []
+    for s in (whole["stops"] + whole["handoffs"] + whole["porter_direct"]
+              + whole["unpinned"]):
+        if s.get("is_handoff_point") or not s.get("delivery_id"):
+            continue
+        orders.append({
+            "delivery_id": s["delivery_id"], "name": s["name"],
+            "locality": s["locality"], "plan": s["plan_name"],
+            "km": s.get("km"), "zone": s.get("zone"),
+            "corridor": s.get("corridor"), "pinned": s.get("pinned"),
+            "mode": s["mode"], "batch_no": s.get("batch_no"),
+            "standing": s.get("standing_batch"), "address_id": s.get("address_id"),
+        })
+    orders.sort(key=lambda o: ((o["corridor"] or "zz"), -(o["km"] or 0),
+                               o["name"].lower()))
+
+    # Per-batch route, so each rider's km and allowance are their own.
+    per = []
+    for b in saved:
+        r = ops.build_route(c, day, slot, batch=b["batch_no"])
+        per.append({"b": b, "route": r,
+                    "n": len(r["stops"]) + len(r["porter_direct"]) + len(r["unpinned"])})
+    riders = [r["rider"] for r in c.execute(
+        "SELECT DISTINCT rider FROM route_batches WHERE rider IS NOT NULL "
+        "AND rider != '' ORDER BY rider")]
+    unassigned = sum(1 for o in orders if not o["batch_no"])
+    c.close()
+    return render_template("routes.html", day=day, slot=slot, n=n, orders=orders,
+                           per=per, riders=riders, unassigned=unassigned,
+                           whole=whole)
+
+
+@app.route("/routes/suggest", methods=["POST"])
+def routes_suggest():
+    """Propose a split by direction. Standing choices are kept, not overwritten."""
+    c = conn()
+    day = request.form.get("d") or today_iso()
+    slot = "Dinner" if request.form.get("slot") == "Dinner" else "Lunch"
+    n = max(1, min(request.form.get("n", type=int) or 2, 6))
+    ops.ensure_batches(c, day, slot, n)
+    plan = ops.suggest_batches(c, day, slot, n)
+    for did, b in plan.items():
+        c.execute("UPDATE deliveries SET batch_no=? WHERE id=?", (b, did))
+    c.commit(); c.close()
+    flash(f"Suggested a split into {n} routes. Adjust anything, then save.", "ok")
+    return redirect(url_for("routes_board", d=day, slot=slot, n=n))
+
+
+@app.route("/routes/save", methods=["POST"])
+def routes_save():
+    c = conn()
+    f = request.form
+    day = f.get("d") or today_iso()
+    slot = "Dinner" if f.get("slot") == "Dinner" else "Lunch"
+    n = max(1, min(f.get("n", type=int) or 2, 6))
+
+    for i in range(1, n + 1):
+        c.execute("UPDATE route_batches SET name=?, rider=?, actual_km=? "
+                  "WHERE date=? AND slot=? AND batch_no=?",
+                  ((f.get(f"bname_{i}") or "").strip() or f"Route {i}",
+                   (f.get(f"rider_{i}") or "").strip() or None,
+                   f.get(f"actual_{i}", type=float),
+                   day, slot, i))
+    moved = standing = 0
+    for key in f:
+        if not key.startswith("b_"):
+            continue
+        did = key[2:]
+        raw = (f.get(key) or "").strip()
+        val = None if raw == "" else max(1, min(int(raw), n))
+        cur = c.execute("SELECT batch_no FROM deliveries WHERE id=?", (did,)).fetchone()
+        if cur is None:
+            continue
+        if cur["batch_no"] != val:
+            c.execute("UPDATE deliveries SET batch_no=? WHERE id=?", (val, did))
+            moved += 1
+        if f.get(f"always_{did}"):
+            aid = f.get(f"addr_{did}", type=int)
+            if aid:
+                c.execute("UPDATE customer_addresses SET batch_no=? WHERE id=?",
+                          (val, aid))
+                standing += 1
+    c.commit(); c.close()
+    bits = []
+    if moved:
+        bits.append(f"{moved} order{'s' if moved != 1 else ''} moved")
+    if standing:
+        bits.append(f"{standing} set for every delivery")
+    flash(", ".join(bits) + "." if bits else "Routes saved.", "ok")
+    return redirect(url_for("routes_board", d=day, slot=slot, n=n))
 
 
 # ---------------------------------------------------------------------------

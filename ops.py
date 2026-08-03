@@ -376,10 +376,20 @@ def _stop_from_row(conn, r, klat, klng, day_iso=None, acache=None):
         assigned = addr["porter_point_id"]
         assigned_from = "address" if assigned is not None else None
 
+    # Which route this order rides on. The order's own value wins; otherwise the
+    # standing preference saved on the address ("Nanganallur always rides West").
+    batch_no = r["batch_no"] if "batch_no" in keys else None
+    standing = (addr["batch_no"]
+                if addr is not None and "batch_no" in addr.keys() else None)
+    if batch_no is None:
+        batch_no = standing
+
     name = r["name"] or "—"
     base = {
         "assigned_point": assigned,
         "assigned_from": assigned_from,
+        "batch_no": batch_no,
+        "standing_batch": standing,
         "delivery_id": r["id"],
         "name": name,
         "phone": r["phone"],
@@ -496,6 +506,94 @@ def assign_modes(conn, stops):
     return stops
 
 
+# ---------------------------------------------------------------------------
+# Splitting a slot into several routes, one per rider
+# ---------------------------------------------------------------------------
+# Ten lunch orders are not one person's run. Tambaram and Sholinganallur are
+# opposite directions out of Perumbakkam, and riding both is an hour of wasted
+# road. Today Balaji takes one direction and his father the other; a hired rider
+# takes one whole batch. So a slot splits into batches, and each batch is its own
+# route with its own km and its own allowance.
+
+# Which corridors sit together naturally. West and Local share the same roads out
+# of Perumbakkam; OMR-N and OMR-S share the other. Keeping these pairs whole is
+# what stops the suggestion cutting a run in half down the middle of one road.
+CORRIDOR_SIDE = {"West": "West", "Local": "West",
+                 "OMR-N": "OMR", "OMR-S": "OMR"}
+
+
+def suggest_batches(conn, day_iso, slot, n_batches=2):
+    """Propose which order rides on which route. Returns {delivery_id: batch_no}.
+
+    Groups by direction first, then balances. A customer with a standing batch
+    on their address keeps it — those are decisions already made, and the
+    suggestion must not quietly undo them.
+    """
+    n_batches = max(1, min(int(n_batches or 2), 6))
+    route = build_route(conn, day_iso, slot, split=False)
+    stops = [s for s in route["stops"] if s.get("delivery_id")]
+    stops += route["handoffs"] + route["porter_direct"] + route["unpinned"]
+
+    # How finely to cut. Two routes → the two sides out of Perumbakkam, which is
+    # the split Balaji and his father already ride. Three or more → individual
+    # corridors, otherwise everything past the second route comes out empty.
+    def key_of(s):
+        corr = s.get("corridor") or "Local"
+        return CORRIDOR_SIDE.get(corr, "West") if n_batches <= 2 else corr
+
+    out, groups = {}, {}
+    for s in stops:
+        did = s.get("delivery_id")
+        if not did:
+            continue
+        if s.get("standing_batch"):
+            out[did] = min(int(s["standing_batch"]), n_batches)
+            continue
+        groups.setdefault(key_of(s), []).append(s)
+
+    # Still fewer groups than routes? Cut the biggest one by distance — the far
+    # half and the near half of a corridor are a sensible pair of runs.
+    while len(groups) < n_batches and any(len(v) > 1 for v in groups.values()):
+        big = max(groups, key=lambda k: len(groups[k]))
+        members = sorted(groups[big], key=lambda s: -(s.get("km") or 0))
+        half = max(1, len(members) // 2)
+        groups[big], groups[f"{big} (near)"] = members[:half], members[half:]
+
+    # Load already carried by the standing assignments, so the rest balances
+    # around them rather than ignoring them.
+    load = {i: 0.0 for i in range(1, n_batches + 1)}
+    for b in out.values():
+        load[b] = load.get(b, 0) + 1
+
+    # Biggest direction first into the emptiest route.
+    for _key, members in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+        target = min(load, key=lambda b: (load[b], b))
+        for s in members:
+            out[s["delivery_id"]] = target
+            load[target] += 1
+    return out
+
+
+def batch_rows(conn, day_iso, slot):
+    """The saved batches for a slot, always at least one."""
+    rows = [dict(r) for r in conn.execute(
+        "SELECT * FROM route_batches WHERE date=? AND slot=? ORDER BY batch_no",
+        (day_iso, slot))]
+    return rows
+
+
+def ensure_batches(conn, day_iso, slot, n):
+    """Make sure batch rows 1..n exist; never deletes one that has orders on it."""
+    have = {r["batch_no"] for r in batch_rows(conn, day_iso, slot)}
+    for i in range(1, n + 1):
+        if i not in have:
+            conn.execute(
+                "INSERT INTO route_batches(date,slot,batch_no,name,created_at) "
+                "VALUES(?,?,?,?,?)",
+                (day_iso, slot, i, f"Route {i}", db.now_iso()))
+    conn.commit()
+
+
 def _group_by_point(handoffs):
     """[(porter_point_id, [stops])] — several orders to one point are one visit."""
     groups = {}
@@ -507,12 +605,17 @@ def _group_by_point(handoffs):
     return sorted(groups.items())
 
 
-def build_route(conn, day_iso, slot, rows=None):
+def build_route(conn, day_iso, slot, rows=None, batch=None, split=True):
     """The evening's route: ordered stops, modes, ETAs, Maps URL, km, allowance.
 
     Ordering (Cowork §5.4): hyperlocal cluster → near band → porter handoff →
     mid band → back to the kitchen. Long stops the rider actually carries are
     slotted after mid; long stops going by Porter never enter the riding order.
+
+    `batch` limits the route to one of the slot's runs — each rider's own route,
+    with its own km and its own allowance. None means the whole slot, which is
+    also exactly what happens on a day nobody has split.
+    `split=False` ignores batching entirely; used when proposing a split.
     """
     import core
     if rows is None:
@@ -529,6 +632,8 @@ def build_route(conn, day_iso, slot, rows=None):
         if r["status"] not in ("Pending", "Delivered"):
             continue          # Skipped/Off orders are not cooked and not ridden
         s = _stop_from_row(conn, r, klat, klng, day_iso, acache)
+        if split and batch is not None and s["batch_no"] != int(batch):
+            continue
         (stops if s["pinned"] else unpinned).append(s)
 
     # Unpinned stops are included so an explicit porter assignment still applies
@@ -622,7 +727,7 @@ def build_route(conn, day_iso, slot, rows=None):
     late_by = int((t - end).total_seconds() // 60) if ordered else 0
 
     return {
-        "day": day_iso, "slot": slot,
+        "day": day_iso, "slot": slot, "batch": batch,
         "stops": ordered,
         "porter_direct": porter_direct,
         "handoffs": handoffs,          # the ORDERS handed over, not the points

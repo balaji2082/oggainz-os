@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Routes · OG Gainz{% endblock %}
+{% block content %}
+
+<div class="page-head"><h1 style="margin:0">Routes for the run</h1></div>
+
+<p class="muted" style="margin:-4px 0 14px">
+  Split a slot between riders. Tambaram and Sholinganallur are opposite directions —
+  riding both is an hour of wasted road. Each route gets its own map, its own km and
+  its own ₹3/km allowance.
+</p>
+
+<form method="get" action="{{ url_for('routes_board') }}" class="card row"
+      style="align-items:flex-end;gap:10px">
+  <div><label>Day</label><input type="date" name="d" value="{{ day }}"></div>
+  <div><label>Slot</label>
+    <select name="slot">
+      <option value="Lunch" {{ 'selected' if slot=='Lunch' }}>Lunch</option>
+      <option value="Dinner" {{ 'selected' if slot=='Dinner' }}>Dinner</option>
+    </select></div>
+  <div><label>Routes</label>
+    <select name="n">
+      {% for i in [1,2,3,4,5,6] %}
+        <option value="{{ i }}" {{ 'selected' if n==i }}>{{ i }}</option>
+      {% endfor %}
+    </select></div>
+  <button class="btn btn-ghost btn-sm">Show</button>
+</form>
+
+{% if not orders %}
+  <div class="card"><p class="muted" style="margin:0">No orders for {{ day }} {{ slot }}.</p></div>
+{% else %}
+
+{% if unassigned %}
+<div class="card" style="border-left:4px solid #e9762b">
+  <strong>{{ unassigned }} order{{ 's' if unassigned != 1 }} not on any route yet</strong>
+  <p class="small muted" style="margin:4px 0 8px">
+    They still get cooked and packed — they just aren&rsquo;t on anyone&rsquo;s run.
+  </p>
+  <form method="post" action="{{ url_for('routes_suggest') }}">
+    <input type="hidden" name="d" value="{{ day }}">
+    <input type="hidden" name="slot" value="{{ slot }}">
+    <input type="hidden" name="n" value="{{ n }}">
+    <button class="btn btn-primary btn-sm">Suggest a split into {{ n }} routes</button>
+  </form>
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('routes_save') }}">
+<input type="hidden" name="d" value="{{ day }}">
+<input type="hidden" name="slot" value="{{ slot }}">
+<input type="hidden" name="n" value="{{ n }}">
+
+{# ---- each route: who rides it, how far, and the map ---- #}
+{% for p in per %}
+<div class="card" style="border-left:4px solid #004030">
+  <div class="row" style="gap:10px;align-items:flex-end">
+    <div style="flex:1;min-width:130px"><label>Route {{ p.b.batch_no }} name</label>
+      <input name="bname_{{ p.b.batch_no }}" value="{{ p.b.name or '' }}"
+             placeholder="West run"></div>
+    <div style="flex:1;min-width:130px"><label>Rider</label>
+      <input name="rider_{{ p.b.batch_no }}" value="{{ p.b.rider or '' }}"
+             list="riderlist" placeholder="Name"></div>
+    <div style="width:110px"><label>Actual km</label>
+      <input name="actual_{{ p.b.batch_no }}" type="number" step="any"
+             value="{{ p.b.actual_km if p.b.actual_km is not none else '' }}"
+             placeholder="{{ p.route.est_km }}"></div>
+  </div>
+
+  <div class="row small" style="gap:14px;margin-top:8px;align-items:center">
+    <span><strong>{{ p.n }}</strong> order{{ 's' if p.n != 1 }}</span>
+    <span><strong>{{ p.route.est_km }} km</strong>
+      <span class="muted">{{ 'measured' if p.route.measured else 'estimate' }}</span></span>
+    <span>allowance <strong>₹{{ p.route.allowance }}</strong></span>
+    {% if p.route.return_eta %}<span class="muted">back {{ p.route.return_eta }}</span>{% endif %}
+    {% if p.route.late_by %}<span style="color:#a52e20">{{ p.route.late_by }} min late</span>{% endif %}
+  </div>
+
+  {% if p.route.stops %}
+  <div class="small muted" style="margin-top:6px">
+    {% for s in p.route.stops %}{{ s.seq }}. {{ s.name }}{% if not loop.last %} → {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="row" style="gap:8px;margin-top:9px">
+    {% if p.route.stops %}
+      <a class="btn btn-ghost btn-sm" href="{{ p.route.maps_url }}" target="_blank" rel="noopener">Open map</a>
+    {% endif %}
+    <a class="btn btn-ghost btn-sm"
+       href="{{ url_for('sheet', d=day, slot=slot, batch=p.b.batch_no) }}">Print sheet</a>
+  </div>
+</div>
+{% endfor %}
+
+<datalist id="riderlist">
+  {% for r in riders %}<option value="{{ r }}">{% endfor %}
+</datalist>
+
+{# ---- every order, and which route it rides ---- #}
+<div class="card">
+  <strong>Which route each order rides</strong>
+  <p class="small muted" style="margin:4px 0 10px">
+    Grouped by direction. Tick <b>every time</b> to make it the standing choice for
+    that address.
+  </p>
+  <div class="list">
+    {% for o in orders %}
+    <div class="litem" style="box-shadow:none;align-items:flex-start;flex-wrap:wrap;gap:8px">
+      <div class="grow" style="min-width:170px">
+        <div class="t">{{ o.name }}
+          {% if o.standing %}<span class="pill pill-ok">every time</span>{% endif %}
+          {% if not o.pinned %}<span class="pill" style="background:#fdeede;color:#9c4a0f">no pin</span>{% endif %}
+        </div>
+        <div class="s">{{ o.locality }}
+          {% if o.corridor %} · <strong>{{ o.corridor }}</strong>{% endif %}
+          {% if o.km %} · {{ o.km }} km{% endif %}
+          {% if o.mode == 'porter_handoff' %} · hand off{% elif o.mode == 'porter_direct' %} · Porter direct{% endif %}
+        </div>
+      </div>
+      <div style="min-width:150px">
+        <select name="b_{{ o.delivery_id }}" style="width:100%">
+          <option value="" {{ 'selected' if not o.batch_no }}>— not on a route —</option>
+          {% for i in range(1, n + 1) %}
+            <option value="{{ i }}" {{ 'selected' if o.batch_no == i }}>Route {{ i }}</option>
+          {% endfor %}
+        </select>
+        {% if o.address_id %}
+          <input type="hidden" name="addr_{{ o.delivery_id }}" value="{{ o.address_id }}">
+          <label class="small muted" style="display:flex;align-items:center;gap:6px;margin-top:5px">
+            <input type="checkbox" name="always_{{ o.delivery_id }}" value="1">
+            every time</label>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="form-actions" style="gap:8px">
+    <button class="btn btn-primary btn-sm">Save routes</button>
+    <button class="btn btn-ghost btn-sm" formaction="{{ url_for('routes_suggest') }}">Re-suggest</button>
+  </div>
+</div>
+</form>
+{% endif %}
+
+{% endblock %}

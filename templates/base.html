@@ -28,7 +28,7 @@
       {# Without this, a laptop has no way at all to reach the shift sheet, map
          pins, porter points, menu, invoices or brochure — the bottom nav that
          holds them is hidden above 760px. #}
-      <a href="{{ url_for('more') }}" class="{{ 'on' if nav in ['more','sheet','pins','porter_points','menu_editor','invoices','deliveries','subscriptions_review','brochure_public','agent_home'] }}">More
+      <a href="{{ url_for('more') }}" class="{{ 'on' if nav in ['more','sheet','pins','porter_points','routes_board','menu_editor','invoices','deliveries','subscriptions_review','brochure_public','agent_home'] }}">More
         {% if g_unpinned or g_sub_issues %}<span class="navbadge">{{ (g_unpinned or 0) + (g_sub_issues or 0) }}</span>{% endif %}</a>
     </nav>
     <a class="bell {{ 'on' if nav=='notifications' }}" href="{{ url_for('notifications') }}" title="OG Agent notifications">
