@@ -961,6 +961,19 @@ def sheet(d, slot):
     # the kitchen cooks everything once, however many people carry it out.
     route = ops.build_route(c, d, slot, rows=rows, batch=batch)
 
+    # Every route for this slot, so the sheet can offer a switcher. Without this
+    # the split is invisible: you open the sheet, see all nine orders, and have
+    # no way to know two runs exist or how to reach them.
+    batches = []
+    for b in ops.batch_rows(c, d, slot):
+        n = c.execute(
+            "SELECT COUNT(*) n FROM deliveries WHERE date=? AND meal_type=? "
+            "AND batch_no=? AND status IN ('Pending','Delivered')",
+            (d, slot, b["batch_no"])).fetchone()["n"]
+        if n:
+            b["n"] = n
+            batches.append(b)
+
     batch_row = None
     unrouted = []
     if batch is not None:
@@ -1046,7 +1059,7 @@ def sheet(d, slot):
         comps=comps, cards=cards, route=route, no_comp=no_comp, ov=ov,
         qr=ops.qr_data_uri(route["maps_url"]), timings=timings,
         staff=staff, kitchen_addr=kitchen_addr,
-        batch=batch, batch_row=batch_row, unrouted=unrouted,
+        batch=batch, batch_row=batch_row, unrouted=unrouted, batches=batches,
         day_label=fmt_date(d, "%A, %d %b %Y"),
         autoprint=request.args.get("print") == "1")
 

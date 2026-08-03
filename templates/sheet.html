@@ -140,8 +140,8 @@ table.route td { border-bottom: .6pt solid #aaa; font-size: 9.7pt; }
 
 <div class="bar noprint">
   <a href="{{ url_for('today') }}">‹ Command Center</a>
-  <a class="{{ 'on' if lang=='en' }}" href="{{ url_for('sheet', d=d, slot=slot, lang='en') }}">English</a>
-  <a class="{{ 'on' if lang=='ta' }}" href="{{ url_for('sheet', d=d, slot=slot, lang='ta') }}">தமிழ்</a>
+  <a class="{{ 'on' if lang=='en' }}" href="{{ url_for('sheet', d=d, slot=slot, lang='en', batch=batch) }}">English</a>
+  <a class="{{ 'on' if lang=='ta' }}" href="{{ url_for('sheet', d=d, slot=slot, lang='ta', batch=batch) }}">தமிழ்</a>
   <a class="{{ 'on' if slot=='Lunch' }}" href="{{ url_for('sheet', d=d, slot='Lunch', lang=lang) }}">Lunch</a>
   <a class="{{ 'on' if slot=='Dinner' }}" href="{{ url_for('sheet', d=d, slot='Dinner', lang=lang) }}">Dinner</a>
   <button id="editBtn" type="button">✎ Edit sheet</button>
@@ -153,6 +153,22 @@ table.route td { border-bottom: .6pt solid #aaa; font-size: 9.7pt; }
   <span id="saveState"></span>
   <span class="hint">Edit anything, then print. Your changes are saved and stay on this sheet.</span>
 </div>
+
+{# The split is otherwise invisible from here: you would see every order and
+   have no way to know two runs exist. One sheet per rider, one tap away. #}
+{% if batches %}
+<div class="bar noprint" style="border-top:0">
+  <span class="hint" style="font-weight:700;color:#004030">Print for:</span>
+  <a class="{{ 'on' if batch is none }}"
+     href="{{ url_for('sheet', d=d, slot=slot, lang=lang) }}">Everyone</a>
+  {% for b in batches %}
+    <a class="{{ 'on' if batch == b.batch_no }}"
+       href="{{ url_for('sheet', d=d, slot=slot, lang=lang, batch=b.batch_no) }}">
+      {{ b.name or ('Route ' ~ b.batch_no) }}{% if b.rider %} · {{ b.rider }}{% endif %} ({{ b.n }})</a>
+  {% endfor %}
+  <a href="{{ url_for('routes_board', d=d, slot=slot) }}">✎ Change routes</a>
+</div>
+{% endif %}
 
 {# ============================ PAGE 1 — BATCH PREP ============================ #}
 <div class="page">
