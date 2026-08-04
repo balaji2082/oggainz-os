@@ -330,6 +330,38 @@ CREATE TABLE IF NOT EXISTS brochure_sections (
     updated_at TEXT
 );
 
+-- ===================== CUSTOMER REQUESTS =====================
+-- Skip / pause / resume asked for by the customer in the OG Gainz app.
+-- A row is written for EVERY action, including ones applied instantly
+-- (outcome = 'auto_applied'), because without that history there is nothing to
+-- screen a repeat late-asker against.
+--
+-- cutoff_at and minutes_late are STORED, never recomputed. The cutoff is a
+-- setting and it will change; history has to keep saying how late a request was
+-- against the rule that was actually in force at the time.
+CREATE TABLE IF NOT EXISTS skip_requests (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id     TEXT NOT NULL,
+    subscription_id TEXT,
+    kind            TEXT NOT NULL,   -- skip | pause | resume | undo
+    target_date     TEXT,            -- for skip / resume
+    start_date      TEXT,            -- for pause
+    end_date        TEXT,
+    requested_at    TEXT NOT NULL,
+    cutoff_at       TEXT NOT NULL,   -- the deadline that applied AT THE TIME
+    minutes_late    INTEGER NOT NULL DEFAULT 0,
+    reason          TEXT,
+    outcome         TEXT NOT NULL,   -- auto_applied | pending | allowed | declined
+    decided_at      TEXT,
+    decided_by      TEXT,
+    decline_reason  TEXT,
+    source          TEXT DEFAULT 'app'
+);
+CREATE INDEX IF NOT EXISTS idx_skipreq_pending
+    ON skip_requests(outcome, requested_at);
+CREATE INDEX IF NOT EXISTS idx_skipreq_customer
+    ON skip_requests(customer_id, requested_at);
+
 -- ---------------------------------------------------------------------------
 -- Evening ops: geography, routing and the rider's shift record
 -- ---------------------------------------------------------------------------
@@ -513,7 +545,60 @@ MIGRATIONS = {
     # batch_no here is the STANDING preference — "Nanganallur always rides with
     # the West run" — so only the exceptions need touching each evening.
     "customer_addresses": [("slot", "TEXT"), ("porter_point_id", "INTEGER"),
-                           ("batch_no", "INTEGER")],
+                           ("batch_no", "INTEGER"),
+                           # Who put this pin here. A customer can drop their own
+                           # from the app, and Balaji can correct any of them by
+                           # hand — when the two disagree the admin pin wins until
+                           # the customer edits it again, so we have to know which
+                           # of the two set the one currently stored.
+                           ("pin_source", "TEXT"),      # customer | admin
+                           ("pin_set_at", "TEXT")],
+    # --- added Aug 2026 for the OG Gainz app (og-gainz-app/docs/03 §2.1) ---
+    # ALL of these are defaults-only: every one of them leaves existing packs
+    # behaving exactly as they do today. Nothing here switches anything on.
+    #
+    # enforce_validity: packs expire in the brochure but nothing has ever
+    # enforced it, and most current packs were sold with validity waived or never
+    # mentioned. So validity is opt-in PER SUBSCRIPTION and defaults to OFF — not
+    # one existing pack starts expiring because this shipped. Turning it on is a
+    # decision Balaji makes one pack at a time.
+    # late_delivery_agreed: a few far orders legitimately arrive after the 8 PM
+    # promise, agreed with the customer before they subscribed. Nothing records
+    # that today, so an ETA past 8 PM cannot tell "expected" from "problem".
+    "subscriptions": [("enforce_validity", "INTEGER DEFAULT 0"),
+                      ("expires_on", "TEXT"),
+                      ("validity_note", "TEXT"),
+                      ("late_delivery_agreed", "INTEGER DEFAULT 0")],
+    # The negotiated add-on rate. The catalog price is a starting suggestion, not
+    # a constraint — Ashok pays ~₹49 per 50g of chicken where the catalog says
+    # ₹60. Today that difference gets absorbed into the typed total and the
+    # reason disappears, so six months later nobody can reconstruct the bill.
+    "subscription_components": [("agreed_price", "REAL"), ("price_note", "TEXT")],
+}
+
+# Settings the app reads, with the values that are true today. Seeded once and
+# never overwritten — if Balaji changes the cutoff, a later deploy must not
+# quietly put it back. There must be exactly ONE place that knows what time the
+# cutoff is, and this is it: the countdown, the server-side check and the
+# published terms all read from here rather than each holding their own constant.
+APP_SETTINGS_DEFAULTS = {
+    "skip_cutoff_time":        "18:00",
+    "skip_cutoff_applies_to":  "calendar_day",
+    "late_requests_allowed":   "1",
+    "pause_max_days":          "",          # empty = unlimited
+    "freeze_eligible_plans":   "Elite Meal Pack,Athlete Meal Pack",
+    # Customer-facing delivery PROMISE — not the staff shift. All food is
+    # delivered by 8 PM; shift_end (21:00) is a payroll number and must never be
+    # shown to a customer as a delivery window.
+    "delivery_promise_lunch":  "11:00-13:45",
+    "delivery_promise_dinner": "17:30-20:00",
+    # Delivery-FEE bands, which are not the same thing as the routing zone bands
+    # (zone_hyperlocal_km / zone_near_km / zone_mid_km). Those decide the riding
+    # order; these decide what the customer is charged, and today they exist only
+    # in Balaji's head. Kept apart on purpose so changing one cannot move the other.
+    "fee_band_free_km":        "5",
+    "fee_band_mid_km":         "10",
+    "fee_band_far_km":         "15",
 }
 
 
@@ -527,6 +612,20 @@ def migrate(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_deliveries_trial ON deliveries(trial_id)")
     conn.commit()
     backfill_addresses(conn)
+    seed_app_settings(conn)
+
+
+def seed_app_settings(conn):
+    """Write each APP_SETTINGS_DEFAULTS key ONCE, only if it isn't there yet.
+
+    Deliberately not `set_setting` — that would overwrite. A value Balaji has
+    edited must survive every future deploy.
+    """
+    for key, value in APP_SETTINGS_DEFAULTS.items():
+        row = conn.execute("SELECT 1 FROM settings WHERE key=?", (key,)).fetchone()
+        if row is None:
+            conn.execute("INSERT INTO settings(key, value) VALUES(?, ?)", (key, value))
+    conn.commit()
 
 
 def backfill_addresses(conn):

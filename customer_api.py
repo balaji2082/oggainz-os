@@ -1,0 +1,299 @@
+"""
+OG Gainz Command Center — the customer API (read-only).
+
+The seam between the Command Center and the new OG Gainz app
+(`Projects/og-gainz-app`). Build-order step 2 of `og-gainz-app/docs/03 §8`.
+
+Additive by design: this module registers new routes and touches no existing
+view, template or table. Deleting this file would leave the Command Center
+exactly as it was.
+
+WHO TALKS TO WHOM
+-----------------
+    customer's browser  ──session cookie──>  the app's own server (Vercel)
+                                                     │
+                                          X-OG-Service-Token
+                                                     ▼
+                                            this file (Flask)
+
+[LAW] The service token NEVER reaches a browser. Only the app's server holds it.
+[LAW] Every endpoint takes an explicit customer_id and returns only that
+      customer's rows. The app's server passes the id it got from the session —
+      never anything the browser sent.
+
+READ ONLY, DELIBERATELY
+-----------------------
+There is not one write path in this file. Skip, pause and pin come later (step 6)
+and, when they do, they will call `core.add_pause()` and friends rather than
+writing SQL — those functions already encode invariants that were each learned
+from a real bug. Reimplementing them here is how they get relearned the hard way.
+
+Until then the whole customer app can be built, deployed and used with zero
+ability to change anything in the business.
+"""
+
+import hmac
+import json
+import os
+from datetime import date, datetime, timedelta
+
+from flask import jsonify, request
+
+import core
+import db
+import menu
+
+# Set OG_API_TOKEN in the environment (PythonAnywhere's WSGI file) to switch the
+# API on. With no token set every endpoint returns 503 — so a half-finished
+# deploy is closed, not open.
+API_TOKEN = os.environ.get("OG_API_TOKEN")
+
+# Settings the customer app is allowed to read. Anything not on this list stays
+# private — the settings table also holds API keys.
+PUBLIC_SETTINGS = [
+    "skip_cutoff_time", "skip_cutoff_applies_to", "late_requests_allowed",
+    "pause_max_days", "freeze_eligible_plans",
+    "delivery_promise_lunch", "delivery_promise_dinner",
+    "fee_band_free_km", "fee_band_mid_km", "fee_band_far_km",
+]
+
+
+def _authorised():
+    """Constant-time token check.
+
+    The token comes from a HEADER, not the JSON body: bodies get written to logs
+    and proxied in ways URLs and headers are not. The comparison is
+    hmac.compare_digest rather than '==' because a plain comparison returns early
+    on the first wrong byte, and that timing difference leaks the token one
+    character at a time to anyone patient enough to measure it.
+    """
+    if not API_TOKEN:
+        return False
+    sent = request.headers.get("X-OG-Service-Token", "")
+    return hmac.compare_digest(sent, API_TOKEN)
+
+
+def _fail(msg, code):
+    return jsonify({"ok": False, "error": msg}), code
+
+
+def _iso(v):
+    return str(v)[:10] if v else None
+
+
+def register(app):
+    """Attach the API to the Flask app (called once from app.py)."""
+
+    @app.before_request
+    def _api_gate():
+        """Token auth for /api/v1/*, applied before any endpoint runs.
+
+        These paths are in PUBLIC_ENDPOINTS so the human login gate lets them
+        past — this is what actually guards them instead.
+        """
+        if not request.path.startswith("/api/v1/"):
+            return
+        if not API_TOKEN:
+            return _fail("api disabled — OG_API_TOKEN is not set", 503)
+        if not _authorised():
+            return _fail("unauthorised", 401)
+        # An /api/v1/ path that matches no route must answer in JSON like every
+        # other API response. Flask has already tried to route by now, so a None
+        # url_rule means there is nothing here — including the write endpoints,
+        # which do not exist yet by design.
+        if request.url_rule is None:
+            return _fail("not found", 404)
+
+    # -- settings -----------------------------------------------------------
+    @app.route("/api/v1/settings/public")
+    def api_public_settings():
+        """The numbers the app and the terms page must not hard-code.
+
+        There is exactly one place that knows what time the cutoff is, and this
+        is how everything else asks it.
+        """
+        c = db.get_db()
+        out = {k: db.get_setting(c, k) for k in PUBLIC_SETTINGS}
+        # Weekday numbers the kitchen runs (Mon=0), so the app can grey out days
+        # it will never deliver on rather than guessing Mon-Fri forever.
+        out["operating_weekdays"] = sorted(core.operating_days(c))
+        c.close()
+        return jsonify({"ok": True, "settings": out})
+
+    # -- packs --------------------------------------------------------------
+    @app.route("/api/v1/customer/<cid>/packs")
+    def api_customer_packs(cid):
+        """This customer's subscriptions, newest first.
+
+        Returns every pack, not only live ones — a customer looking at last
+        month's history needs the finished ones too. `live` marks which are
+        currently running, and one customer can hold several at once.
+        """
+        c = db.get_db()
+        rows = c.execute(
+            "SELECT * FROM subscriptions WHERE customer_id=? "
+            "ORDER BY COALESCE(start_date, booking_date) DESC, id DESC", (cid,)).fetchall()
+        packs = []
+        for s in rows:
+            keys = s.keys()
+            comp = {"base": [], "addons": []}
+            for x in menu.sub_composition(c, s["id"]):
+                item = {"name": x["name"], "qty": x["qty"], "unit": x["unit"],
+                        "display": menu.fmt_qty(x["qty"], x["unit"]),
+                        "emoji": x["emoji"], "protein": x["protein"],
+                        "note": x["note"]}
+                comp["addons" if x["kind"] == "addon" else "base"].append(item)
+            # Standing swaps like "paneer instead of chicken on Tue and Fri" —
+            # the customer should see them, they asked for them.
+            rules = [{"label": menu.rule_label(r), "weekdays": r["weekdays"]}
+                     for r in menu.rules_for_sub(c, s["id"])]
+            pause = core.current_pause(c, s["id"])
+            enforced = bool(s["enforce_validity"]) if "enforce_validity" in keys else False
+            packs.append({
+                "id": s["id"],
+                "plan": s["plan_name"],
+                "duration": s["duration"],
+                "slot": s["slot"],
+                "preferred_timing": s["preferred_timing"],
+                "status": s["status"],
+                "live": s["status"] in ("Active", "Ending Soon"),
+                "start_date": _iso(s["start_date"]),
+                "meals_total": s["total_meals_scheduled"],
+                "meals_delivered": s["delivered_count"],
+                "meals_skipped": s["skipped_count"],
+                "meals_remaining": s["remaining_meals"],
+                # Only meaningful when Balaji has switched validity on for this
+                # pack. Off by default, and an unenforced pack must show the
+                # customer no countdown at all.
+                "expires_on": (_iso(s["expires_on"]) if enforced else None),
+                "validity_enforced": enforced,
+                "paused": pause is not None,
+                "paused_until": _iso(pause["end_date"]) if pause else None,
+                "composition": comp,
+                "rules": rules,
+            })
+        c.close()
+        return jsonify({"ok": True, "customer_id": cid, "packs": packs})
+
+    # -- meals --------------------------------------------------------------
+    @app.route("/api/v1/customer/<cid>/meals")
+    def api_customer_meals(cid):
+        """One row per delivery day in the window (default: 14 back, 14 ahead).
+
+        [LAW] Read-only, in the strictest sense: this does NOT call
+        `deliveries_for_day()`, because that function CREATES the day's rows as a
+        side effect. A customer opening their app must never cause order rows to
+        be generated. Days with no row yet are reported as `projected` — the
+        Command Center makes them lazily when Balaji opens that day, so a future
+        week legitimately has no rows and would otherwise look empty.
+        """
+        try:
+            frm = request.args.get("from") or (date.today() - timedelta(days=14)).isoformat()
+            to = request.args.get("to") or (date.today() + timedelta(days=14)).isoformat()
+            datetime.strptime(frm, "%Y-%m-%d")
+            datetime.strptime(to, "%Y-%m-%d")
+        except ValueError:
+            return _fail("from/to must be YYYY-MM-DD", 400)
+
+        c = db.get_db()
+        rows = c.execute(
+            "SELECT d.*, COALESCE(s.plan_name, d.notes) AS plan_name "
+            "FROM deliveries d LEFT JOIN subscriptions s ON s.id=d.subscription_id "
+            "WHERE d.customer_id=? AND d.date BETWEEN ? AND ? "
+            "ORDER BY d.date, (d.meal_type='Dinner')", (cid, frm, to)).fetchall()
+        meals = [{
+            "date": _iso(r["date"]),
+            "slot": r["meal_type"],
+            "status": r["status"],
+            "plan": r["plan_name"],
+            "note": r["day_note"],
+            "subscription_id": r["subscription_id"],
+            "projected": False,
+        } for r in rows]
+
+        # Fill the forward gap with expected days, clearly flagged. No meal count
+        # is computed here — "remaining" always comes from the engine.
+        have = {(m["date"], m["slot"]) for m in meals}
+        live = c.execute(
+            "SELECT id, slot FROM subscriptions WHERE customer_id=? "
+            "AND status IN ('Active','Ending Soon')", (cid,)).fetchall()
+        today = date.today().isoformat()
+        for s in live:
+            day = max(frm, today)
+            end = to
+            cur = datetime.strptime(day, "%Y-%m-%d").date()
+            last = datetime.strptime(end, "%Y-%m-%d").date()
+            while cur <= last:
+                iso = cur.isoformat()
+                slot = s["slot"] or "Lunch"
+                if (core.is_operating_day(c, iso) and (iso, slot) not in have
+                        and not core.is_paused_on(c, s["id"], iso)):
+                    meals.append({"date": iso, "slot": slot, "status": "Expected",
+                                  "plan": None, "note": None,
+                                  "subscription_id": s["id"], "projected": True})
+                    have.add((iso, slot))
+                cur += timedelta(days=1)
+        c.close()
+        meals.sort(key=lambda m: (m["date"], m["slot"] == "Dinner"))
+        return jsonify({"ok": True, "customer_id": cid, "from": frm, "to": to,
+                        "meals": meals})
+
+    # -- invoices -----------------------------------------------------------
+    @app.route("/api/v1/customer/<cid>/invoices")
+    def api_customer_invoices(cid):
+        c = db.get_db()
+        rows = c.execute(
+            "SELECT id, token, inv_date, items, discount, total, received, "
+            "payment_status, subscription_id FROM invoices WHERE customer_id=? "
+            "ORDER BY inv_date DESC, id DESC", (cid,)).fetchall()
+        out = []
+        for r in rows:
+            try:
+                items = json.loads(r["items"] or "[]")
+            except (ValueError, TypeError):
+                items = []
+            out.append({
+                "id": r["id"],
+                # The existing public link the customer may already hold. Reused
+                # rather than reinvented — those URLs are on invoices already sent.
+                "url": "/i/" + r["token"] if r["token"] else None,
+                "date": _iso(r["inv_date"]),
+                "items": items,
+                "discount": r["discount"], "total": r["total"],
+                "received": r["received"], "payment_status": r["payment_status"],
+                "subscription_id": r["subscription_id"],
+            })
+        c.close()
+        return jsonify({"ok": True, "customer_id": cid, "invoices": out})
+
+    # -- addresses ----------------------------------------------------------
+    @app.route("/api/v1/customer/<cid>/addresses")
+    def api_customer_addresses(cid):
+        """Delivery addresses, each with its own pin and weekday schedule.
+
+        `pin_source` says who put the current pin there. When a customer's own
+        pin and an admin correction disagree, the admin pin is authoritative
+        until the customer edits it again — so the app has to be able to tell
+        which one it is looking at.
+        """
+        c = db.get_db()
+        rows = c.execute(
+            "SELECT * FROM customer_addresses WHERE customer_id=? AND active=1 "
+            "ORDER BY is_default DESC, sort, id", (cid,)).fetchall()
+        out = []
+        for r in rows:
+            keys = r.keys()
+            out.append({
+                "id": r["id"], "label": r["label"], "address": r["address"],
+                "lat": r["lat"], "lng": r["lng"],
+                "pinned": r["lat"] is not None and r["lng"] is not None,
+                "pin_source": r["pin_source"] if "pin_source" in keys else None,
+                "pin_set_at": r["pin_set_at"] if "pin_set_at" in keys else None,
+                "map_note": r["map_note"], "drop_type": r["drop_type"],
+                "slot": r["slot"], "weekdays": r["weekdays"],
+                "is_default": bool(r["is_default"]),
+                # Deliberately NOT returned: zone and corridor. They are routing
+                # decisions and delivery-fee inputs, not the customer's business.
+            })
+        c.close()
+        return jsonify({"ok": True, "customer_id": cid, "addresses": out})

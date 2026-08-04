@@ -79,9 +79,18 @@ TEAM_PASSWORD = os.environ.get("OG_TEAM_PASSWORD")
 PUBLIC_ENDPOINTS = {"login", "static", "invoice_public", "terms", "brochure_public",
                     "content_sync_api"}
 
+# The customer API (customer_api.py) is machine-to-machine — the new OG Gainz
+# app's server calls it with a service token. It is exempt from the HUMAN login
+# gate below and guarded by its own token check instead. Matched on the path
+# prefix rather than a list of endpoint names, so endpoints added to the API
+# later cannot be forgotten here and accidentally answer with a login page.
+API_PREFIX = "/api/v1/"
+
 
 @app.before_request
 def require_login():
+    if request.path.startswith(API_PREFIX):
+        return                                   # token-guarded in customer_api.py
     if not APP_PASSWORD:
         return                                   # local mode: no gate
     if request.endpoint in PUBLIC_ENDPOINTS:
@@ -124,6 +133,11 @@ def logout():
 # Content Hub (social-media production dashboard) — self-contained module.
 import content_hub                                            # noqa: E402
 content_hub.register(app)
+
+# Read-only customer API for the new OG Gainz app. Additive: it adds routes and
+# changes no existing view. Off unless OG_API_TOKEN is set.
+import customer_api                                           # noqa: E402
+customer_api.register(app)
 
 
 # ---------------------------------------------------------------------------
