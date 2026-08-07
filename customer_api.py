@@ -120,6 +120,27 @@ def register(app):
         c.close()
         return jsonify({"ok": True, "settings": out})
 
+    # -- who they are -------------------------------------------------------
+    @app.route("/api/v1/customer/<cid>")
+    def api_customer(cid):
+        """The customer's own details — enough to greet them by name.
+
+        Deliberately thin: name, phone, area. Not their revenue, not their
+        payment history, not their notes. The app displays this; it has no
+        business knowing anything else about them.
+        """
+        c = db.get_db()
+        row = c.execute(
+            "SELECT id, name, phone, locality FROM customers WHERE id=?", (cid,)
+        ).fetchone()
+        c.close()
+        if not row:
+            return jsonify({"ok": False, "error": "no such customer"}), 404
+        return jsonify({"ok": True, "customer": {
+            "id": row["id"], "name": row["name"],
+            "phone": row["phone"], "locality": row["locality"],
+        }})
+
     # -- packs --------------------------------------------------------------
     @app.route("/api/v1/customer/<cid>/packs")
     def api_customer_packs(cid):

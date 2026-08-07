@@ -83,7 +83,45 @@
     <div><h2 style="margin:0">{{ cust.name }}</h2><div class="small muted">{{ cust.id }}</div></div>
     <span class="spacer"></span>
     {% if cust.phone %}<a class="btn btn-success btn-sm" href="{{ cust.phone|wa }}" target="_blank">💬 WhatsApp</a>{% endif %}
+    {% if g_invites_on %}
+    <form method="post" action="{{ url_for('customer_invite', cid=cust.id) }}" style="display:inline">
+      <button class="btn btn-ghost btn-sm" type="submit"
+              title="Create a private sign-in link for the OG Gainz app">📱 Invite to app</button>
+    </form>
+    {% endif %}
   </div>
+
+  {# The invite link, shown once, right after the button is pressed. Deliberately
+     not stored anywhere: it is single-use and expires in a week, and a table of
+     live invite links would be a copy of every customer's front-door key. #}
+  {% with msgs = get_flashed_messages(category_filter=["invite"]) %}
+    {% for m in msgs %}
+      {% set parts = m.split('|') %}
+      {% if parts|length >= 5 %}
+      <div class="card" style="border-left:4px solid #1FA84A;margin:12px 0 0">
+        <strong>Sign-in link for {{ parts[2] }}</strong>
+        <p class="small muted" style="margin:4px 0 8px">
+          Works once, expires in {{ parts[4] }} days. Send it on WhatsApp — they tap it,
+          sign in with Google, and see their own meals.
+        </p>
+        <input readonly value="{{ parts[1] }}" onclick="this.select()"
+               style="width:100%;font-size:12px;padding:8px;border:1px solid #d8e2db;border-radius:8px">
+        <div class="row" style="gap:8px;margin-top:8px">
+          {% if parts[3] %}
+          <a class="btn btn-success btn-sm" target="_blank"
+             href="https://wa.me/{{ ('91' + parts[3]) if parts[3]|length == 10 else parts[3] }}?text={{
+               ('Hi ' ~ parts[2] ~ ', here is your OG Gainz app link. Tap it, sign in with Google, and you can see your meals, what is in each one, and how many you have left: ' ~ parts[1]) | urlencode }}">
+            💬 Send on WhatsApp</a>
+          {% endif %}
+          <button class="btn btn-ghost btn-sm" type="button"
+                  onclick="navigator.clipboard.writeText('{{ parts[1] }}');this.textContent='Copied'">
+            Copy link</button>
+        </div>
+      </div>
+      {% endif %}
+    {% endfor %}
+  {% endwith %}
+
   <div class="kvs">
     {% if cust.phone %}<div class="k">Phone</div><div><a href="tel:{{ cust.phone }}">{{ cust.phone }}</a></div>{% endif %}
     {% if cust.locality %}<div class="k">Locality</div><div>{{ cust.locality }}</div>{% endif %}

@@ -139,6 +139,11 @@ content_hub.register(app)
 import customer_api                                           # noqa: E402
 customer_api.register(app)
 
+# "Invite to app" button on a customer's page. Off unless OG_APP_URL and
+# OG_ADMIN_TOKEN are set, and it never writes to this database.
+import app_invites                                            # noqa: E402
+app_invites.register(app)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
