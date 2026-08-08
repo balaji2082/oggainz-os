@@ -46,8 +46,12 @@ def register(app):
 
     @app.context_processor
     def _invite_globals():
-        # Lets the template hide the button entirely when it is not configured.
-        return {"g_invites_on": enabled()}
+        # The customer page links straight to the app's own invite screen.
+        # It cannot POST here: PythonAnywhere's free plan permits outgoing
+        # requests only to an allowlist, so this server is not allowed to call
+        # the app at all -- its proxy answers "Tunnel connection failed".
+        # The connection works one way only: app -> Command Center.
+        return {"g_invites_on": enabled(), "g_app_url": (APP_URL or "").rstrip("/")}
 
     @app.route("/customers/<cid>/invite", methods=["POST"])
     def customer_invite(cid):

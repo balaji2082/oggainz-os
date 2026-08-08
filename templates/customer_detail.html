@@ -83,11 +83,13 @@
     <div><h2 style="margin:0">{{ cust.name }}</h2><div class="small muted">{{ cust.id }}</div></div>
     <span class="spacer"></span>
     {% if cust.phone %}<a class="btn btn-success btn-sm" href="{{ cust.phone|wa }}" target="_blank">💬 WhatsApp</a>{% endif %}
-    {% if g_invites_on %}
-    <form method="post" action="{{ url_for('customer_invite', cid=cust.id) }}" style="display:inline">
-      <button class="btn btn-ghost btn-sm" type="submit"
-              title="Create a private sign-in link for the OG Gainz app">📱 Invite to app</button>
-    </form>
+    {# The app must be opened directly: PythonAnywhere's free plan blocks this
+       server from calling out to it, so a button that posted here could only
+       ever fail. The link carries the customer id so the page is pre-filled. #}
+    {% if g_app_url %}
+    <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener"
+       href="{{ g_app_url }}/admin?customer={{ cust.id }}"
+       title="Open the app to create a sign-in link for this customer">📱 Invite to app ↗</a>
     {% endif %}
   </div>
 
