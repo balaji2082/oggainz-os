@@ -126,6 +126,7 @@
 
   <div class="kvs">
     {% if cust.phone %}<div class="k">Phone</div><div><a href="tel:{{ cust.phone }}">{{ cust.phone }}</a></div>{% endif %}
+    {% if cust.email %}<div class="k">Email</div><div>{{ cust.email }}</div>{% endif %}
     {% if cust.locality %}<div class="k">Locality</div><div>{{ cust.locality }}</div>{% endif %}
     {% if cust.address %}<div class="k">Address</div><div>{{ cust.address }}</div>{% endif %}
     {% if cust.notes %}<div class="k">Notes</div><div>{{ cust.notes }}</div>{% endif %}

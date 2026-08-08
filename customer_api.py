@@ -120,6 +120,56 @@ def register(app):
         c.close()
         return jsonify({"ok": True, "settings": out})
 
+    # -- finding a customer -------------------------------------------------
+    @app.route("/api/v1/customers/search")
+    def api_customer_search():
+        """Find a customer by anything you happen to have: id, name, phone, email.
+
+        One box, not four. When somebody signs up in the app all Balaji has is a
+        phone number and a Google email; when he is looking for a person he has
+        a name. Making him choose which kind of thing he is typing is friction
+        for no gain, so the query is matched against all of them.
+
+        Phone matching ignores punctuation and country codes, so '+91 98765
+        43210', '098765-43210' and '9876543210' all find the same person —
+        customers write their number a dozen different ways.
+        """
+        q = (request.args.get("q") or "").strip()
+        if len(q) < 2:
+            return jsonify({"ok": False, "error": "give at least 2 characters"}), 400
+        limit = min(int(request.args.get("limit", 20) or 20), 50)
+
+        # Indian mobiles are 10 digits, but people write them with +91, a
+        # leading 0, spaces or dashes. Reduce whatever was typed to the last 10
+        # digits and compare that against the last 10 of what is stored, so
+        # every one of those spellings finds the same person.
+        digits = "".join(ch for ch in q if ch.isdigit())[-10:]
+        like = f"%{q.lower()}%"
+
+        c = db.get_db()
+        rows = c.execute(
+            "SELECT id, name, phone, email, locality FROM customers "
+            "WHERE lower(id) = lower(?) "
+            "   OR lower(name) LIKE ? "
+            "   OR lower(COALESCE(email,'')) LIKE ? "
+            # Strip every non-digit from the stored number before comparing, so
+            # the format it was typed in never decides whether it is found.
+            "   OR (? != '' AND REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),"
+            "        ' ',''),'-',''),'(',''),')','') LIKE ?) "
+            "ORDER BY (lower(id) = lower(?)) DESC, name LIMIT ?",
+            (q, like, like, digits, f"%{digits}", q, limit)).fetchall()
+
+        out = []
+        for r in rows:
+            live = c.execute(
+                "SELECT COUNT(*) n FROM subscriptions WHERE customer_id=? "
+                "AND status IN ('Active','Ending Soon')", (r["id"],)).fetchone()["n"]
+            out.append({"id": r["id"], "name": r["name"], "phone": r["phone"],
+                        "email": r["email"], "locality": r["locality"],
+                        "active_packs": live})
+        c.close()
+        return jsonify({"ok": True, "query": q, "results": out})
+
     # -- who they are -------------------------------------------------------
     @app.route("/api/v1/customer/<cid>")
     def api_customer(cid):
@@ -131,14 +181,14 @@ def register(app):
         """
         c = db.get_db()
         row = c.execute(
-            "SELECT id, name, phone, locality FROM customers WHERE id=?", (cid,)
+            "SELECT id, name, phone, email, locality FROM customers WHERE id=?", (cid,)
         ).fetchone()
         c.close()
         if not row:
             return jsonify({"ok": False, "error": "no such customer"}), 404
         return jsonify({"ok": True, "customer": {
-            "id": row["id"], "name": row["name"],
-            "phone": row["phone"], "locality": row["locality"],
+            "id": row["id"], "name": row["name"], "phone": row["phone"],
+            "email": row["email"], "locality": row["locality"],
         }})
 
     # -- packs --------------------------------------------------------------

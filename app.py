@@ -852,9 +852,10 @@ def customer_new():
     if request.method == "POST":
         f = request.form
         cid = next_id(c, "customers", "C")
-        c.execute("INSERT INTO customers(id,name,phone,locality,address,notes,created_at) "
-                  "VALUES(?,?,?,?,?,?,?)",
-                  (cid, f.get("name"), f.get("phone"), f.get("locality"),
+        c.execute("INSERT INTO customers(id,name,phone,email,locality,address,notes,created_at) "
+                  "VALUES(?,?,?,?,?,?,?,?)",
+                  (cid, f.get("name"), f.get("phone"),
+                   (f.get("email") or "").strip().lower() or None, f.get("locality"),
                    f.get("address"), f.get("notes"), db.now_iso()))
         _save_customer_geo(c, f, cid)
         c.commit(); c.close()
@@ -872,9 +873,11 @@ def customer_edit(cid):
         c.close(); abort(404)
     if request.method == "POST":
         f = request.form
-        c.execute("UPDATE customers SET name=?,phone=?,locality=?,address=?,notes=? WHERE id=?",
-                  (f.get("name"), f.get("phone"), f.get("locality"), f.get("address"),
-                   f.get("notes"), cid))
+        c.execute("UPDATE customers SET name=?,phone=?,email=?,locality=?,address=?,notes=? "
+                  "WHERE id=?",
+                  (f.get("name"), f.get("phone"),
+                   (f.get("email") or "").strip().lower() or None,
+                   f.get("locality"), f.get("address"), f.get("notes"), cid))
         pinned = _save_customer_geo(c, f, cid)
         c.commit(); c.close()
         if (f.get("pin") or "").strip() and not pinned:

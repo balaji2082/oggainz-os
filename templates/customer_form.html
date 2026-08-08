@@ -11,6 +11,9 @@
       <input name="name" value="{{ cust.name if cust }}" required autofocus></div>
     <div><label>Phone (WhatsApp)</label>
       <input name="phone" value="{{ cust.phone if cust }}" placeholder="10-digit number"></div>
+    <div><label>Email <span class="small muted">(for the app)</span></label>
+      <input name="email" type="email" value="{{ cust.email if cust and cust.email }}"
+             placeholder="name@gmail.com" autocapitalize="off"></div>
     <div><label>Locality</label>
       <input name="locality" value="{{ cust.locality if cust }}" placeholder="Perumbakkam"></div>
     <div class="full"><label>Address</label>

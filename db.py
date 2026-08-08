@@ -524,7 +524,11 @@ MIGRATIONS = {
     "trial_orders":  [("notes", "TEXT"), ("delivery_date", "TEXT"),
                       ("meal_type", "TEXT"), ("delivery_status", "TEXT"),
                       ("plan_id", "INTEGER")],   # which pack the trial is of → prep list
-    "customers":     [("lat", "REAL"), ("lng", "REAL"),
+    # email: customers were only ever reached on WhatsApp, so this never existed.
+    # The app signs people in with Google, so knowing a customer's email lets a
+    # sign-up be matched to them automatically instead of by hand.
+    "customers":     [("email", "TEXT"),
+                      ("lat", "REAL"), ("lng", "REAL"),
                       ("zone", "TEXT"),          # auto from distance, overridable
                       ("corridor", "TEXT"),      # OMR-N / West / OMR-S
                       ("drop_type", "TEXT"),     # Home / PG / Office / Gym
