@@ -255,15 +255,38 @@ Adds a **Money** tab to More: your finance dashboard (revenue, expenses, profit,
 business / personal / appa) served from the Command Center, so it works on mobile data
 away from home instead of only on the laptop's wifi.
 
-**This one needs an environment variable — without it the tab stays switched off.**
+**This one needs one line added to your WSGI file — without it the tab stays switched off.**
+It goes in the same place as your password, so all the settings stay together.
 
-1. PythonAnywhere → **Web** tab → scroll to **Environment variables**
-2. Add: name `OG_NOTION_TOKEN`, value = the same token that's in `.notion_token` on the
-   laptop (open that file, copy the whole line)
-3. **Reload**
+**1. Get the token off your laptop.** Open this file — it is ONE long line starting `ntn_`:
 
-Then More → **Money**. If you skip the variable nothing breaks — the tab explains what
-to set and the laptop dashboard keeps working exactly as before.
+```
+D:\AI-Workspace\Projects\OG-Gainz-OS\.notion_token
+```
+
+It has no `.txt` ending, so double-clicking may not open it: right-click → **Open with** →
+**Notepad**. Select the whole line and copy it.
+
+**2. Paste it into the WSGI file.** PythonAnywhere → **Web** tab → find **WSGI configuration
+file** → click the blue link (`/var/www/oggainz_pythonanywhere_com_wsgi.py`). Add ONE new
+line below your existing password lines, so that block reads:
+
+```python
+# ---- OG Gainz settings ----
+os.environ["OG_PASSWORD"]     = "your-existing-password"
+os.environ["OG_SECRET_KEY"]   = "ee853b58130af877e2141a140f134d0fa4f394ff32ea437277b9fc09bee03ea7"
+os.environ["OG_NOTION_TOKEN"] = "ntn_PASTE-THE-WHOLE-LINE-HERE"
+```
+
+Keep the quotes and the `os.environ[...]` part exactly. Change nothing else.
+
+**3.** Green **Save** (top right of the editor), then back to the **Web** tab → **Reload**.
+
+Then More → **Money**. If you skip this nothing breaks — the tab tells you what's missing,
+and the laptop dashboard keeps working as before.
+
+**If it still says no token:** you saved the file but didn't Reload, or a quote got lost in
+the paste. Re-open the file and check the new line looks just like the two above it.
 
 ### What to know
 
