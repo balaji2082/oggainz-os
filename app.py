@@ -257,10 +257,16 @@ def inject_globals():
     # measured from a placeholder ~2.7 km away — silently wrong on every screen.
     # This warns everywhere, not just on the two pages that happen to check.
     kitchen_unset = not ops.kitchen(c)[2]
+    # Live on-demand packs: these get NO orders unless their week is ticked, so the
+    # count is a standing reminder that someone is waiting to be planned.
+    ondemand = c.execute(
+        "SELECT COUNT(*) FROM subscriptions WHERE COALESCE(schedule_mode,'daily')='ondemand' "
+        "AND status IN ('Active','Ending Soon')").fetchone()[0]
     c.close()
     return {"g_stats": stats, "g_due": due, "g_unread": unread,
             "g_agent_ready": agent_ready, "g_unpinned": unpinned,
             "g_sub_issues": sub_issues, "g_kitchen_unset": kitchen_unset,
+            "g_ondemand": ondemand,
             "active_page": request.endpoint,
             "today": date.today().strftime("%Y-%m-%d"),
             "today_str": date.today().strftime("%Y-%m-%d"),
@@ -306,10 +312,12 @@ def today():
         cid = r["customer_id"]
         if cid and cid not in addr_map:
             addr_map[cid] = ops.customer_addresses(c, cid)
+    variant_map = _variant_map(c, summary["rows"])
     c.close()
     return render_template("today.html", d=d, s=summary, ending=ending, unpaid=unpaid,
                            prev_d=prev_d, next_d=next_d, view=view, override=override,
                            prep=prep, backlog=backlog, ticks=ticks, addr_map=addr_map,
+                           variant_map=variant_map,
                            day_label=fmt_date(d, "%A, %d %b %Y"))
 
 
@@ -390,9 +398,11 @@ def deliveries():
     operating = core.is_operating_day(c, d)
     prev_d = (datetime.strptime(d, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
     next_d = (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+    variant_map = _variant_map(c, rows)
     c.close()
     return render_template("deliveries.html", d=d, rows=rows, view=view, override=override,
                            operating=operating, prev_d=prev_d, next_d=next_d,
+                           variant_map=variant_map,
                            day_label=fmt_date(d, "%A, %d %b %Y"))
 
 
@@ -415,6 +425,142 @@ def _menu_data(c):
                        for r in menu.plan_recipe(c, p["id"])],
         }
     return {"components": comps, "plans": plans_out}
+
+
+def _save_schedule_from_form(c, sid, f, vmap=None):
+    """Persist the delivery schedule the create/edit form submitted.
+
+    The form posts `schedule_mode` plus, for 'weekly', one `day_active_<n>` per
+    ticked weekday with optional `day_slot_<n>` / `day_variant_<n>`. A form that
+    sends no schedule_mode at all (an old bookmark, or the CRM conversion flow)
+    leaves the subscription exactly as it was rather than silently resetting it
+    to daily.
+
+    `vmap` translates old variant ids to new ones when renewing: the prefilled
+    form is rendered from the pack being copied, so the ids it posts belong to
+    THAT subscription. Anything that still doesn't belong here after remapping is
+    dropped rather than stored — a day plan pointing at another subscription's
+    box would cook the wrong meal and be near-impossible to spot.
+    """
+    mode = f.get("schedule_mode")
+    if mode not in ("daily", "weekly", "ondemand"):
+        return
+    c.execute("UPDATE subscriptions SET schedule_mode=? WHERE id=?", (mode, sid))
+    c.commit()
+    if mode == "weekly":
+        mine = {v["id"] for v in menu.variants_for_sub(c, sid)}
+        rows = []
+        for wd in range(7):
+            if not f.get(f"day_active_{wd}"):
+                continue
+            vid = f.get(f"day_variant_{wd}") or None
+            if vid:
+                vid = int(vid)
+                vid = (vmap or {}).get(vid, vid)
+                if vid not in mine:
+                    vid = None
+            rows.append({"weekday": wd, "active": 1,
+                         "slot": f.get(f"day_slot_{wd}") or None,
+                         "variant_id": vid,
+                         "meals": f.get(f"day_meals_{wd}") or 1,
+                         "note": f.get(f"day_note_{wd}") or None})
+        core.save_day_plan(c, sid, rows)
+    else:
+        # daily and ondemand don't read the weekday grid; clear it so a later
+        # switch back to weekly starts from a clean, visible state.
+        c.execute("DELETE FROM subscription_day_plan WHERE subscription_id=?", (sid,))
+        c.commit()
+    # Bring already-planned future orders in line with the new schedule.
+    core.resync_scheduled_days(c, sid)
+
+
+def _copy_pack_setup(c, from_sid, to_sid, skip_composition=False):
+    """Copy everything that makes a pack what it is onto a renewal.
+
+    A renewal used to copy only the subscription row, so the new pack arrived with
+    no contents at all and every add-on had to be typed in again by hand. What a
+    customer is actually getting is spread across four tables, and all four have to
+    travel: the box contents, any alternative boxes, the weekly schedule that says
+    which box lands on which day, and the standing rules.
+
+    Variant ids are remapped as they are copied, so the new pack's day plan points
+    at the new pack's variants and the two subscriptions stay independent — editing
+    the renewal can never reach back and change last month's record. Returns that
+    {old_variant_id: new_variant_id} map, which the caller needs to translate the
+    ids a prefilled renewal form posts back.
+    """
+    # Variants first: we need old id -> new id before anything referencing them.
+    vmap = {}
+    for v in c.execute("SELECT * FROM subscription_variants WHERE subscription_id=? ORDER BY id",
+                       (from_sid,)).fetchall():
+        cur = c.execute(
+            "INSERT INTO subscription_variants(subscription_id,name,plan_id,sort,created_at) "
+            "VALUES(?,?,?,?,?)", (to_sid, v["name"], v["plan_id"], v["sort"], db.now_iso()))
+        vmap[v["id"]] = cur.lastrowid
+
+    if not skip_composition:
+        c.execute("DELETE FROM subscription_components WHERE subscription_id=?", (to_sid,))
+    for r in c.execute("SELECT * FROM subscription_components WHERE subscription_id=?",
+                       (from_sid,)).fetchall():
+        # When the form supplied its own contents, keep those for the normal box but
+        # still bring the variants across — the form has no way to describe them.
+        if skip_composition and r["variant_id"] is None:
+            continue
+        c.execute(
+            "INSERT INTO subscription_components(subscription_id,component_id,qty,kind,note,"
+            "agreed_price,price_note,variant_id) VALUES(?,?,?,?,?,?,?,?)",
+            (to_sid, r["component_id"], r["qty"], r["kind"], r["note"],
+             r["agreed_price"], r["price_note"], vmap.get(r["variant_id"])))
+
+    old = c.execute("SELECT schedule_mode FROM subscriptions WHERE id=?", (from_sid,)).fetchone()
+    if old and old["schedule_mode"]:
+        c.execute("UPDATE subscriptions SET schedule_mode=? WHERE id=?",
+                  (old["schedule_mode"], to_sid))
+    c.execute("DELETE FROM subscription_day_plan WHERE subscription_id=?", (to_sid,))
+    for d in c.execute("SELECT * FROM subscription_day_plan WHERE subscription_id=?",
+                       (from_sid,)).fetchall():
+        c.execute(
+            "INSERT INTO subscription_day_plan(subscription_id,weekday,active,slot,variant_id,meals,note) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (to_sid, d["weekday"], d["active"], d["slot"], vmap.get(d["variant_id"]),
+             d["meals"], d["note"]))
+
+    for r in c.execute("SELECT * FROM component_rules WHERE subscription_id=? AND active=1",
+                       (from_sid,)).fetchall():
+        c.execute(
+            "INSERT INTO component_rules(subscription_id,weekdays,start_date,end_date,action,"
+            "from_component_id,to_component_id,qty,note,source,active,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,1,?)",
+            (to_sid, r["weekdays"], r["start_date"], r["end_date"], r["action"],
+             r["from_component_id"], r["to_component_id"], r["qty"], r["note"],
+             r["source"], db.now_iso()))
+    c.commit()
+    return vmap
+
+
+def _variant_map(c, rows):
+    """{subscription_id: [{id, name}]} for the subscriptions in a day's list.
+
+    The extra-meal sheet needs it so a customer whose Tuesday is a salad can be
+    given an extra salad rather than silently getting their usual box. Only the
+    subscriptions actually on screen are looked up, and only once each.
+    """
+    out = {}
+    for r in rows:
+        sid = r["subscription_id"]
+        if not sid or sid in out:
+            continue
+        vs = menu.variants_for_sub(c, sid)
+        if vs:
+            out[sid] = [{"id": v["id"], "name": v["name"]} for v in vs]
+    return out
+
+
+def _schedule_ctx(c, sid):
+    """Day plan + variants for the create/edit form and the detail card."""
+    return {"day_plan": core.day_plan_for(c, sid) if sid else {},
+            "variants": menu.variants_for_sub(c, sid) if sid else [],
+            "weekday_names": core.WEEKDAY_NAMES}
 
 
 def _save_composition_from_form(c, sid, f):
@@ -491,13 +637,33 @@ def subscription_detail(sid):
     rule_labels = {r["id"]: menu.rule_label(r) for r in rules}
     suggestions = agent.suggestions_for_sub(c, sub)
     components = menu.all_components(c)
+    ctx = _schedule_ctx(c, sid)
+    plans = c.execute("SELECT id,name FROM plans WHERE active=1 ORDER BY name").fetchall()
+    schedule_summary = core.schedule_summary(c, sub)
+    extras = c.execute("SELECT * FROM deliveries WHERE subscription_id=? AND is_extra=1 "
+                       "ORDER BY date DESC", (sid,)).fetchall()
+    # The next fortnight as the schedule will actually play out — the quickest way
+    # to see that a plan does what was meant before the kitchen finds out.
+    preview, d0 = [], date.today()
+    for i in range(14):
+        day_iso = (d0 + timedelta(days=i)).strftime("%Y-%m-%d")
+        if not core.is_operating_day(c, day_iso):
+            continue
+        p = core.plan_for_day(c, sub, day_iso)
+        vname = next((v["name"] for v in ctx["variants"] if v["id"] == p["variant_id"]), None)
+        preview.append({"date": day_iso, "deliver": p["deliver"], "slot": p["slot"],
+                        "box": vname or (sub["plan_name"] or "Usual box"),
+                        "frozen": core.is_paused_on(c, sid, day_iso)})
     c.close()
     return render_template("subscription_detail.html", sub=sub, cust=cust, dels=dels,
                            pauses=pauses, slot_moves=slot_moves, cur_pause=cur_pause,
                            cur_move=cur_move, comp=comp, rules=rules,
                            rule_labels=rule_labels, suggestions=suggestions,
                            components=components, fmt_qty=menu.fmt_qty,
-                           today=date.today().strftime("%Y-%m-%d"))
+                           plans=plans, schedule_summary=schedule_summary,
+                           schedule_mode=core.schedule_mode(sub), preview=preview,
+                           extras=extras,
+                           today=date.today().strftime("%Y-%m-%d"), **ctx)
 
 
 @app.route("/subscriptions/new", methods=["GET", "POST"])
@@ -534,10 +700,22 @@ def subscription_new():
              scheduled, "Active", db.now_iso()))
         c.commit()
         core.recompute_subscription(c, sid)
+        # Composition and schedule BEFORE backfilling days: the generator reads
+        # both, so setting them first means the very first orders it creates are
+        # already on the right weekdays with the right box.
+        _save_composition_from_form(c, sid, f)
+        # Renewing? Carry the previous pack's contents, variants, schedule and
+        # standing rules across, so a renewal starts as a copy of what the
+        # customer was actually getting instead of an empty pack.
+        renew_of = f.get("renew_of")
+        vmap = None
+        if renew_of:
+            vmap = _copy_pack_setup(c, renew_of, sid,
+                                    skip_composition=bool(f.get("comp_json")))
+        _save_schedule_from_form(c, sid, f, vmap)
         # A back-dated start (meals already delivered, sub registered late) gets its
         # past days as Pending rows right away → they show in the backlog to mark.
         core.backfill_sub_days(c, sid)
-        _save_composition_from_form(c, sid, f)
         # If this booking came from converting a CRM lead, link them together.
         lead_id = f.get("lead")
         if lead_id:
@@ -548,12 +726,23 @@ def subscription_new():
     customers = c.execute("SELECT id,name FROM customers ORDER BY name").fetchall()
     plans = c.execute("SELECT * FROM plans WHERE active=1 ORDER BY name").fetchall()
     menu_data = _menu_data(c)
+    # "Renew" opens this form already filled in from the pack being renewed, so the
+    # contents, add-ons and schedule are all there to check (and adjust, if this
+    # month is different) before the new pack is created.
+    renew_of = request.args.get("renew")
+    src = (c.execute("SELECT * FROM subscriptions WHERE id=?", (renew_of,)).fetchone()
+           if renew_of else None)
+    existing_comp = ([{"id": r["component_id"], "qty": r["qty"], "kind": r["kind"],
+                       "note": r["note"] or ""} for r in menu.sub_composition(c, src["id"])]
+                     if src else [])
+    ctx = _schedule_ctx(c, src["id"] if src else None)
     c.close()
     return render_template("subscription_form.html", customers=customers, plans=plans,
-                           sub=None, today=date.today().strftime("%Y-%m-%d"),
+                           sub=src, today=date.today().strftime("%Y-%m-%d"),
                            preset_customer=request.args.get("customer"),
                            lead=request.args.get("lead"), menu_data=menu_data,
-                           existing_comp=[])
+                           existing_comp=existing_comp, renew_of=(src["id"] if src else None),
+                           is_new=True, **ctx)
 
 
 @app.route("/subscriptions/<sid>/edit", methods=["GET", "POST"])
@@ -601,6 +790,7 @@ def subscription_edit(sid):
                    cust["id"] if cust else sub["customer_id"], sid))
         c.commit()
         _save_composition_from_form(c, sid, f)
+        _save_schedule_from_form(c, sid, f)
         c.close()
         flash(f"Subscription {sid} updated.", "ok")
         return redirect(url_for("subscription_detail", sid=sid))
@@ -609,11 +799,12 @@ def subscription_edit(sid):
     menu_data = _menu_data(c)
     existing_comp = [{"id": r["component_id"], "qty": r["qty"], "kind": r["kind"],
                       "note": r["note"] or ""} for r in menu.sub_composition(c, sid)]
+    ctx = _schedule_ctx(c, sid)
     c.close()
     return render_template("subscription_form.html", customers=customers, plans=plans,
                            sub=sub, today=date.today().strftime("%Y-%m-%d"),
                            preset_customer=None, lead=None, menu_data=menu_data,
-                           existing_comp=existing_comp)
+                           existing_comp=existing_comp, renew_of=None, is_new=False, **ctx)
 
 
 @app.route("/subscriptions/<sid>/status", methods=["POST"])
@@ -747,10 +938,16 @@ def subscription_renew(sid):
          core.month_label_iso(booking), old["subscription_price"], old["delivery_fee"],
          old["total_amount"], received, ps, old["total_meals_scheduled"], "Active", db.now_iso()))
     c.commit()
+    # A renewal is the same customer eating the same thing next month, so it has to
+    # arrive as a full copy: box contents, add-ons, alternative boxes, the weekly
+    # schedule and the standing rules. Copying only the subscription row (which is
+    # all this used to do) produced a pack with no contents, which then had to be
+    # rebuilt by hand and silently broke the prep list until someone noticed.
+    _copy_pack_setup(c, sid, nid)
     core.recompute_subscription(c, nid)
     core.backfill_sub_days(c, nid)      # renewals can be back-dated too
     c.close()
-    flash(f"Renewed {sid} → new subscription {nid}.", "ok")
+    flash(f"Renewed {sid} → new subscription {nid} (contents and schedule carried over).", "ok")
     return redirect(url_for("subscription_detail", sid=nid))
 
 
@@ -2191,6 +2388,175 @@ def reimport():
     importer.run_import()
     flash("Re-imported from NEW TRACKER.xlsx (a backup was taken first).", "ok")
     return redirect(url_for("today"))
+
+
+# ---------------------------------------------------------------------------
+# Delivery schedule: which weekdays, which slot, which box
+# ---------------------------------------------------------------------------
+@app.route("/subscriptions/<sid>/schedule", methods=["POST"])
+def subscription_schedule(sid):
+    c = conn()
+    if not c.execute("SELECT 1 FROM subscriptions WHERE id=?", (sid,)).fetchone():
+        c.close(); abort(404)
+    _save_schedule_from_form(c, sid, request.form)
+    sub = c.execute("SELECT * FROM subscriptions WHERE id=?", (sid,)).fetchone()
+    summary = core.schedule_summary(c, sub)
+    c.close()
+    flash(f"Schedule saved — {summary}.", "ok")
+    return redirect(url_for("subscription_detail", sid=sid))
+
+
+@app.route("/subscriptions/<sid>/variants", methods=["POST"])
+def subscription_variants(sid):
+    """Add or remove one of a subscription's alternative boxes."""
+    c = conn()
+    if not c.execute("SELECT 1 FROM subscriptions WHERE id=?", (sid,)).fetchone():
+        c.close(); abort(404)
+    f = request.form
+    if f.get("do") == "delete":
+        menu.delete_variant(c, sid, int(f["vid"]))
+        flash("Alternative box removed — those days go back to the usual meal.", "ok")
+    else:
+        name = (f.get("name") or "").strip()
+        plan_id = int(f["plan_id"]) if f.get("plan_id") else None
+        if name or plan_id:
+            if not name and plan_id:
+                p = c.execute("SELECT name FROM plans WHERE id=?", (plan_id,)).fetchone()
+                name = p["name"] if p else "Alternative box"
+            vid = menu.add_variant(c, sid, name, plan_id)
+            flash(f"“{name}” added — now pick the days it goes out on.", "ok")
+        else:
+            flash("Give the alternative box a name (or pick a pack to copy).", "ok")
+    c.close()
+    return redirect(url_for("subscription_detail", sid=sid))
+
+
+@app.route("/subscriptions/<sid>/variant/<int:vid>", methods=["GET", "POST"])
+def subscription_variant_edit(sid, vid):
+    """Edit what goes in one alternative box — the same builder as the main pack."""
+    c = conn()
+    sub = c.execute("SELECT * FROM subscriptions WHERE id=?", (sid,)).fetchone()
+    var = menu.variant(c, vid)
+    if not sub or not var or var["subscription_id"] != sid:
+        c.close(); abort(404)
+    if request.method == "POST":
+        raw = request.form.get("comp_json")
+        items = json.loads(raw) if raw else []
+        base = [(int(i["id"]), float(i["qty"]), (i.get("note") or "").strip())
+                for i in items if i.get("kind") != "addon" and float(i.get("qty") or 0) > 0]
+        addons = [(int(i["id"]), float(i["qty"]), (i.get("note") or "").strip())
+                  for i in items if i.get("kind") == "addon" and float(i.get("qty") or 0) > 0]
+        menu.save_sub_composition(c, sid, base, addons, variant_id=vid)
+        if request.form.get("name"):
+            c.execute("UPDATE subscription_variants SET name=? WHERE id=?",
+                      (request.form["name"].strip(), vid))
+            c.commit()
+        c.close()
+        flash(f"“{var['name']}” updated.", "ok")
+        return redirect(url_for("subscription_detail", sid=sid))
+    existing = [{"id": r["component_id"], "qty": r["qty"], "kind": r["kind"],
+                 "note": r["note"] or ""} for r in menu.sub_composition(c, sid, vid)]
+    menu_data = _menu_data(c)
+    c.close()
+    return render_template("variant_form.html", sub=sub, variant=var,
+                           existing_comp=existing, menu_data=menu_data)
+
+
+# ---------------------------------------------------------------------------
+# Extra meals — a second box drawn from the pack the customer already bought
+# ---------------------------------------------------------------------------
+@app.route("/subscriptions/<sid>/extra", methods=["POST"])
+def subscription_extra(sid):
+    c = conn()
+    if not c.execute("SELECT 1 FROM subscriptions WHERE id=?", (sid,)).fetchone():
+        c.close(); abort(404)
+    f = request.form
+    day = (f.get("date") or "").strip() or date.today().strftime("%Y-%m-%d")
+    did = core.add_extra_meal(
+        c, sid, day, slot=f.get("slot") or None,
+        counts_against_pack=(f.get("counts_against_pack", "1") == "1"),
+        note=f.get("note") or None,
+        variant_id=int(f["variant_id"]) if f.get("variant_id") else None,
+        status=f.get("status") or "Pending")
+    sub = c.execute("SELECT delivered_count,total_meals_scheduled,remaining_meals "
+                    "FROM subscriptions WHERE id=?", (sid,)).fetchone()
+    c.close()
+    if did:
+        flash(f"Extra meal added for {day[8:10]}/{day[5:7]} — now "
+              f"{sub['delivered_count']}/{sub['total_meals_scheduled']} delivered, "
+              f"{sub['remaining_meals']} left.", "ok")
+    return redirect(request.form.get("back") or url_for("subscription_detail", sid=sid))
+
+
+@app.route("/api/delivery/<int:did>/delete", methods=["POST"])
+def api_delivery_delete(did):
+    """Remove an order row — used to undo an extra meal added by mistake."""
+    c = conn()
+    row = c.execute("SELECT is_extra FROM deliveries WHERE id=?", (did,)).fetchone()
+    if not row:
+        c.close()
+        return jsonify({"ok": False, "error": "not found"}), 404
+    # Only ever a hand-added extra: the scheduled orders are managed by the app and
+    # deleting one here would just make it reappear on the next page load.
+    if not (row["is_extra"] or 0):
+        c.close()
+        return jsonify({"ok": False, "error": "only extra meals can be removed"}), 400
+    core.delete_delivery(c, did)
+    c.close()
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Week planner — the customers who confirm their days one at a time
+# ---------------------------------------------------------------------------
+@app.route("/planner", methods=["GET", "POST"])
+def planner():
+    """Tick next week's days for every on-demand customer in one screen.
+
+    These are the subscribers who take one to three meals a week and tell us the
+    day before. Nothing is generated for them automatically, so this is where
+    their week gets set — all of them together, rather than opening each
+    subscription in turn.
+    """
+    c = conn()
+    start = (request.values.get("start") or "").strip()
+    try:
+        monday = datetime.strptime(start, "%Y-%m-%d").date()
+    except ValueError:
+        today = date.today()
+        # Default to the week that is being planned: this week until Friday,
+        # next week once the working week is basically over.
+        monday = today - timedelta(days=today.weekday())
+        if today.weekday() >= 4:
+            monday += timedelta(days=7)
+    week = [(monday + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+    open_days = [d for d in week if core.is_operating_day(c, d)]
+
+    if request.method == "POST":
+        sid = request.form.get("sid")
+        if sid:
+            added, removed = core.plan_week(
+                c, sid, request.form.getlist("day"), open_days)
+            flash(f"{sid}: {added} meal(s) planned, {removed} removed.", "ok")
+        c.close()
+        return redirect(url_for("planner", start=monday.strftime("%Y-%m-%d")))
+
+    subs = c.execute(
+        "SELECT * FROM subscriptions WHERE COALESCE(schedule_mode,'daily')='ondemand' "
+        "AND status IN ('Active','Ending Soon','Paused') ORDER BY customer_name").fetchall()
+    rows = []
+    for s in subs:
+        planned = {r["date"]: r for r in c.execute(
+            "SELECT * FROM deliveries WHERE subscription_id=? AND date BETWEEN ? AND ?",
+            (s["id"], week[0], week[-1])).fetchall()}
+        rows.append({"sub": s, "planned": planned,
+                     "frozen": {d: core.is_paused_on(c, s["id"], d) for d in open_days}})
+    c.close()
+    return render_template("planner.html", rows=rows, week=week, open_days=open_days,
+                           monday=monday.strftime("%Y-%m-%d"),
+                           prev_week=(monday - timedelta(days=7)).strftime("%Y-%m-%d"),
+                           next_week=(monday + timedelta(days=7)).strftime("%Y-%m-%d"),
+                           today=date.today().strftime("%Y-%m-%d"))
 
 
 # ---------------------------------------------------------------------------

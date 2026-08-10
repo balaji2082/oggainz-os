@@ -140,31 +140,95 @@ def match_plan(conn, plan_name):
     return best
 
 
-def copy_recipe_to_subscription(conn, plan_id, sub_id):
-    conn.execute("DELETE FROM subscription_components WHERE subscription_id=? AND kind='base'",
-                 (sub_id,))
+def copy_recipe_to_subscription(conn, plan_id, sub_id, variant_id=None):
+    """Seed a box from a catalog pack recipe. variant_id=None fills the
+    subscription's normal box; an id fills that named variant instead."""
+    conn.execute(
+        "DELETE FROM subscription_components WHERE subscription_id=? AND kind='base' "
+        "AND variant_id IS ?", (sub_id, variant_id))
     for r in plan_recipe(conn, plan_id):
         conn.execute(
-            "INSERT INTO subscription_components(subscription_id,component_id,qty,kind,note) "
-            "VALUES(?,?,?,?,?)", (sub_id, r["component_id"], r["qty"], "base", r["note"]))
+            "INSERT INTO subscription_components(subscription_id,component_id,qty,kind,note,variant_id) "
+            "VALUES(?,?,?,?,?,?)",
+            (sub_id, r["component_id"], r["qty"], "base", r["note"], variant_id))
 
 
-def sub_composition(conn, sub_id):
+def sub_composition(conn, sub_id, variant_id=None):
+    """The contents of one box. variant_id=None is the subscription's normal box
+    (`variant_id IS NULL` — every row that existed before variants shipped)."""
     return conn.execute(
         "SELECT sc.*, c.name, c.unit, c.step, c.emoji, c.protein, c.addon_price "
         "FROM subscription_components sc JOIN components c ON c.id=sc.component_id "
-        "WHERE sc.subscription_id=? ORDER BY sc.kind, c.sort", (sub_id,)).fetchall()
+        "WHERE sc.subscription_id=? AND sc.variant_id IS ? ORDER BY sc.kind, c.sort",
+        (sub_id, variant_id)).fetchall()
 
 
-def save_sub_composition(conn, sub_id, base_items, addon_items):
-    """Replace a subscription's composition. Items = [(component_id, qty, note)]."""
-    conn.execute("DELETE FROM subscription_components WHERE subscription_id=?", (sub_id,))
+def save_sub_composition(conn, sub_id, base_items, addon_items, variant_id=None):
+    """Replace ONE box's composition. Items = [(component_id, qty, note)].
+
+    Scoped to `variant_id` on purpose: saving the normal box must not wipe the
+    subscription's variants, and editing a variant must not touch the normal box.
+    """
+    conn.execute("DELETE FROM subscription_components WHERE subscription_id=? AND variant_id IS ?",
+                 (sub_id, variant_id))
     for cid, qty, note in base_items:
-        conn.execute("INSERT INTO subscription_components(subscription_id,component_id,qty,kind,note) "
-                     "VALUES(?,?,?,?,?)", (sub_id, cid, qty, "base", note or None))
+        conn.execute("INSERT INTO subscription_components(subscription_id,component_id,qty,kind,note,variant_id) "
+                     "VALUES(?,?,?,?,?,?)", (sub_id, cid, qty, "base", note or None, variant_id))
     for cid, qty, note in addon_items:
-        conn.execute("INSERT INTO subscription_components(subscription_id,component_id,qty,kind,note) "
-                     "VALUES(?,?,?,?,?)", (sub_id, cid, qty, "addon", note or None))
+        conn.execute("INSERT INTO subscription_components(subscription_id,component_id,qty,kind,note,variant_id) "
+                     "VALUES(?,?,?,?,?,?)", (sub_id, cid, qty, "addon", note or None, variant_id))
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Variants — a named alternative box for one subscription
+# ---------------------------------------------------------------------------
+def variants_for_sub(conn, sub_id):
+    return conn.execute(
+        "SELECT * FROM subscription_variants WHERE subscription_id=? ORDER BY sort, id",
+        (sub_id,)).fetchall()
+
+
+def variant(conn, variant_id):
+    if not variant_id:
+        return None
+    return conn.execute("SELECT * FROM subscription_variants WHERE id=?",
+                        (variant_id,)).fetchone()
+
+
+def add_variant(conn, sub_id, name, plan_id=None, seed_from_plan=True):
+    """Create a named alternative box. When it maps to a catalog pack (Vaithi's
+    'Protein Salad' → Protein Salad Box) its recipe is copied in as a starting
+    point, so the common case needs no ingredient typing at all."""
+    import db
+    cur = conn.execute(
+        "INSERT INTO subscription_variants(subscription_id,name,plan_id,created_at) "
+        "VALUES(?,?,?,?)", (sub_id, (name or "").strip() or "Alternative box",
+                            plan_id, db.now_iso()))
+    vid = cur.lastrowid
+    if plan_id and seed_from_plan:
+        copy_recipe_to_subscription(conn, plan_id, sub_id, vid)
+    else:
+        # No pack to copy → start from the subscription's normal box, which is
+        # nearly always what a variant is: the usual meal with two things changed.
+        for r in sub_composition(conn, sub_id):
+            conn.execute(
+                "INSERT INTO subscription_components(subscription_id,component_id,qty,kind,note,variant_id) "
+                "VALUES(?,?,?,?,?,?)",
+                (sub_id, r["component_id"], r["qty"], r["kind"], r["note"], vid))
+    conn.commit()
+    return vid
+
+
+def delete_variant(conn, sub_id, variant_id):
+    """Remove a variant, its contents, and any day-plan rows pointing at it (those
+    days fall back to the subscription's normal box rather than breaking)."""
+    conn.execute("DELETE FROM subscription_components WHERE subscription_id=? AND variant_id=?",
+                 (sub_id, variant_id))
+    conn.execute("UPDATE subscription_day_plan SET variant_id=NULL "
+                 "WHERE subscription_id=? AND variant_id=?", (sub_id, variant_id))
+    conn.execute("DELETE FROM subscription_variants WHERE subscription_id=? AND id=?",
+                 (sub_id, variant_id))
     conn.commit()
 
 
@@ -245,14 +309,22 @@ def fmt_qty(qty, unit):
     return f"{n} serving{'s' if n != 1 else ''}"
 
 
-def _composition_items(conn, sub_id, cache):
-    """[{component_id,name,unit,step,emoji,qty,note}] for a sub (cached per request)."""
-    if sub_id in cache:
-        return cache[sub_id]
+def _composition_items(conn, sub_id, cache, variant_id=None):
+    """[{component_id,name,unit,step,emoji,qty,note}] for one box (cached per request).
+
+    Keyed on (sub, variant) so a customer whose Tuesday box differs from their
+    Monday box aggregates correctly in the same prep run."""
+    key = (sub_id, variant_id)
+    if key in cache:
+        return cache[key]
     items = [{"component_id": r["component_id"], "name": r["name"], "unit": r["unit"],
               "step": r["step"], "emoji": r["emoji"], "qty": r["qty"], "note": r["note"]}
-             for r in sub_composition(conn, sub_id)]
-    cache[sub_id] = items
+             for r in sub_composition(conn, sub_id, variant_id)]
+    # A variant with nothing saved in it must not silently cook an empty box —
+    # fall back to the subscription's normal contents.
+    if not items and variant_id:
+        items = _composition_items(conn, sub_id, cache, None)
+    cache[key] = items
     return items
 
 
@@ -400,13 +472,24 @@ def order_items(conn, r, day_iso, cache=None, plan_cache=None):
     """
     cache = {} if cache is None else cache
     plan_cache = {} if plan_cache is None else plan_cache
+    keys = r.keys()
     items, label = [], None
     if r["subscription_id"]:
-        items = _composition_items(conn, r["subscription_id"], cache)
+        # Which box this day gets. The value stamped on the order row wins — it
+        # records what was actually cooked, so changing the schedule later never
+        # rewrites history. NULL = the subscription's normal box.
+        vid = r["variant_id"] if "variant_id" in keys else None
+        items = _composition_items(conn, r["subscription_id"], cache, vid)
         rules = rules_for_sub(conn, r["subscription_id"])
         if rules:
+            # Standing rules ("no yogurt, ever") apply on top of whichever box the
+            # day plan chose, so they keep working for variants too.
             items = apply_rules(items, rules, day_iso)
         label = r["plan_name"] or "Meal"
+        if vid:
+            v = variant(conn, vid)
+            if v:
+                label = v["name"]
     elif r["trial_id"]:
         t = conn.execute("SELECT * FROM trial_orders WHERE id=?", (r["trial_id"],)).fetchone()
         label = "TRIAL · " + ((t["order_text"] if t else None) or "Trial meal")

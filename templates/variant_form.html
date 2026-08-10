@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}{{ variant.name }} · {{ sub.customer_name }} · OG Gainz{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('subscription_detail', sid=sub.id) }}">‹ Cancel</a>
+  <h1 style="margin:0 0 0 6px">Alternative box</h1>
+</div>
+
+<form method="post" class="card" id="varform">
+  <input type="hidden" name="comp_json" id="comp_json">
+
+  <div class="small muted" style="margin-bottom:12px">
+    What goes in <b>{{ sub.customer_name }}</b>'s box on the days the schedule points at this
+    one — instead of their usual {{ sub.plan_name }}. Standing rules still apply on top.
+  </div>
+
+  <div class="form-grid">
+    <div class="full">
+      <label>Name</label>
+      <input name="name" value="{{ variant.name }}" required>
+    </div>
+
+    <div class="full">
+      <label>🍱 In this box</label>
+      <div class="builder" id="base_rows"></div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="openPicker('base')" style="margin-top:8px">＋ Add item</button>
+    </div>
+
+    <div class="full">
+      <label>⭐ Add-ons <span class="muted small">(prepared with this box)</span></label>
+      <div class="builder" id="addon_rows"></div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="openPicker('addon')" style="margin-top:8px">＋ Add add-on</button>
+    </div>
+  </div>
+
+  <div class="form-actions">
+    <button class="btn btn-primary" onclick="packComp()">Save box</button>
+  </div>
+</form>
+
+<!-- item picker sheet -->
+<div class="sheet" id="picker" hidden>
+  <div class="sheet-card">
+    <div class="card-title"><h3 id="picker_title">Add item</h3><span class="spacer"></span>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="closePicker()">✕</button></div>
+    <div id="picker_rows"></div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// The same box builder as the subscription form, without the pack/pricing half —
+// a variant has no price of its own, it is just a different set of contents.
+const MENU = {{ menu_data|tojson }};
+const EXISTING = {{ existing_comp|tojson }};
+const COMP = {};
+MENU.components.forEach(c => COMP[c.id] = c);
+
+let rows = EXISTING.length ? EXISTING.slice() : [];
+let pickerKind = 'base';
+
+function fmtQty(q, unit){
+  if (unit === 'g') return Math.round(q) + 'g';
+  if (unit === 'pcs') return q + ' pc' + (q != 1 ? 's' : '');
+  return q + ' serving' + (q != 1 ? 's' : '');
+}
+
+function renderRows(){
+  ['base','addon'].forEach(kind => {
+    const wrap = document.getElementById(kind + '_rows');
+    wrap.innerHTML = '';
+    rows.filter(r => r.kind === (kind === 'addon' ? 'addon' : 'base')).forEach(r => {
+      const c = COMP[r.id]; if (!c) return;
+      const div = document.createElement('div');
+      div.className = 'b-row';
+      div.innerHTML = `
+        <span class="b-emoji">${c.emoji || '🍽️'}</span>
+        <span class="b-name">${c.name}
+          <input class="b-note" placeholder="note (e.g. scrambled)" value="${(r.note||'').replace(/"/g,'&quot;')}"></span>
+        <span class="stepper">
+          <button type="button" onclick="bump(${r.id},'${r.kind}',-1)">−</button>
+          <b>${fmtQty(r.qty, c.unit)}</b>
+          <button type="button" onclick="bump(${r.id},'${r.kind}',1)">＋</button>
+        </span>`;
+      div.querySelector('.b-note').addEventListener('input', e => { r.note = e.target.value; });
+      wrap.appendChild(div);
+    });
+    if (!wrap.children.length)
+      wrap.innerHTML = `<div class="empty small" style="padding:10px">${kind === 'addon'
+        ? 'No add-ons.' : 'Nothing in this box yet — add the items it should contain.'}</div>`;
+  });
+}
+
+function bump(id, kind, dir){
+  const r = rows.find(x => x.id === id && x.kind === kind);
+  const c = COMP[id]; if (!r || !c) return;
+  const step = (c.unit === 'g') ? (c.step || 50) : (c.step || 1);
+  r.qty = Math.round((r.qty + dir * step) * 100) / 100;
+  if (r.qty <= 0) rows = rows.filter(x => x !== r);
+  renderRows();
+}
+
+function openPicker(kind){
+  pickerKind = kind;
+  document.getElementById('picker_title').textContent = kind === 'addon' ? 'Add add-on' : 'Add item to the box';
+  const wrap = document.getElementById('picker_rows');
+  wrap.innerHTML = '';
+  MENU.components
+    .filter(c => kind !== 'addon' || c.addon_price)
+    .forEach(c => {
+      const div = document.createElement('button');
+      div.type = 'button'; div.className = 'pick-row';
+      const meta = [c.protein, (kind === 'addon' && c.addon_price) ? '₹' + c.addon_price : '']
+        .filter(Boolean).join(' · ');
+      div.innerHTML = `<span class="b-emoji">${c.emoji || '🍽️'}</span><b>${c.name}</b>
+        <span class="muted small">${meta}</span><span class="spacer"></span>＋`;
+      div.onclick = () => {
+        const ex = rows.find(x => x.id === c.id && x.kind === pickerKind);
+        if (ex) ex.qty += (c.unit === 'g' ? (c.step || 50) : 1);
+        else rows.push({id: c.id, qty: c.default_qty || 1, kind: pickerKind, note: ''});
+        closePicker(); renderRows();
+      };
+      wrap.appendChild(div);
+    });
+  document.getElementById('picker').hidden = false;
+}
+function closePicker(){ document.getElementById('picker').hidden = true; }
+document.getElementById('picker').addEventListener('click', e => {
+  if (e.target.id === 'picker') closePicker();
+});
+
+function packComp(){
+  document.getElementById('comp_json').value = JSON.stringify(rows);
+}
+document.getElementById('varform').addEventListener('submit', packComp);
+
+renderRows();
+</script>
+{% endblock %}

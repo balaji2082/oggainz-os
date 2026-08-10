@@ -9,9 +9,25 @@
       <b class="drow-name">{{ r.name }}</b>
       <span class="chip chip-xs chip-{{ slot|lower }}">{{ slot }}</span>
       {% if r.trial_ref %}<span class="chip chip-xs chip-trial">TRIAL</span>{% endif %}
+      {% if r.is_extra %}<span class="chip chip-xs chip-addon"
+        title="An additional meal taken from this pack">EXTRA</span>{% endif %}
     </div>
     <div class="acts">
       {% if r.phone %}<a class="iconbtn" href="{{ r.phone|wa }}" target="_blank" title="WhatsApp">💬</a>{% endif %}
+      {# A customer asking for another box out of their own pack. Opens the sheet
+         rather than adding straight away: the day and the slot are usually NOT
+         this row's — an extra is often for tomorrow, or the other slot, and is
+         often already handed over by the time it gets recorded. #}
+      {% if r.subscription_id and not r.is_extra %}
+      <button class="iconbtn" title="Add an extra meal from this pack"
+              onclick="openExtra(this)"
+              data-sid="{{ r.subscription_id }}" data-name="{{ r.name }}"
+              data-date="{{ r.date }}" data-slot="{{ slot }}">➕</button>
+      {% endif %}
+      {% if r.is_extra %}
+      <button class="iconbtn" title="Remove this extra meal"
+              onclick="removeExtra({{ r.id }})">🗑</button>
+      {% endif %}
       <button class="iconbtn note {{ 'on' if r.day_note }}" title="Note for today's order"
               onclick="toggleNote(this)">📝</button>
       <button class="iconbtn skip {{ 'on' if r.status=='Skipped' }}" title="Skip"
@@ -54,6 +70,72 @@
     </div>
   </div>
 </div>
+{% endmacro %}
+
+
+{# The extra-meal sheet. ONE per page, opened by any row's ➕ and filled in by JS.
+
+   An extra meal is nearly always recorded after the fact ("he took a second box
+   at dinner yesterday"), so every part of it has to be chooseable: the date can
+   be past, today or ahead; the slot is often not the one the customer usually
+   eats in; and it may already be delivered. Guessing any of those and adding the
+   meal on one tap put wrong data in the count, which is the thing this feature
+   exists to get right. `variants` is {sub_id: [{id,name}]} — only subscriptions
+   that actually have alternative boxes appear in it. #}
+{% macro extra_sheet(variants=None) %}
+<div class="sheet" id="extrasheet" hidden>
+  <form class="sheet-card" method="post" id="extraform">
+    <div class="card-title"><h3>➕ Extra meal <span id="ex_for" class="muted"></span></h3>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="closeExtra()">✕</button></div>
+
+    <input type="hidden" name="back" value="{{ request.full_path }}">
+
+    <div class="mini-grid" style="margin-top:4px">
+      <div><label class="mini-l">Date</label>
+        <input type="date" name="date" id="ex_date" required></div>
+      <div><label class="mini-l">Slot</label>
+        <select name="slot" id="ex_slot">
+          <option value="Lunch">Lunch</option>
+          <option value="Dinner">Dinner</option>
+        </select></div>
+    </div>
+
+    <div class="ex-status">
+      <span class="mini-l">Has it gone out already?</span>
+      <label class="ex-pick"><input type="radio" name="status" value="Pending" checked>
+        <span>⏳ Not yet — leave it pending</span></label>
+      <label class="ex-pick"><input type="radio" name="status" value="Delivered">
+        <span>✓ Already delivered — tick it off</span></label>
+    </div>
+
+    <div class="mini-grid" style="margin-top:10px">
+      <div class="grow" id="ex_boxwrap" hidden><label class="mini-l">Which box</label>
+        <select name="variant_id" id="ex_box"><option value="">usual box</option></select></div>
+      <div><label class="mini-l">Counts against pack</label>
+        <select name="counts_against_pack">
+          <option value="1">Yes — uses one of their meals</option>
+          <option value="0">No — sold separately</option>
+        </select></div>
+    </div>
+
+    <div style="margin-top:10px">
+      <label class="mini-l">Note for this order (optional)</label>
+      <input name="note" id="ex_note"
+             placeholder="e.g. second box for his wife · handed over at the gate">
+    </div>
+
+    <div class="ex-acts">
+      <button class="btn btn-primary btn-sm">Add meal</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="closeExtra()">Cancel</button>
+    </div>
+    <div class="small muted" style="margin-top:8px">
+      Taken from the pack they already bought, so their meals-left drops by one and the pack
+      finishes a delivery earlier.
+    </div>
+  </form>
+</div>
+<script>window.OG_VARIANTS = {{ (variants or {})|tojson }};</script>
 {% endmacro %}
 
 {% macro kitchen_control(d, operating, override, endpoint) %}

@@ -1011,3 +1011,71 @@ tr.rowlink:hover{background:var(--cream)}
 .bro-help{background:var(--cream); border-radius:var(--r-sm); padding:10px 12px; font-size:.8rem;
   color:var(--muted); margin-bottom:12px}
 .bro-help code{background:#fff; border:1px solid var(--line); border-radius:5px; padding:0 5px}
+
+/* ===========================================================================
+   v8 — per-subscription delivery schedule, alternative boxes, week planner
+   =========================================================================== */
+
+/* --- Schedule mode picker (daily / chosen weekdays / on demand) --- */
+.sched-block{border-top:1px solid var(--line); padding-top:14px; margin-top:4px}
+.sched-modes{display:flex; gap:8px; flex-wrap:wrap; margin-top:4px}
+.sched-mode{flex:1 1 190px; cursor:pointer}
+.sched-mode input{position:absolute; opacity:0; width:0; height:0}
+.sched-mode .sm-body{display:block; border:1.5px solid var(--line); border-radius:var(--r-sm);
+  padding:10px 12px; background:#fff; transition:border-color .15s, background .15s; height:100%}
+.sched-mode .sm-body b{display:block; font-size:.88rem; color:var(--forest)}
+.sched-mode .sm-body em{display:block; font-style:normal; font-size:.75rem; color:var(--muted);
+  margin-top:2px; line-height:1.35}
+.sched-mode input:checked + .sm-body{border-color:var(--forest); background:#f2fbf5}
+.sched-mode input:focus-visible + .sm-body{outline:2px solid var(--lime); outline-offset:2px}
+
+/* --- The weekday grid --- */
+.sched-days{margin-top:14px; background:var(--cream); border-radius:var(--r-sm); padding:12px}
+.sched-row{display:flex; gap:8px; align-items:center; padding:5px 0; flex-wrap:wrap}
+.sched-row.off{opacity:.45}
+.sched-tick{flex:0 0 96px; display:flex; align-items:center; gap:7px; cursor:pointer;
+  font-weight:700; font-size:.86rem; color:var(--forest)}
+.sched-tick input{width:17px; height:17px; accent-color:var(--forest); cursor:pointer}
+.sched-row select{flex:1 1 130px; min-width:0; font-size:.84rem}
+@media(max-width:560px){
+  .sched-tick{flex:1 1 100%}
+  .sched-row{padding:8px 0; border-bottom:1px dashed var(--line)}
+  .sched-row:last-child{border-bottom:none}
+}
+
+/* --- Alternative boxes --- */
+.var-box{margin-top:16px; border-top:1px solid var(--line); padding-top:12px}
+
+/* --- The fortnight preview --- */
+.prev-list{margin-top:8px; display:flex; flex-direction:column}
+.prev-row{display:flex; align-items:center; gap:9px; padding:6px 2px; font-size:.85rem;
+  border-bottom:1px dashed var(--line)}
+.prev-row:last-child{border-bottom:none}
+.prev-row.off{opacity:.5}
+.prev-day{flex:0 0 108px; font-weight:700; color:var(--forest)}
+.prev-box{color:var(--muted)}
+
+/* --- Week planner: the tick grid for on-demand subscribers --- */
+.plan-week{display:flex; gap:8px; flex-wrap:wrap; margin-top:12px}
+.plan-day{flex:1 1 96px; cursor:pointer; position:relative}
+.plan-day input{position:absolute; opacity:0; width:0; height:0}
+.plan-day .pd-body{display:block; text-align:center; border:1.5px solid var(--line);
+  border-radius:var(--r-sm); padding:10px 6px; background:#fff; transition:border-color .15s, background .15s}
+.plan-day .pd-body b{display:block; font-size:.9rem; color:var(--forest)}
+.plan-day .pd-body em{display:block; font-style:normal; font-size:.72rem; color:var(--muted); margin-top:1px}
+.plan-day .pd-tag{display:block; font-style:normal; font-size:.66rem; text-transform:uppercase;
+  letter-spacing:.04em; color:var(--muted); margin-top:3px; font-weight:700}
+.plan-day input:checked + .pd-body{border-color:var(--forest); background:#e9f6ee}
+.plan-day input:focus-visible + .pd-body{outline:2px solid var(--lime); outline-offset:2px}
+.plan-day.locked,.plan-day.frozen{cursor:not-allowed}
+.plan-day.locked .pd-body{background:#f4f6f5; border-style:dashed}
+.plan-day.frozen .pd-body{background:#eef3fb; border-color:#d3e0f3; border-style:dashed}
+
+/* --- Extra-meal sheet (opened from any order's ➕) --- */
+.ex-status{margin-top:12px; background:var(--cream); border-radius:var(--r-sm); padding:10px 12px}
+.ex-pick{display:flex; align-items:center; gap:9px; padding:7px 0; cursor:pointer; font-size:.88rem}
+.ex-pick input{width:17px; height:17px; accent-color:var(--forest); cursor:pointer; flex:0 0 auto}
+.ex-pick input:checked + span{font-weight:700; color:var(--forest)}
+.ex-acts{display:flex; gap:8px; align-items:center; margin-top:14px}
+.ex-acts .btn{flex:1 1 auto}
+#extrasheet .sheet-card{padding-bottom:18px}

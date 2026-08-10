@@ -121,8 +121,10 @@
 
   {# -------- standing rules -------- #}
   <details class="rules-box" {{ 'open' if rules }}>
-    <summary><b>📐 Standing rules</b> <span class="muted small">· day-wise swaps the prep list applies</span>
+    <summary><b>📐 Standing rules</b> <span class="muted small">· small changes to every box (“no yogurt, ever”)</span>
       {% if rules %}<span class="navbadge">{{ rules|length }}</span>{% endif %}<span class="chev">›</span></summary>
+    <div class="small muted" style="margin:6px 0 2px">A whole different box on some days
+      belongs in <b>Weekly schedule</b> below — these rules are for tweaking ingredients.</div>
     {% for r in rules %}
     <div class="as-row">
       <span class="as-label">{{ rule_labels[r.id] }}{% if r.source=='agent' %} <span class="chip chip-xs chip-addon">agent</span>{% endif %}</span>
@@ -163,6 +165,162 @@
       <button class="btn btn-primary btn-sm" style="margin-top:8px">Add rule</button>
     </form>
   </details>
+</div>
+
+{# ========================== Weekly schedule ============================= #}
+<div class="card">
+  <div class="card-title"><h3>📅 Weekly schedule</h3><span class="spacer"></span>
+    <span class="chip chip-line">{{ schedule_summary }}</span></div>
+
+  <form method="post" action="{{ url_for('subscription_schedule', sid=sub.id) }}">
+    <div class="sched-modes">
+      {% for key, title, blurb in [
+           ('daily',    'Every kitchen day', 'Mon–Fri, the usual.'),
+           ('weekly',   'Chosen weekdays',   'Only some days — and a different box per day if needed.'),
+           ('ondemand', 'On demand',         'Nothing auto-planned; tick their days in the week planner.')] %}
+      <label class="sched-mode">
+        <input type="radio" name="schedule_mode" value="{{ key }}"
+               {{ 'checked' if schedule_mode==key }} onchange="schedMode()">
+        <span class="sm-body"><b>{{ title }}</b><em>{{ blurb }}</em></span>
+      </label>
+      {% endfor %}
+    </div>
+
+    <div id="sched_days" class="sched-days" hidden>
+      <div class="small muted" style="margin-bottom:8px">
+        Tick the days they eat. Leave the box as “usual” unless that day is different.
+      </div>
+      {% for i in range(7) %}
+      {% set d = day_plan.get(i) %}
+      <div class="sched-row">
+        <label class="sched-tick">
+          <input type="checkbox" name="day_active_{{ i }}" value="1"
+                 {{ 'checked' if d and d.active }} onchange="schedRow(this)">
+          <span>{{ weekday_names[i] }}</span>
+        </label>
+        <select name="day_slot_{{ i }}" class="sched-slot">
+          <option value="">usual slot ({{ sub.slot }})</option>
+          {% for sl in ['Lunch','Dinner'] %}
+          <option value="{{ sl }}" {{ 'selected' if d and d.slot==sl }}>{{ sl }}</option>{% endfor %}
+        </select>
+        <select name="day_variant_{{ i }}" class="sched-box">
+          <option value="">usual box ({{ sub.plan_name }})</option>
+          {% for v in variants %}
+          <option value="{{ v.id }}" {{ 'selected' if d and d.variant_id==v.id }}>{{ v.name }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div id="sched_ondemand" class="small muted" hidden style="margin-top:8px">
+      No orders are generated. Tick their days each week in
+      <a href="{{ url_for('planner') }}" style="color:var(--lime)"><b>the week planner ›</b></a>
+    </div>
+
+    <button class="btn btn-primary btn-sm" style="margin-top:12px">Save schedule</button>
+    <div class="small muted" style="margin-top:8px">Changing this only affects days not yet
+      delivered — past meals stay exactly as they happened.</div>
+  </form>
+
+  {# -------- alternative boxes -------- #}
+  <div class="var-box">
+    <div class="card-title" style="margin-bottom:6px"><b>🍱 Alternative boxes</b>
+      <span class="spacer"></span>
+      <span class="muted small">a different meal on some days</span></div>
+    {% for v in variants %}
+    <div class="as-row">
+      <span class="as-label">{{ v.name }}</span>
+      <span class="spacer"></span>
+      <a class="btn btn-ghost btn-sm" href="{{ url_for('subscription_variant_edit', sid=sub.id, vid=v.id) }}">Edit contents</a>
+      <form method="post" action="{{ url_for('subscription_variants', sid=sub.id) }}"
+            onsubmit="return confirm('Remove “{{ v.name|e }}”? Those days go back to the usual box.');">
+        <input type="hidden" name="do" value="delete"><input type="hidden" name="vid" value="{{ v.id }}">
+        <button class="btn btn-ghost btn-sm">🗑</button>
+      </form>
+    </div>
+    {% else %}
+    <div class="small muted" style="padding:4px 0">None yet. Add one when a customer wants
+      something different on certain days — a salad instead of the meal, or a veg version.</div>
+    {% endfor %}
+    <form method="post" action="{{ url_for('subscription_variants', sid=sub.id) }}" class="mini-grid" style="margin-top:10px">
+      <div class="grow"><label class="mini-l">Name it</label>
+        <input name="name" placeholder="e.g. Protein Salad, Veg Thursday"></div>
+      <div><label class="mini-l">Copy a pack (optional)</label>
+        <select name="plan_id"><option value="">start from their usual box</option>
+          {% for p in plans %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        </select></div>
+      <div class="mini-act"><button class="btn btn-primary btn-sm">Add box</button></div>
+    </form>
+  </div>
+
+  {# -------- what the next fortnight looks like -------- #}
+  {% if preview %}
+  <details class="rules-box">
+    <summary><b>🔎 Next 2 weeks</b> <span class="muted small">· check the plan does what you meant</span>
+      <span class="chev">›</span></summary>
+    <div class="prev-list">
+      {% for p in preview %}
+      <div class="prev-row {{ 'off' if not p.deliver or p.frozen }}">
+        <span class="prev-day">{{ p.date|fdate('%a %d %b') }}</span>
+        {% if p.frozen %}<span class="chip chip-paused chip-xs">frozen</span>
+        {% elif p.deliver %}<span class="chip chip-{{ p.slot|lower }} chip-xs">{{ p.slot }}</span>
+          <span class="prev-box">{{ p.box }}</span>
+        {% else %}<span class="muted small">no meal</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+</div>
+
+{# ============================= Extra meal =============================== #}
+<div class="card">
+  <div class="card-title"><h3>➕ Extra meal</h3><span class="spacer"></span>
+    <span class="small muted">a second box, taken from this pack</span></div>
+  <form method="post" action="{{ url_for('subscription_extra', sid=sub.id) }}" class="mini-grid">
+    <div><label class="mini-l">Date</label>
+      <input type="date" name="date" value="{{ today }}" required></div>
+    <div><label class="mini-l">Slot</label>
+      <select name="slot">{% for sl in ['Lunch','Dinner'] %}
+        <option {{ 'selected' if sl != sub.slot }}>{{ sl }}</option>{% endfor %}</select></div>
+    {% if variants %}
+    <div><label class="mini-l">Box</label>
+      <select name="variant_id"><option value="">usual box</option>
+        {% for v in variants %}<option value="{{ v.id }}">{{ v.name }}</option>{% endfor %}
+      </select></div>
+    {% endif %}
+    <div><label class="mini-l">Already delivered?</label>
+      <select name="status"><option value="Pending">No — still to go out</option>
+        <option value="Delivered">Yes, mark delivered</option></select></div>
+    <div><label class="mini-l">Counts against pack</label>
+      <select name="counts_against_pack">
+        <option value="1">Yes — uses one of their meals</option>
+        <option value="0">No — sold separately</option>
+      </select></div>
+    <div class="grow"><label class="mini-l">Note (optional)</label>
+      <input name="note" placeholder="e.g. extra box for his wife"></div>
+    <div class="mini-act"><button class="btn btn-primary btn-sm">Add meal</button></div>
+  </form>
+  <div class="small muted" style="margin-top:8px">
+    They bought {{ sub.total_meals_scheduled }} servings, not {{ sub.total_meals_scheduled }} days —
+    so a second box on one day is fine and simply uses a meal up early. The pack then finishes
+    a delivery sooner, and the count stays honest.
+  </div>
+
+  {% if extras %}
+  <div class="window-list">
+    {% for e in extras %}
+    <div class="as-row">
+      <span class="as-label">{{ e.date|fdate('%d %b') }} · {{ e.meal_type }}
+        <span class="chip chip-xs {{ 'chip-active' if e.status=='Delivered' else 'chip-line' }}">{{ e.status }}</span>
+        {% if not e.counts_against_pack %}<span class="chip chip-xs chip-addon">billed separately</span>{% endif %}
+        {% if e.day_note %}<span class="muted small"> · {{ e.day_note }}</span>{% endif %}</span>
+      <span class="spacer"></span>
+      <button class="btn btn-ghost btn-sm" onclick="removeExtra({{ e.id }})">🗑</button>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 </div>
 
 {# ============================ Freeze / pause ============================ #}
@@ -289,17 +447,13 @@
     {% endif %}
   </div>
 
-  <details class="renew-box">
-    <summary><span class="btn btn-primary btn-sm">🔄 Renew this pack</span></summary>
-    <form method="post" action="{{ url_for('subscription_renew', sid=sub.id) }}" class="mini-grid" style="margin-top:12px">
-      <div><label class="mini-l">Billing date</label><input type="date" name="booking_date" value="{{ today }}"></div>
-      <div><label class="mini-l">Start date</label><input type="date" name="start_date" value="{{ today }}"></div>
-      <div><label class="mini-l">Received (₹)</label><input type="number" step="1" name="amount_received" value="0"></div>
-      <div class="mini-act"><button class="btn btn-success btn-sm">Create renewal</button></div>
-    </form>
-    <div class="small muted" style="margin-top:6px">Creates a fresh {{ sub.plan_name }} pack
-      ({{ sub.total_amount|inr }}) for {{ sub.customer_name }} billed on the date you choose.</div>
-  </details>
+  <div class="renew-box">
+    <a class="btn btn-primary btn-sm" href="{{ url_for('subscription_new', renew=sub.id) }}">🔄 Renew this pack</a>
+    <div class="small muted" style="margin-top:6px">Opens a new {{ sub.plan_name }} pack
+      ({{ sub.total_amount|inr }}) for {{ sub.customer_name }}, already filled in with this
+      pack's contents, add-ons{% if variants %}, alternative boxes{% endif %} and schedule —
+      check it over, change anything different this month, then create it.</div>
+  </div>
 
   <div class="danger-zone">
     <div class="small muted">Created by mistake? Deleting removes this subscription and its meal
@@ -336,6 +490,29 @@ function ruleKind(sel){
   const to = form.querySelector('[data-rule=to]');
   from.style.display = (sel.value === 'add') ? 'none' : '';
   to.style.display = (sel.value === 'remove') ? 'none' : '';
+}
+
+// Delivery schedule: only show the controls the chosen mode uses.
+function schedMode(){
+  const mode = (document.querySelector('input[name=schedule_mode]:checked') || {}).value || 'daily';
+  document.getElementById('sched_days').hidden = (mode !== 'weekly');
+  document.getElementById('sched_ondemand').hidden = (mode !== 'ondemand');
+  document.querySelectorAll('.sched-row').forEach(r => schedRow(r.querySelector('input[type=checkbox]')));
+}
+function schedRow(cb){
+  if (!cb) return;
+  const row = cb.closest('.sched-row');
+  row.classList.toggle('off', !cb.checked);
+  row.querySelectorAll('select').forEach(s => { s.disabled = !cb.checked; });
+}
+schedMode();
+
+function removeExtra(id){
+  if (!confirm('Remove this extra meal? The pack gets the serving back.')) return;
+  fetch('/api/delivery/' + id + '/delete', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => { if (d.ok) location.reload(); else alert(d.error || 'Could not remove it.'); })
+    .catch(() => alert('Could not remove it.'));
 }
 </script>
 {% endblock %}

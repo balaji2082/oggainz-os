@@ -700,12 +700,21 @@ def build_route(conn, day_iso, slot, rows=None, batch=None, split=True):
     speed = fnum(conn, "avg_speed_kmph") or 20
     dwell = fnum(conn, "dwell_min")
     t = _parse_hhmm(setting(conn, "depart_time"))
+    prev_pin = None
     for i, s in enumerate(ordered, 1):
         leg = legs[i - 1] if i - 1 < len(legs) else 0.0
         # Handing several bags over at one point takes a little longer than a
         # single drop, but not once per order — one conversation, several bags.
         n_here = len(s.get("orders") or []) or 1
-        t += timedelta(minutes=(leg / speed) * 60 + dwell * (1 + 0.4 * (n_here - 1)))
+        # Same idea one door down: a customer taking an extra box that day is two
+        # order rows at one address. The rider knocks once, so the second row is
+        # the same visit — it must not book a second full dwell.
+        pin = (s["lat"], s["lng"])
+        same_visit = (pin == prev_pin)
+        s["same_stop_as_prev"] = same_visit
+        prev_pin = pin
+        t += timedelta(minutes=(leg / speed) * 60
+                       + dwell * ((0.4 if same_visit else 1) + 0.4 * (n_here - 1)))
         s["seq"] = i
         s["km_from_prev"] = round(leg, 2)
         s["eta"] = _clock(t)

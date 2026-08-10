@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Week planner · OG Gainz{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('more') }}">‹ Back</a>
+  <h1 style="margin:0 0 0 6px">Week planner</h1>
+</div>
+
+<p class="muted" style="margin:-4px 0 14px">
+  The subscribers who take a meal only when they need it and confirm the day before.
+  Nothing is planned for them automatically — tick the days they've confirmed and the
+  orders appear in the kitchen list. Their pack simply lasts until the meals run out.
+</p>
+
+<div class="card" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('planner', start=prev_week) }}">‹ Previous</a>
+  <b>Week of {{ week[0]|fdate('%d %b') }}</b>
+  <span class="muted small">{{ open_days|length }} kitchen day{{ '' if open_days|length == 1 else 's' }}</span>
+  <span class="spacer"></span>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('planner', start=next_week) }}">Next ›</a>
+</div>
+
+{% if not rows %}
+<div class="card">
+  <div class="empty small">No on-demand subscribers yet. Set a subscription's schedule to
+    <b>On demand</b> on its page and it will appear here every week.</div>
+</div>
+{% else %}
+
+{% for r in rows %}
+<div class="card">
+  <form method="post" action="{{ url_for('planner') }}">
+    <input type="hidden" name="sid" value="{{ r.sub.id }}">
+    <input type="hidden" name="start" value="{{ monday }}">
+    <div class="card-title">
+      <div class="avatar">{{ r.sub.customer_name[:1] }}</div>
+      <div>
+        <b>{{ r.sub.customer_name }}</b>
+        <div class="small muted">{{ r.sub.id }} · {{ r.sub.plan_name }} ·
+          <b style="color:var(--forest)">{{ r.sub.remaining_meals or 0 }} meals left</b></div>
+      </div>
+      <span class="spacer"></span>
+      <a class="btn btn-ghost btn-sm" href="{{ url_for('subscription_detail', sid=r.sub.id) }}">Open</a>
+    </div>
+
+    <div class="plan-week">
+      {% for d in open_days %}
+      {% set row = r.planned.get(d) %}
+      {% set locked = row and row.status in ('Delivered','Skipped') %}
+      <label class="plan-day {{ 'locked' if locked }} {{ 'frozen' if r.frozen.get(d) }}">
+        <input type="checkbox" name="day" value="{{ d }}"
+               {{ 'checked' if row }} {{ 'disabled' if locked or r.frozen.get(d) }}>
+        <span class="pd-body">
+          <b>{{ d|fdate('%a') }}</b>
+          <em>{{ d|fdate('%d %b') }}</em>
+          {% if locked %}<i class="pd-tag">{{ row.status }}</i>
+          {% elif r.frozen.get(d) %}<i class="pd-tag">frozen</i>{% endif %}
+        </span>
+      </label>
+      {% endfor %}
+    </div>
+
+    <button class="btn btn-primary btn-sm" style="margin-top:10px">Save {{ r.sub.customer_name.split()[0] }}'s week</button>
+    <span class="small muted" style="margin-left:8px">Delivered and skipped days can't be changed here.</span>
+  </form>
+</div>
+{% endfor %}
+{% endif %}
+
+{% endblock %}

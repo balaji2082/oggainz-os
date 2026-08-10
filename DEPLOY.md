@@ -200,3 +200,49 @@ subscriptions are untouched.**
   WhatsApp** to share, and a one-tap **📘 Send brochure** button on every CRM lead.
   It seeded itself from the app's live pack prices — give it one read and tweak any wording
   you want.
+
+---
+
+## 9 August 2026 update — delivery schedules, extra meals, proper renewals
+
+Same 2-step deploy (`git pull` + **Reload**). All additive: the new tables create themselves
+on first load and every existing pack keeps its current behaviour — **nothing changes for
+anyone until you change it yourself.** Verified against a copy of the live database: all 74
+subscriptions came through the migration with identical counts and statuses.
+
+- **Delivery schedule, per subscription** (subscription page → *📅 Weekly schedule*, and now
+  on the create/edit form too). Three choices:
+  - **Every kitchen day** — Mon–Fri, exactly as today. This is what every existing pack is set
+    to, so nothing moves until you change it.
+  - **Chosen weekdays** — tick only the days they eat. *Razia* on Mon/Wed/Fri, *Raja Sankar*
+    on Mon–Thu. No order is generated on the other days, so their meals last longer instead of
+    being burnt on days they don't eat.
+  - **On demand** — nothing is planned automatically; you tick their days in the week planner.
+    For the people who take 1–3 meals a week and confirm the day before.
+- **Alternative boxes** (same card). Give a subscription a second, named box — "Protein Salad",
+  "Veg Thursday" — with its own contents, then point individual weekdays at it.
+  *Vaithi* is now: Mon Signature · Tue Salad · Wed Signature · **Thu veg (paneer + legumes)** ·
+  Fri Salad, and the prep list, rider sheet and customer app all follow it on their own.
+  Standing rules ("no yogurt, ever") still apply on top of whichever box the day picks.
+- **Next 2 weeks** preview on the subscription page — check a schedule does what you meant
+  before the kitchen finds out.
+- **Week planner** (More → *Week planner*). Every on-demand subscriber as a Mon–Fri tick grid
+  with meals-left shown. Tick a day → the order appears. Untick → it's gone. Delivered and
+  skipped days are locked so re-saving a part-done week is safe.
+- **Extra meals.** A customer taking a second box in a day — a different slot, or just one
+  more — is now a real order row instead of a note. Add it from the ➕ on the day's order, or
+  from *➕ Extra meal* on the subscription page. It comes out of the pack they already bought,
+  so the count stays honest: **Raja's 30 July dinner box now reads 12/20 instead of 11/20.**
+  There's a "sold separately" option for a meal that shouldn't use a pack meal.
+  Automatic order-generation never creates or deletes an extra — only you do.
+- **Renewals actually carry the pack over.** *🔄 Renew this pack* now opens a **new
+  subscription form already filled in** — contents, add-ons, alternative boxes and the weekly
+  schedule — for you to check, adjust anything different this month, and create. Previously a
+  renewal copied only the subscription row, so the new pack arrived **with no contents at all**
+  and the prep list couldn't see it until you re-entered everything by hand.
+- **Regression tests:** `python test_schedule.py` (51 checks) covers all of the above,
+  including that a delivered meal is never rewritten by a schedule change and that a renewal's
+  boxes belong to the renewal. `test_customer_api.py` (51) and `test_invite_button.py` (27)
+  still pass unchanged.
+
+Nothing here touches validity/expiry — packs still never expire on their own.

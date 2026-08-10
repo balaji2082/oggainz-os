@@ -61,11 +61,13 @@ def purge_unworked_day(conn, day_iso):
     auto-creates Pending rows for every active subscription, and those used to
     linger (and keep showing up) after the day was closed again. We only drop
     Pending subscription rows — Delivered/Skipped history and any explicit trial
-    orders placed for that date are left untouched. Returns the number removed.
+    orders placed for that date are left untouched. A hand-added extra meal is
+    kept too: like a trial, it was put on that date deliberately, so closing the
+    day must not silently throw it away. Returns the number removed.
     """
     cur = conn.execute(
         "DELETE FROM deliveries WHERE date=? AND status='Pending' "
-        "AND subscription_id IS NOT NULL",
+        "AND subscription_id IS NOT NULL AND COALESCE(is_extra,0)=0",
         (day_iso,))
     conn.commit()
     return cur.rowcount
@@ -230,15 +232,21 @@ def resync_order_slots(conn, sub_id):
     Applies to TODAY and every future row (whatever their status) so a change shows up
     on the current day immediately — even if today's order was already marked
     delivered/skipped — plus any still-Pending past row. Genuinely past Delivered/Skipped
-    rows are left untouched as the true record of what happened."""
-    sub = conn.execute("SELECT slot FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
-    base = (sub["slot"] if sub else None) or "Lunch"
+    rows are left untouched as the true record of what happened. Hand-added extras
+    keep the slot they were created in — an extra put in Dinner on purpose must not
+    be dragged back to the standing Lunch slot by an unrelated edit."""
+    sub = conn.execute("SELECT * FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
+    if not sub:
+        return
     today_iso = _today_iso()
     for r in conn.execute(
             "SELECT id, date FROM deliveries WHERE subscription_id=? "
-            "AND (date>=? OR status='Pending')", (sub_id, today_iso)).fetchall():
-        slot = effective_slot(conn, sub_id, r["date"], base)
-        conn.execute("UPDATE deliveries SET meal_type=? WHERE id=?", (slot, r["id"]))
+            "AND (date>=? OR status='Pending') AND COALESCE(is_extra,0)=0",
+            (sub_id, today_iso)).fetchall():
+        # plan_for_day folds in the weekly plan's per-day slot as well as any
+        # covering slot move, so a "Mon lunch / Wed dinner" schedule resyncs right.
+        conn.execute("UPDATE deliveries SET meal_type=? WHERE id=?",
+                     (plan_for_day(conn, sub, r["date"])["slot"], r["id"]))
     conn.commit()
 
 
@@ -273,16 +281,149 @@ def delete_slot_move(conn, move_id):
 
 
 # ---------------------------------------------------------------------------
+# Per-subscription delivery schedule (which weekdays, which slot, which box)
+# ---------------------------------------------------------------------------
+WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def schedule_mode(sub):
+    """'daily' | 'weekly' | 'ondemand'. Anything unrecognised (or a row from
+    before this shipped) means daily — the behaviour every pack has always had."""
+    try:
+        mode = sub["schedule_mode"]
+    except (IndexError, KeyError):
+        mode = None
+    return mode if mode in ("daily", "weekly", "ondemand") else "daily"
+
+
+def day_plan_for(conn, sub_id):
+    """{weekday:int -> row} for a subscription. Empty when it has no plan."""
+    return {r["weekday"]: r for r in conn.execute(
+        "SELECT * FROM subscription_day_plan WHERE subscription_id=? ORDER BY weekday",
+        (sub_id,)).fetchall()}
+
+
+def save_day_plan(conn, sub_id, rows):
+    """Replace a subscription's weekly plan.
+
+    rows = [{weekday, active, slot, variant_id, meals, note}]. Written as a whole
+    so the stored plan always matches the grid that was submitted — no orphan
+    weekday left behind from a previous save.
+    """
+    conn.execute("DELETE FROM subscription_day_plan WHERE subscription_id=?", (sub_id,))
+    for r in rows:
+        try:
+            wd = int(r.get("weekday"))
+        except (TypeError, ValueError):
+            continue
+        if not 0 <= wd <= 6:
+            continue
+        conn.execute(
+            "INSERT INTO subscription_day_plan(subscription_id,weekday,active,slot,variant_id,meals,note) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (sub_id, wd, 1 if r.get("active") else 0, (r.get("slot") or None),
+             (int(r["variant_id"]) if r.get("variant_id") else None),
+             max(1, int(r.get("meals") or 1)), (r.get("note") or "").strip() or None))
+    conn.commit()
+
+
+def plan_for_day(conn, sub, day_iso):
+    """What this subscription gets on this date:
+        {deliver: bool, slot: str, variant_id: int|None, meals: int}
+
+    The single place that answers "is there an order today, and which box". The
+    generator, the backfill and the week planner all go through it so they can
+    never disagree.
+    """
+    base_slot = effective_slot(conn, sub["id"], day_iso, sub["slot"])
+    mode = schedule_mode(sub)
+    if mode == "ondemand":
+        # Nothing is ever generated: these customers confirm a day at a time and
+        # the days are entered by hand (week planner / "add a meal").
+        return {"deliver": False, "slot": base_slot, "variant_id": None, "meals": 1}
+    if mode == "daily":
+        return {"deliver": True, "slot": base_slot, "variant_id": None, "meals": 1}
+
+    weekday = datetime.strptime(day_iso, "%Y-%m-%d").date().weekday()
+    row = day_plan_for(conn, sub["id"]).get(weekday)
+    if row is None:
+        # 'weekly' with no row for this weekday = no delivery. A plan that only
+        # ticks Mon/Wed/Fri stores only those three days, so a missing row is a
+        # deliberate "not this day", not missing data.
+        return {"deliver": False, "slot": base_slot, "variant_id": None, "meals": 1}
+    # A temporary slot move still wins over the plan's per-day slot: it is the more
+    # specific, more recent instruction ("deliver in the evening this week").
+    mv = current_slot_move(conn, sub["id"], day_iso)
+    slot = mv["slot"] if mv else ((row["slot"] or None) or base_slot)
+    return {"deliver": bool(row["active"]), "slot": slot,
+            "variant_id": row["variant_id"], "meals": max(1, row["meals"] or 1)}
+
+
+def schedule_summary(conn, sub):
+    """One line for lists and the subscription header, e.g.
+    'Mon, Wed, Fri' or 'Mon Signature · Tue Salad · …' or 'On demand'."""
+    mode = schedule_mode(sub)
+    if mode == "daily":
+        return "Every kitchen day"
+    if mode == "ondemand":
+        return "On demand — days confirmed one at a time"
+    plan = day_plan_for(conn, sub["id"])
+    days = [wd for wd in range(7) if plan.get(wd) is not None and plan[wd]["active"]]
+    if not days:
+        return "No delivery days set"
+    names = {v["id"]: v["name"] for v in conn.execute(
+        "SELECT id,name FROM subscription_variants WHERE subscription_id=?",
+        (sub["id"],)).fetchall()}
+    if any(plan[wd]["variant_id"] for wd in days):
+        return " · ".join(
+            f"{WEEKDAY_NAMES[wd]} {names.get(plan[wd]['variant_id'], sub['plan_name'] or 'usual')}"
+            for wd in days)
+    return ", ".join(WEEKDAY_NAMES[wd] for wd in days)
+
+
+def resync_scheduled_days(conn, sub_id):
+    """After the schedule changes, bring FUTURE planned orders in line with it.
+
+    Removes still-Pending rows on days the subscription no longer delivers, and
+    restamps the slot/box on the ones it keeps. Deliberately limited to today and
+    later, and to Pending rows: a delivered meal is history and is never rewritten
+    by a schedule edit. Hand-added extras are left alone — they were a decision.
+    """
+    sub = conn.execute("SELECT * FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
+    if not sub:
+        return 0
+    today_iso = _today_iso()
+    removed = 0
+    for r in conn.execute(
+            "SELECT id, date FROM deliveries WHERE subscription_id=? AND status='Pending' "
+            "AND date>=? AND COALESCE(is_extra,0)=0", (sub_id, today_iso)).fetchall():
+        p = plan_for_day(conn, sub, r["date"])
+        if not p["deliver"]:
+            conn.execute("DELETE FROM deliveries WHERE id=?", (r["id"],))
+            removed += 1
+        else:
+            conn.execute("UPDATE deliveries SET meal_type=?, variant_id=? WHERE id=?",
+                         (p["slot"], p["variant_id"], r["id"]))
+    conn.commit()
+    return removed
+
+
+# ---------------------------------------------------------------------------
 # Subscription recompute
 # ---------------------------------------------------------------------------
 def recompute_subscription(conn, sub_id, commit=True):
     sub = conn.execute("SELECT * FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
     if not sub:
         return
+    # An extra meal the customer drew from their own pack counts exactly like any
+    # other delivered meal — that is the whole point of it, and why a pack with an
+    # extra finishes a day early. Only a meal explicitly sold OUTSIDE the pack
+    # (counts_against_pack=0) is left out of the count. COALESCE keeps every row
+    # written before this column existed counting as it always did.
     row = conn.execute(
         "SELECT "
-        " SUM(status='Delivered') AS d, "
-        " SUM(status='Skipped')   AS s, "
+        " SUM(status='Delivered' AND COALESCE(counts_against_pack,1)=1) AS d, "
+        " SUM(status='Skipped'   AND COALESCE(counts_against_pack,1)=1) AS s, "
         " MAX(CASE WHEN status='Delivered' THEN date END) AS last "
         "FROM deliveries WHERE subscription_id=?",
         (sub_id,),
@@ -315,9 +456,12 @@ def recompute_subscription(conn, sub_id, commit=True):
     # new day rows get generated) and then re-marked Delivered: the moment the
     # count is complete again, the extra Pending rows vanish on their own.
     # Delivered/Skipped history is never touched.
+    # A hand-added extra is never cleared here: it was put there on purpose, and if
+    # it is what finished the pack off, deleting it would undo the very meal that
+    # completed the count.
     if scheduled and remaining <= 0:
-        conn.execute("DELETE FROM deliveries WHERE subscription_id=? AND status='Pending'",
-                     (sub_id,))
+        conn.execute("DELETE FROM deliveries WHERE subscription_id=? AND status='Pending' "
+                     "AND COALESCE(is_extra,0)=0", (sub_id,))
     if commit:
         conn.commit()
 
@@ -369,16 +513,22 @@ def backfill_sub_days(conn, sub_id):
                 continue
             if is_paused_on(conn, sub_id, day_iso):
                 continue
-            if conn.execute("SELECT 1 FROM deliveries WHERE subscription_id=? AND date=?",
-                            (sub_id, day_iso)).fetchone():
+            # Their own weekly schedule: a Mon/Wed/Fri customer gets no Tuesday
+            # row, and an on-demand one gets nothing generated at all.
+            plan = plan_for_day(conn, sub, day_iso)
+            if not plan["deliver"]:
                 continue
-            slot = effective_slot(conn, sub_id, day_iso, sub["slot"])
+            # Only auto-rows block a re-run; a hand-added extra on this date must
+            # not make the day look already-generated.
+            if conn.execute("SELECT 1 FROM deliveries WHERE subscription_id=? AND date=? "
+                            "AND COALESCE(is_extra,0)=0", (sub_id, day_iso)).fetchone():
+                continue
             conn.execute(
                 "INSERT INTO deliveries(date,subscription_id,customer_id,name,meal_type,"
-                "status,month,notes,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                (day_iso, sub_id, sub["customer_id"], sub["customer_name"], slot, "Pending",
-                 datetime.strptime(day_iso, "%Y-%m-%d").strftime("%b-%Y"),
-                 sub["plan_name"], db.now_iso()))
+                "status,month,notes,created_at,variant_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (day_iso, sub_id, sub["customer_id"], sub["customer_name"], plan["slot"],
+                 "Pending", datetime.strptime(day_iso, "%Y-%m-%d").strftime("%b-%Y"),
+                 sub["plan_name"], db.now_iso(), plan["variant_id"]))
             created += 1
     conn.commit()
     return created
@@ -400,7 +550,8 @@ def ensure_day_rows(conn, day_iso):
     # from past-day corrections — e.g. a finished pack that briefly looked Active
     # while old days were unmarked — and must never keep showing as today's orders.
     conn.execute(
-        "DELETE FROM deliveries WHERE date=? AND status='Pending' AND subscription_id IN "
+        "DELETE FROM deliveries WHERE date=? AND status='Pending' AND COALESCE(is_extra,0)=0 "
+        "AND subscription_id IN "
         "(SELECT id FROM subscriptions WHERE COALESCE(total_meals_scheduled,0)>0 "
         " AND COALESCE(remaining_meals,0)<=0)", (day_iso,))
     month_label = datetime.strptime(day_iso, "%Y-%m-%d").strftime("%b-%Y")
@@ -417,8 +568,16 @@ def ensure_day_rows(conn, day_iso):
     for s in subs:
         if is_paused_on(conn, s["id"], day_iso):     # frozen this day → no order
             continue
+        # Their own weekly schedule decides whether this weekday is a delivery day
+        # at all, which slot it lands in, and which box gets cooked.
+        plan = plan_for_day(conn, s, day_iso)
+        if not plan["deliver"]:
+            continue
+        # An extra added by hand on this date is not an auto-row, so it must not
+        # count as "already generated" and suppress the normal order.
         exists = conn.execute(
-            "SELECT 1 FROM deliveries WHERE subscription_id=? AND date=?",
+            "SELECT 1 FROM deliveries WHERE subscription_id=? AND date=? "
+            "AND COALESCE(is_extra,0)=0",
             (s["id"], day_iso),
         ).fetchone()
         if exists:
@@ -431,12 +590,12 @@ def ensure_day_rows(conn, day_iso):
             (s["id"],)).fetchone()[0]
         if planned >= (s["remaining_meals"] or 0):
             continue
-        slot = effective_slot(conn, s["id"], day_iso, s["slot"])
         conn.execute(
-            "INSERT INTO deliveries(date,subscription_id,customer_id,name,meal_type,status,month,notes,created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO deliveries(date,subscription_id,customer_id,name,meal_type,status,month,notes,created_at,variant_id) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
             (day_iso, s["id"], s["customer_id"], s["customer_name"],
-             slot, "Pending", month_label, s["plan_name"], db.now_iso()),
+             plan["slot"], "Pending", month_label, s["plan_name"], db.now_iso(),
+             plan["variant_id"]),
         )
         created += 1
     conn.commit()
@@ -531,6 +690,102 @@ def mark_delivery(conn, delivery_id, status):
         conn.execute("UPDATE trial_orders SET delivery_status=? WHERE id=?", (status, d["trial_id"]))
         conn.commit()
     return d["subscription_id"]
+
+
+# ---------------------------------------------------------------------------
+# Extra meals — a second box on a day, drawn from the pack already bought
+# ---------------------------------------------------------------------------
+def add_extra_meal(conn, sub_id, day_iso, slot=None, counts_against_pack=True,
+                   note=None, variant_id=None, status="Pending"):
+    """Put an ADDITIONAL meal on a date for a subscription that already has one.
+
+    A subscription is sold as a number of servings, not as a number of days, so a
+    customer can quite legitimately take two in one day — a second box in the
+    evening, or a spare for someone at home — and have it come out of the pack
+    they have already paid for. Buying that meal on its own would cost them more
+    than their per-meal pack rate, which is exactly why they ask for it this way.
+
+    The row is marked is_extra so no automatic process ever creates or removes it,
+    and counts_against_pack (the normal case) makes it consume one of the pack's
+    meals — so 20 meals now finish one delivery day earlier, which is correct.
+
+    Returns the new delivery id, or None if the subscription doesn't exist.
+    """
+    sub = conn.execute("SELECT * FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
+    if not sub:
+        return None
+    slot = slot or plan_for_day(conn, sub, day_iso)["slot"]
+    cur = conn.execute(
+        "INSERT INTO deliveries(date,subscription_id,customer_id,name,meal_type,status,"
+        "month,notes,created_at,is_extra,counts_against_pack,variant_id,day_note,day_note_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (day_iso, sub_id, sub["customer_id"], sub["customer_name"], slot, status,
+         datetime.strptime(day_iso, "%Y-%m-%d").strftime("%b-%Y"), sub["plan_name"],
+         db.now_iso(), 1, 1 if counts_against_pack else 0, variant_id,
+         (note or "").strip() or None, db.now_iso() if (note or "").strip() else None))
+    conn.commit()
+    recompute_subscription(conn, sub_id)
+    return cur.lastrowid
+
+
+def delete_delivery(conn, delivery_id):
+    """Remove one order row (used to undo an extra added by mistake) and put the
+    subscription's counts back where they were."""
+    d = conn.execute("SELECT subscription_id FROM deliveries WHERE id=?",
+                     (delivery_id,)).fetchone()
+    if not d:
+        return None
+    conn.execute("DELETE FROM deliveries WHERE id=?", (delivery_id,))
+    conn.commit()
+    if d["subscription_id"]:
+        recompute_subscription(conn, d["subscription_id"])
+    return d["subscription_id"]
+
+
+def plan_week(conn, sub_id, wanted_days, window_days, slot=None):
+    """Set exactly which days of a window an on-demand subscription eats on.
+
+    Used by the week planner. `window_days` is every date the planner showed;
+    `wanted_days` is the subset that is ticked. Both are needed: unticking a day
+    means removing an order for a date that is, by definition, no longer in the
+    ticked list, so the window is what tells us where to look.
+
+    Delivered/Skipped days and hand-added extras are never touched, so re-saving
+    a week you have already part-delivered is safe. Returns (added, removed).
+    """
+    sub = conn.execute("SELECT * FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
+    if not sub:
+        return 0, 0
+    window = set(window_days or []) | set(wanted_days or [])
+    wanted = set(wanted_days or []) & window
+    added = removed = 0
+    for day_iso in sorted(window):
+        has = conn.execute(
+            "SELECT id FROM deliveries WHERE subscription_id=? AND date=? AND status='Pending' "
+            "AND COALESCE(is_extra,0)=0", (sub_id, day_iso)).fetchone()
+        if day_iso in wanted and not has:
+            if not is_operating_day(conn, day_iso) or is_paused_on(conn, sub_id, day_iso):
+                continue
+            # Never plan past what the pack still owes.
+            planned = conn.execute(
+                "SELECT COUNT(*) FROM deliveries WHERE subscription_id=? AND status='Pending'",
+                (sub_id,)).fetchone()[0]
+            if planned >= (sub["remaining_meals"] or 0):
+                continue
+            conn.execute(
+                "INSERT INTO deliveries(date,subscription_id,customer_id,name,meal_type,status,"
+                "month,notes,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (day_iso, sub_id, sub["customer_id"], sub["customer_name"],
+                 slot or effective_slot(conn, sub_id, day_iso, sub["slot"]), "Pending",
+                 datetime.strptime(day_iso, "%Y-%m-%d").strftime("%b-%Y"),
+                 sub["plan_name"], db.now_iso()))
+            added += 1
+        elif day_iso not in wanted and has:
+            conn.execute("DELETE FROM deliveries WHERE id=?", (has["id"],))
+            removed += 1
+    conn.commit()
+    recompute_subscription(conn, sub_id)
+    return added, removed
 
 
 # ---------------------------------------------------------------------------

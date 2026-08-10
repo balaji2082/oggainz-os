@@ -1,17 +1,26 @@
 {% extends "base.html" %}
-{% block title %}{{ 'Edit' if sub else 'New' }} subscription · OG Gainz{% endblock %}
+{# `sub` is the pack being edited — or, when renewing, the pack being copied FROM.
+   `editing` tells the two apart so a renewal never claims to be an edit. #}
+{% set editing = sub and not is_new %}
+{% block title %}{{ 'Edit' if editing else ('Renew' if renew_of else 'New') }} subscription · OG Gainz{% endblock %}
 {% block content %}
 <div class="page-head">
   <a class="btn btn-ghost btn-sm" href="{{ url_for('subscriptions') if not sub else url_for('subscription_detail', sid=sub.id) }}">‹ Cancel</a>
-  <h1 style="margin:0 0 0 6px">{{ 'Edit subscription' if sub else 'New subscription' }}</h1>
+  <h1 style="margin:0 0 0 6px">{{ 'Edit subscription' if editing else ('Renew subscription' if renew_of else 'New subscription') }}</h1>
 </div>
 
-<form method="post" class="card" id="subform">
+<form method="post" class="card" id="subform"
+      action="{{ url_for('subscription_edit', sid=sub.id) if editing else url_for('subscription_new') }}">
   {% if lead %}<input type="hidden" name="lead" value="{{ lead }}">{% endif %}
+  {% if renew_of %}<input type="hidden" name="renew_of" value="{{ renew_of }}">{% endif %}
   <input type="hidden" name="comp_json" id="comp_json">
   <div class="form-grid">
     {% if preset_customer %}<div class="full alert alert-warn" style="margin-bottom:4px">
       ✓ Lead converted — booking this pack for the new customer.</div>{% endif %}
+    {% if renew_of %}<div class="full alert alert-warn" style="margin-bottom:4px">
+      🔄 Renewing <b>{{ renew_of }}</b> for {{ sub.customer_name }} — the contents, add-ons,
+      alternative boxes and delivery schedule below are carried over. Change whatever is
+      different this month, then create the pack.</div>{% endif %}
     <div class="full">
       <label>Customer{% if sub %} (whose name this is registered under){% endif %}</label>
       <select name="customer_id" required>
@@ -86,12 +95,12 @@
     <div>
       <label>Booking / billing date</label>
       <input name="booking_date" type="date"
-             value="{{ sub.booking_date if sub else today }}">
+             value="{{ sub.booking_date if editing else today }}">
       <div class="small muted" style="margin-top:6px">Revenue is billed on this date.</div>
     </div>
     <div>
       <label>Start date</label>
-      <input name="start_date" type="date" value="{{ sub.start_date if sub else today }}">
+      <input name="start_date" type="date" value="{{ sub.start_date if editing else today }}">
       <div class="small muted" style="margin-top:6px">Meals start counting from here.</div>
     </div>
 
@@ -110,7 +119,64 @@
     </div>
     <div>
       <label>Amount received (₹)</label>
-      <input name="amount_received" type="number" step="1" value="{{ sub.amount_received if sub else '' }}">
+      {# A renewal starts unpaid: last month's money belongs to last month's pack. #}
+      <input name="amount_received" type="number" step="1" value="{{ sub.amount_received if editing else '' }}">
+    </div>
+
+    <!-- ===== Delivery schedule: which days, which slot, which box ===== -->
+    <div class="full sched-block">
+      <label>📅 Delivery schedule</label>
+      <div class="sched-modes">
+        {% set cur_mode = (sub.schedule_mode or 'daily') if sub else 'daily' %}
+        {% for key, title, blurb in [
+             ('daily',    'Every kitchen day', 'Mon–Fri, the usual.'),
+             ('weekly',   'Chosen weekdays',   'Only some days — and a different box per day if needed.'),
+             ('ondemand', 'On demand',         'Nothing auto-planned; days are ticked in the week planner.')] %}
+        <label class="sched-mode">
+          <input type="radio" name="schedule_mode" value="{{ key }}"
+                 {{ 'checked' if cur_mode==key }} onchange="schedMode()">
+          <span class="sm-body"><b>{{ title }}</b><em>{{ blurb }}</em></span>
+        </label>
+        {% endfor %}
+      </div>
+
+      <div id="sched_days" class="sched-days" hidden>
+        <div class="small muted" style="margin-bottom:8px">
+          Tick the days they eat. Leave the box as “usual” unless that day is different.
+        </div>
+        {% for i in range(7) %}
+        {% set d = day_plan.get(i) %}
+        <div class="sched-row">
+          <label class="sched-tick">
+            <input type="checkbox" name="day_active_{{ i }}" value="1"
+                   {{ 'checked' if d and d.active }} onchange="schedRow(this)">
+            <span>{{ weekday_names[i] }}</span>
+          </label>
+          <select name="day_slot_{{ i }}" class="sched-slot">
+            <option value="">usual slot</option>
+            {% for sl in ['Lunch','Dinner'] %}
+            <option value="{{ sl }}" {{ 'selected' if d and d.slot==sl }}>{{ sl }}</option>{% endfor %}
+          </select>
+          <select name="day_variant_{{ i }}" class="sched-box">
+            <option value="">usual box</option>
+            {% for v in variants %}
+            <option value="{{ v.id }}" {{ 'selected' if d and d.variant_id==v.id }}>{{ v.name }}</option>{% endfor %}
+          </select>
+        </div>
+        {% endfor %}
+        {% if not variants %}
+        <div class="small muted" style="margin-top:8px">
+          Need a different box on some days — a salad instead of the meal, or a veg Thursday?
+          {% if editing %}Add it under <b>Alternative boxes</b> on the subscription page after saving.
+          {% else %}Create the pack first, then add alternative boxes on its page.{% endif %}
+        </div>
+        {% endif %}
+      </div>
+
+      <div id="sched_ondemand" class="small muted" hidden style="margin-top:8px">
+        No orders are generated for this pack. Tick their days each week in
+        <b>More → Week planner</b> — the meals last until the pack runs out.
+      </div>
     </div>
 
     <div class="full">
@@ -121,7 +187,7 @@
     </div>
   </div>
   <div class="form-actions">
-    <button class="btn btn-primary" onclick="packComp()">{{ 'Save changes' if sub else 'Create subscription' }}</button>
+    <button class="btn btn-primary" onclick="packComp()">{{ 'Save changes' if editing else ('Create renewal' if renew_of else 'Create subscription') }}</button>
   </div>
 </form>
 
@@ -306,9 +372,27 @@ function feeHint(){
   else el.textContent = 'Total across the pack (e.g. ₹60 × 20 = ₹1200).';
 }
 
+// --- Delivery schedule: show only the controls the chosen mode actually uses ---
+function schedMode(){
+  const mode = (document.querySelector('input[name=schedule_mode]:checked') || {}).value || 'daily';
+  document.getElementById('sched_days').hidden = (mode !== 'weekly');
+  document.getElementById('sched_ondemand').hidden = (mode !== 'ondemand');
+  document.querySelectorAll('.sched-row').forEach(r => {
+    schedRow(r.querySelector('input[type=checkbox]'));
+  });
+}
+// An unticked day's slot/box pickers mean nothing — grey them out so the grid
+// reads as "these are the days", not "these are seven half-filled settings".
+function schedRow(cb){
+  if (!cb) return;
+  const row = cb.closest('.sched-row');
+  row.classList.toggle('off', !cb.checked);
+  row.querySelectorAll('select').forEach(s => { s.disabled = !cb.checked; });
+}
+
 {% if sub %}document.getElementById('f_price').dataset.touched = 1;
 document.getElementById('f_meals').dataset.touched = 1;{% endif %}
-renderPacks(); renderRows(); feeHint();
+renderPacks(); renderRows(); feeHint(); schedMode();
 
 // ---- delivery location -----------------------------------------------------
 // Shows whether the chosen customer has a map pin, and lets one be attached

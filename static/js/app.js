@@ -64,6 +64,67 @@ function updateCounters(d) {
   set('cnt-skipped', d.skipped);
 }
 
+// --- Extra meals (another box, taken from the customer's own pack) ---
+// The ➕ on an order opens a sheet rather than adding immediately. An extra is
+// usually being RECORDED, not planned — a box that went out yesterday, in the
+// other slot, already handed over — so the date, the slot and whether it has
+// been delivered all have to be answerable. Guessing them from the row that was
+// clicked is what puts a wrong number in the meal count.
+function openExtra(btn) {
+  const sheet = document.getElementById('extrasheet');
+  if (!sheet) return;
+  const sid = btn.dataset.sid;
+  document.getElementById('extraform').action = '/subscriptions/' + sid + '/extra';
+  document.getElementById('ex_for').textContent = '· ' + btn.dataset.name;
+  // Seed from the row that was clicked, then let it all be changed.
+  document.getElementById('ex_date').value = btn.dataset.date || '';
+  document.getElementById('ex_slot').value = btn.dataset.slot || 'Lunch';
+  document.getElementById('ex_note').value = '';
+  const pending = document.querySelector('#extraform input[value=Pending]');
+  if (pending) pending.checked = true;
+
+  // Only offer a box picker to customers who actually have alternative boxes.
+  const boxes = (window.OG_VARIANTS || {})[sid] || [];
+  const wrap = document.getElementById('ex_boxwrap');
+  const sel = document.getElementById('ex_box');
+  sel.innerHTML = '<option value="">usual box</option>';
+  boxes.forEach(v => {
+    const o = document.createElement('option');
+    o.value = v.id; o.textContent = v.name;
+    sel.appendChild(o);
+  });
+  wrap.hidden = boxes.length === 0;
+
+  sheet.hidden = false;
+  document.getElementById('ex_date').focus();
+}
+
+function closeExtra() {
+  const sheet = document.getElementById('extrasheet');
+  if (sheet) sheet.hidden = true;
+}
+
+document.addEventListener('click', e => {
+  if (e.target && e.target.id === 'extrasheet') closeExtra();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeExtra();
+});
+
+// Removing one is a fetch: the row disappears and the page reloads behind it.
+async function removeExtra(id) {
+  if (!confirm('Remove this extra meal? The pack gets the serving back.')) return;
+  try {
+    const res = await fetch(`/api/delivery/${id}/delete`, { method: 'POST' });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || '');
+    showToast('Extra meal removed');
+    location.reload();
+  } catch (e) {
+    showToast('Could not remove it — try again', false);
+  }
+}
+
 // --- Per-order note (one-off note for a single day's delivery) ---
 function toggleNote(btn) {
   const row = btn.closest('.drow');

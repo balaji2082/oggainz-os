@@ -483,6 +483,52 @@ CREATE TABLE IF NOT EXISTS route_km_cache (
 CREATE INDEX IF NOT EXISTS idx_shift_stops_shift ON shift_stops(shift_id);
 CREATE INDEX IF NOT EXISTS idx_shifts_date       ON shifts(date);
 
+-- ---------------------------------------------------------------------------
+-- Per-subscription DELIVERY SCHEDULE (Aug 2026)
+-- ---------------------------------------------------------------------------
+-- Not everyone eats every kitchen day, and not everyone eats the same box every
+-- day. Two real cases this exists for:
+--   Razia    — Mon, Wed, Fri only. The other days must not generate an order at
+--              all, so her 20 meals last ~7 weeks instead of 4.
+--   Vaithi   — Signature and Protein Salad on alternating days, and Thursday is
+--              a veg box (paneer instead of chicken, legumes instead of egg).
+-- Both are the same question asked once per weekday: do we deliver, in which
+-- slot, and which box? So one table answers it.
+--
+-- A subscription with NO rows here behaves exactly as it always has (an order on
+-- every operating day) — that is what subscriptions.schedule_mode='daily' means
+-- and it is the default for every existing pack.
+CREATE TABLE IF NOT EXISTS subscription_day_plan (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscription_id TEXT NOT NULL,
+    weekday         INTEGER NOT NULL,        -- 0=Mon .. 6=Sun
+    active          INTEGER DEFAULT 1,       -- 0 = no delivery on this weekday
+    slot            TEXT,                    -- NULL = the subscription's usual slot
+    variant_id      INTEGER,                 -- NULL = the subscription's default box
+    meals           INTEGER DEFAULT 1,       -- standing two-box days
+    note            TEXT,
+    UNIQUE(subscription_id, weekday),
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
+);
+
+-- A named alternative box for ONE subscription — "Protein Salad", "Veg Signature".
+-- Its contents live in subscription_components with this id in variant_id, so a
+-- variant is built and edited with exactly the same machinery as the normal box.
+-- plan_id only records which pack recipe it was seeded from (for the label and so
+-- the prep list can name it); the saved components are what actually gets cooked.
+CREATE TABLE IF NOT EXISTS subscription_variants (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscription_id TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    plan_id         INTEGER,
+    sort            INTEGER DEFAULT 100,
+    created_at      TEXT,
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dayplan_sub  ON subscription_day_plan(subscription_id);
+CREATE INDEX IF NOT EXISTS idx_variants_sub ON subscription_variants(subscription_id);
+
 CREATE INDEX IF NOT EXISTS idx_sub_comps      ON subscription_components(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_plan_comps     ON plan_components(plan_id);
 CREATE INDEX IF NOT EXISTS idx_comp_rules_sub ON component_rules(subscription_id);
@@ -518,9 +564,24 @@ MIGRATIONS = {
     # This is a routing instruction only — the customer's address is untouched.
     # batch_no = which of the slot's routes this order rides on. NULL = not split
     # (one route, exactly as before), so existing days are untouched.
+    # is_extra = a meal added BY HAND on top of that day's normal order — the
+    # customer asked for a second box in another slot, or a bigger one today, and
+    # drew the serving from the pack they had already bought. The flag matters
+    # because auto-generation must never create one and the self-heal deletes must
+    # never remove one: an extra is a decision, not something the app inferred.
+    # counts_against_pack = 1 (the normal case) consumes one of the pack's meals,
+    # so 20 meals finish a day earlier. 0 is for a meal sold separately once the
+    # pack is already used up — it shows in the day's cooking but not in the count.
     "deliveries":    [("trial_id", "TEXT"), ("day_note", "TEXT"), ("day_note_at", "TEXT"),
                       ("address_id", "INTEGER"), ("porter_point_id", "INTEGER"),
-                      ("batch_no", "INTEGER")],
+                      ("batch_no", "INTEGER"),
+                      ("is_extra", "INTEGER DEFAULT 0"),
+                      ("counts_against_pack", "INTEGER DEFAULT 1"),
+                      # Which box was cooked for this order, when the day plan says
+                      # it is not the subscription's usual one. Stored on the row so
+                      # the history still shows what actually went out even if the
+                      # schedule is changed months later.
+                      ("variant_id", "INTEGER")],
     "trial_orders":  [("notes", "TEXT"), ("delivery_date", "TEXT"),
                       ("meal_type", "TEXT"), ("delivery_status", "TEXT"),
                       ("plan_id", "INTEGER")],   # which pack the trial is of → prep list
@@ -569,15 +630,28 @@ MIGRATIONS = {
     # late_delivery_agreed: a few far orders legitimately arrive after the 8 PM
     # promise, agreed with the customer before they subscribed. Nothing records
     # that today, so an ETA past 8 PM cannot tell "expected" from "problem".
+    # schedule_mode decides who gets an order generated on an operating day:
+    #   daily     — every kitchen day. The default, and what every pack sold so
+    #               far does, so this migration changes nothing for anyone.
+    #   weekly    — only the weekdays ticked in subscription_day_plan (Razia's
+    #               Mon/Wed/Fri, Raja's Mon-Thu, Vaithi's pack-per-day plan).
+    #   ondemand  — nothing is generated. The customer confirms a day at a time
+    #               and the days are entered in the week planner.
     "subscriptions": [("enforce_validity", "INTEGER DEFAULT 0"),
                       ("expires_on", "TEXT"),
                       ("validity_note", "TEXT"),
-                      ("late_delivery_agreed", "INTEGER DEFAULT 0")],
+                      ("late_delivery_agreed", "INTEGER DEFAULT 0"),
+                      ("schedule_mode", "TEXT DEFAULT 'daily'")],
     # The negotiated add-on rate. The catalog price is a starting suggestion, not
     # a constraint — Ashok pays ~₹49 per 50g of chicken where the catalog says
     # ₹60. Today that difference gets absorbed into the typed total and the
     # reason disappears, so six months later nobody can reconstruct the bill.
-    "subscription_components": [("agreed_price", "REAL"), ("price_note", "TEXT")],
+    # variant_id: NULL = a row of the subscription's normal box (every row that
+    # exists today), >0 = a row belonging to that named variant. Because the
+    # default is NULL, existing compositions are untouched and every query that
+    # never heard of variants keeps returning the normal box.
+    "subscription_components": [("agreed_price", "REAL"), ("price_note", "TEXT"),
+                                ("variant_id", "INTEGER")],
 }
 
 # Settings the app reads, with the values that are true today. Seeded once and
