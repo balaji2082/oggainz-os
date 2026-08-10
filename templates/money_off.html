@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Money · OG Gainz{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('more') }}">‹ Back</a>
+  <h1 style="margin:0 0 0 6px">Money</h1>
+</div>
+
+<div class="card">
+  <div class="alert alert-warn" style="margin-bottom:12px">
+    <span>💰</span>
+    <span>{{ reason }}</span>
+  </div>
+
+  <div class="small muted">
+    <p style="margin-top:0">The Money tab reads your Notion expense sheets and the
+      revenue in this app, then builds the same dashboard you get on the laptop.
+      It stays switched off until the server has a Notion token.</p>
+
+    <p><b>To switch it on:</b> PythonAnywhere → <b>Web</b> tab → <b>Environment
+      variables</b> → add <code>OG_NOTION_TOKEN</code> with your integration token
+      (the same value as <code>.notion_token</code> on the laptop) → <b>Reload</b>.</p>
+
+    <p style="margin-bottom:0">Until then, use <b>Edit-Dashboard.bat</b> on the laptop —
+      it works exactly as before, and your phone can reach it on home wifi.</p>
+  </div>
+</div>
+{% endblock %}

@@ -246,3 +246,49 @@ subscriptions came through the migration with identical counts and statuses.
   still pass unchanged.
 
 Nothing here touches validity/expiry — packs still never expire on their own.
+
+---
+
+## 10 August 2026 — Money on your phone
+
+Adds a **Money** tab to More: your finance dashboard (revenue, expenses, profit,
+business / personal / appa) served from the Command Center, so it works on mobile data
+away from home instead of only on the laptop's wifi.
+
+**This one needs an environment variable — without it the tab stays switched off.**
+
+1. PythonAnywhere → **Web** tab → scroll to **Environment variables**
+2. Add: name `OG_NOTION_TOKEN`, value = the same token that's in `.notion_token` on the
+   laptop (open that file, copy the whole line)
+3. **Reload**
+
+Then More → **Money**. If you skip the variable nothing breaks — the tab explains what
+to set and the laptop dashboard keeps working exactly as before.
+
+### What to know
+
+- **Admin only.** The team password (`OG_TEAM_PASSWORD`) that your editor friends use
+  cannot open any part of it, and the Money link doesn't appear for them at all. Two
+  independent checks enforce this, and `test_money.py` proves it every run.
+- **Personal and appa's figures are on the server now.** That was a deliberate choice.
+  If you ever want to pull back to business-only, it's a small change — say the word.
+- **It reads the server's own `oggainz.db`** for the revenue half, so the numbers are
+  the live ones, not your laptop's copy.
+- **Nothing is written to disk on the server** — no `dashboard.html`, no xlsx, no
+  `finance.json`. It's all built in memory per request.
+- **Editing works from the phone**, exactly as on the laptop: same code, same safety
+  rules (a category still can't be created without its COGS/OPEX/CAPEX/DRAW class, and
+  deleting an option in use still refuses until you say where those rows should go).
+- **The page is cached for 10 minutes** because a full Notion pull pages through three
+  databases 100 rows at a time (~3 seconds). Hit **↻ Refresh** in the green bar for the
+  current picture; any edit you make clears the cache on its own.
+
+### Under the hood
+
+`finance/serve_dashboard.py` went from 683 lines to 184: everything it can *do* moved to
+`finance/actions.py`, which the laptop server and the Money tab both call. There is now
+one copy of the category rules and the Notion writes, not two that drift. `Edit-Dashboard.bat`
+is unchanged and works as before.
+
+Tests: `python test_money.py` (60 checks — the gate, the off-switch, and the coupling
+between the two front doors).

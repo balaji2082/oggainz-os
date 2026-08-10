@@ -134,6 +134,12 @@ def logout():
 import content_hub                                            # noqa: E402
 content_hub.register(app)
 
+# Money — the finance dashboard, reachable from the phone. Admin-only, and off
+# entirely unless OG_NOTION_TOKEN is set on the server (see finance_hub.py for
+# why the gate is where it is). Adds routes only; changes no existing view.
+import finance_hub                                            # noqa: E402
+finance_hub.register(app)
+
 # Read-only customer API for the new OG Gainz app. Additive: it adds routes and
 # changes no existing view. Off unless OG_API_TOKEN is set.
 import customer_api                                           # noqa: E402
