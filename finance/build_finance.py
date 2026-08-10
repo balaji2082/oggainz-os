@@ -8,6 +8,9 @@ Pulls expenses from Notion + revenue from oggainz.db, then writes:
 
 Run it with:  Update-Dashboard.bat   (or:  python finance/build_finance.py)
 
+To EDIT entries from the dashboard instead of just reading them, use Edit-Dashboard.bat,
+which runs finance/serve_dashboard.py — that's the only piece that writes to Notion.
+
 SETUP — once only
 -----------------
 1. Go to  https://www.notion.so/my-integrations
@@ -18,7 +21,8 @@ SETUP — once only
    choose "Connections" -> "OG Gainz Finance". Without this the integration
    cannot see the database and you'll get a 404.
 
-Nothing here ever writes to Notion or to the live app. Read-only, always.
+This file never writes to Notion or to the live app — it only reads. Writes happen in
+serve_dashboard.py, and only when you have Edit-Dashboard.bat running.
 """
 
 import json
@@ -29,6 +33,10 @@ import urllib.error
 import urllib.request
 from collections import defaultdict
 from datetime import datetime
+
+# Works whether this file is run as a script or imported from the app root.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from dashboard_render import render_dashboard  # noqa: E402
 
 # ---------------------------------------------------------------- paths / config
 
@@ -171,6 +179,109 @@ def flatten(pages):
     return out
 
 
+def find_dad_db(token):
+    """Locate appa's expense database, if it has been shared with the integration.
+
+    Discovered by title rather than a hard-coded ID, so sharing it in Notion is the
+    only step — nothing here needs editing. Returns (db_id, title) or (None, reason).
+    """
+    url = f"{'https://api.notion.com/v1'}/search"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Notion-Version": NOTION_VERSION,
+        "Content-Type": "application/json",
+    }
+    body = {"filter": {"value": "database", "property": "object"}, "page_size": 100}
+    req = urllib.request.Request(
+        url, data=json.dumps(body).encode(), headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            payload = json.loads(resp.read())
+    except (urllib.error.HTTPError, urllib.error.URLError):
+        return None, "could not search Notion"
+
+    known = {BUSINESS_DB, PERSONAL_DB}
+    hints = ("appa", "dad", "father", "papa")
+    fallback = None
+    for db in payload.get("results", []):
+        db_id = (db.get("id") or "").replace("-", "")
+        if db_id in known:
+            continue
+        title = "".join(x.get("plain_text", "") for x in db.get("title", []))
+        low = title.lower()
+        if any(h in low for h in hints):
+            return db_id, title
+        if "expense" in low or "spend" in low:
+            fallback = (db_id, title)
+    if fallback:
+        return fallback
+    return None, "not shared with the integration"
+
+
+def shape_shared(rows):
+    """Tolerant shaper for appa's database.
+
+    Its schema isn't ours to control, so match property names case-insensitively and
+    accept the common variants rather than assuming. Anything missing is left blank —
+    the dashboard renders fine without it.
+    """
+    def pick(row, *names):
+        low = {k.lower(): v for k, v in row.items()}
+        for n in names:
+            v = low.get(n.lower())
+            if v not in (None, ""):
+                return v
+        return None
+
+    def yes_no(v):
+        """Normalise a Yes/No-ish flag to True / False / None."""
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return v
+        s = str(v).strip().lower()
+        if s in ("yes", "y", "true", "business", "1"):
+            return True
+        if s in ("no", "n", "false", "personal", "home", "0"):
+            return False
+        return None
+
+    clean = []
+    for r in rows:
+        amt = pick(r, "Amount", "Cost", "Price", "Value", "Spent")
+        try:
+            amt = float(amt)
+        except (TypeError, ValueError):
+            continue
+        if not amt:
+            continue
+        date = pick(r, "Date", "Day", "When", "Spent On")
+        if not date:
+            continue
+        cat = pick(r, "Category", "Type", "Head") or "Uncategorised"
+        # The "did this feed the kitchen?" flag, however he named it. Appa buys for
+        # both the business and the house out of one pocket, so this is the field
+        # that decides whether a row is really an OG Gainz cost.
+        to_biz = yes_no(pick(r, "Goes To Business", "For Business", "Business?",
+                             "Is Business", "For", "Side", "Business", "Purpose"))
+        clean.append({
+            "id": r.get("_id"), "db": "dad",
+            "date": str(date)[:10],
+            "month": iso_to_month(str(date)),
+            "what": pick(r, "What", "Name", "Item", "Title", "Description"),
+            "amount": amt,
+            "category": cat,
+            "cost_type": pick(r, "Cost Type") or None,
+            "subcategory": pick(r, "Subcategory", "Sub Category", "Sub"),
+            "vendor": pick(r, "Vendor", "Shop", "Store", "Merchant", "Paid To"),
+            "payment": pick(r, "Payment Method", "Paid By", "Mode", "Payment"),
+            "to_business": to_biz,
+            "notes": pick(r, "Notes", "Note", "Remarks", "Comment"),
+        })
+    clean.sort(key=lambda x: x["date"] or "", reverse=True)
+    return clean
+
+
 # ---------------------------------------------------------------- revenue (sqlite)
 
 def load_revenue():
@@ -283,6 +394,8 @@ def shape_expenses(rows):
             d["orders"] += int(r.get("Orders Covered") or 0)
 
         clean.append({
+            # id + db let the dashboard write a correction straight back to Notion
+            "id": r.get("_id"), "db": "business",
             "month": m, "date": r.get("Date"), "what": r.get("What"),
             "amount": amt, "category": cat, "cost_type": ctype,
             "subcategory": r.get("Subcategory"), "vendor": r.get("Vendor"),
@@ -311,7 +424,8 @@ def shape_personal(rows):
         else:
             months[m]["out"] += amt
             cats[m][cat] += amt
-        clean.append({"month": m, "date": r.get("Date"), "what": r.get("What"),
+        clean.append({"id": r.get("_id"), "db": "personal",
+                      "month": m, "date": r.get("Date"), "what": r.get("What"),
                       "amount": amt, "category": cat, "direction": direction,
                       "subcategory": r.get("Subcategory"),
                       "payment": r.get("Payment Method"), "notes": r.get("Notes")})
@@ -847,18 +961,28 @@ def main():
     print(f"    {len(rev)} months of revenue found")
 
     token = get_token()
-    biz_rows, per_rows = [], []
+    biz_rows, per_rows, dad_rows = [], [], []
+    dad_status = None
     if token:
         print("  Reading expenses from Notion ...")
         biz_rows = flatten(notion_query(BUSINESS_DB, token))
         per_rows = flatten(notion_query(PERSONAL_DB, token))
         print(f"    {len(biz_rows)} business · {len(per_rows)} personal")
+
+        dad_id, dad_info = find_dad_db(token)
+        if dad_id:
+            dad_rows = flatten(notion_query(dad_id, token))
+            print(f"    {len(dad_rows)} appa ({dad_info})")
+        else:
+            dad_status = dad_info
+            print(f"    appa's sheet: {dad_info}")
     else:
         print("  ! No .notion_token found — building with revenue only.")
         print("    See the setup notes at the top of this file to enable expenses.")
 
     expenses, cash, cash_cat, true_cost, delivery, vendors = shape_expenses(biz_rows)
     personal, personal_m, personal_cats = shape_personal(per_rows)
+    dad = shape_shared(dad_rows)
     monthly = build_monthly(rev, cash, true_cost, delivery, personal_m)
 
     if not monthly:
@@ -877,11 +1001,12 @@ def main():
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(os.path.join(DATA_DIR, "finance.json"), "w", encoding="utf-8") as f:
         json.dump({"generated": datetime.now().isoformat(), "monthly": monthly,
-                   "expenses": expenses, "personal": personal}, f, indent=1, default=str)
+                   "expenses": expenses, "personal": personal, "dad": dad},
+                  f, indent=1, default=str)
 
     print("  Building dashboard ...")
     with open(OUT_HTML, "w", encoding="utf-8") as f:
-        f.write(render_html(monthly, expenses, personal, vendors, cur))
+        f.write(render_dashboard(monthly, expenses, personal, dad, cur, dad_status))
 
     print("  Building Excel ...")
     ok = write_excel(monthly, expenses, personal, OUT_XLSX)
