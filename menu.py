@@ -573,8 +573,9 @@ def backlog(conn, before_iso):
     """Every order from BEFORE `before_iso` still sitting as Pending — i.e. days
     you forgot to tick. Grouped newest date first so they're quick to clear."""
     rows = conn.execute(
-        "SELECT d.*, COALESCE(s.plan_name, d.notes) AS plan_label "
+        "SELECT d.*, COALESCE(v.name, s.plan_name, d.notes) AS plan_label "
         "FROM deliveries d LEFT JOIN subscriptions s ON s.id=d.subscription_id "
+        "LEFT JOIN subscription_variants v ON v.id=d.variant_id "
         "WHERE d.status='Pending' AND d.date < ? "
         "ORDER BY d.date DESC, (d.meal_type='Dinner'), d.name", (before_iso,)).fetchall()
     groups = []

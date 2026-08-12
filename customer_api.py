@@ -268,8 +268,9 @@ def register(app):
 
         c = db.get_db()
         rows = c.execute(
-            "SELECT d.*, COALESCE(s.plan_name, d.notes) AS plan_name "
+            "SELECT d.*, COALESCE(v.name, s.plan_name, d.notes) AS plan_name "
             "FROM deliveries d LEFT JOIN subscriptions s ON s.id=d.subscription_id "
+            "LEFT JOIN subscription_variants v ON v.id=d.variant_id "
             "WHERE d.customer_id=? AND d.date BETWEEN ? AND ? "
             "ORDER BY d.date, (d.meal_type='Dinner')", (cid, frm, to)).fetchall()
         meals = [{
@@ -286,21 +287,31 @@ def register(app):
         # is computed here — "remaining" always comes from the engine.
         have = {(m["date"], m["slot"]) for m in meals}
         live = c.execute(
-            "SELECT id, slot FROM subscriptions WHERE customer_id=? "
+            "SELECT * FROM subscriptions WHERE customer_id=? "
             "AND status IN ('Active','Ending Soon')", (cid,)).fetchall()
         today = date.today().isoformat()
         for s in live:
+            # Ask the schedule engine day by day rather than assuming every open
+            # kitchen day is a delivery day. A Mon/Wed/Fri pack used to promise the
+            # customer meals on Tuesday and Thursday too, and a day pointed at an
+            # alternative box showed no name at all.
+            vnames = {v["id"]: v["name"] for v in c.execute(
+                "SELECT id, name FROM subscription_variants WHERE subscription_id=?",
+                (s["id"],)).fetchall()}
             day = max(frm, today)
             end = to
             cur = datetime.strptime(day, "%Y-%m-%d").date()
             last = datetime.strptime(end, "%Y-%m-%d").date()
             while cur <= last:
                 iso = cur.isoformat()
-                slot = s["slot"] or "Lunch"
-                if (core.is_operating_day(c, iso) and (iso, slot) not in have
+                p = core.plan_for_day(c, s, iso)
+                slot = p["slot"] or "Lunch"
+                if (p["deliver"] and core.is_operating_day(c, iso)
+                        and (iso, slot) not in have
                         and not core.is_paused_on(c, s["id"], iso)):
                     meals.append({"date": iso, "slot": slot, "status": "Expected",
-                                  "plan": None, "note": None,
+                                  "plan": vnames.get(p["variant_id"]) or s["plan_name"],
+                                  "note": None,
                                   "subscription_id": s["id"], "projected": True})
                     have.add((iso, slot))
                 cur += timedelta(days=1)

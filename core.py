@@ -643,6 +643,11 @@ def deliveries_for_day(conn, day_iso):
         # day that was opened-to-peek then closed/reset never keeps showing phantom orders.
         purge_unworked_day(conn, day_iso)
     ensure_trial_rows(conn, day_iso)     # explicit trials may be scheduled on any day
+    # plan_name is what the day's box is CALLED. When the day plan pointed this
+    # order at an alternative box, that variant's name is the answer — the same
+    # name the prep list already cooks from (menu.order_items). Without the join
+    # every screen fell back to the subscription's pack and a Tuesday salad was
+    # announced as a Signature Meal Pack, contradicting the kitchen list beside it.
     return conn.execute(
         "SELECT d.*, COALESCE(c.phone, t.phone) AS phone, c.locality, "
         "       COALESCE(c.address, t.address) AS address, s.preferred_timing, "
@@ -650,11 +655,13 @@ def deliveries_for_day(conn, day_iso):
         "       COALESCE(s.notes,'') AS sub_notes, "
         "       (SELECT COUNT(*) FROM customer_addresses ca "
         "          WHERE ca.customer_id=d.customer_id AND ca.active=1) AS n_addresses, "
-        "       COALESCE(s.plan_name, d.notes) AS plan_name, s.remaining_meals, "
+        "       COALESCE(v.name, s.plan_name, d.notes) AS plan_name, "
+        "       v.name AS variant_name, s.plan_name AS pack_name, s.remaining_meals, "
         "       t.id AS trial_ref, t.order_text AS trial_order "
         "FROM deliveries d "
         "LEFT JOIN customers c ON c.id=d.customer_id "
         "LEFT JOIN subscriptions s ON s.id=d.subscription_id "
+        "LEFT JOIN subscription_variants v ON v.id=d.variant_id "
         "LEFT JOIN trial_orders t ON t.id=d.trial_id "
         "WHERE d.date=? ORDER BY (d.meal_type='Dinner'), d.name",
         (day_iso,),

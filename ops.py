@@ -1108,14 +1108,19 @@ def pin_status(conn):
 def parse_location(text):
     """Anything you can copy out of Google Maps → (lat, lng, how) or (None, None, reason).
 
-    Accepts, in this order:
+    Offline and exact — it only ever reads coordinates that are already IN the
+    text. Accepts, in this order:
       * a plus code, short or full   — 'V6R3+XM Chennai', '7M42V6R3+XM'
-      * a Maps URL containing @lat,lng or ?q=lat,lng
-      * a bare coordinate pair       — '12.892438, 80.204187'
+      * a Maps URL carrying a point  — !3d12.89!4d80.20, @12.89,80.20,
+                                       ?q=/ll=/daddr=/center=, geo:12.89,80.20
+      * a bare coordinate pair       — '12.892438, 80.204187', '12.89° N, 80.20° E'
 
     Deliberately strict: a pin that is merely *plausible* is worse than no pin,
     because a wrong one silently mis-pays the petrol allowance every day. Anything
     it cannot read with confidence comes back as None with a reason to show.
+
+    A share link (maps.app.goo.gl/...) carries no coordinates at all, so it fails
+    here by design — resolve_location() is the one that can go and fetch them.
     """
     import re
     s = (text or "").strip()
@@ -1131,12 +1136,25 @@ def parse_location(text):
         if got:
             return None, None, "that plus code is not near Chennai"
 
-    m = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+)", s)          # .../@12.89,80.20,17z
+    # !3d<lat>!4d<lng> comes first: in a Maps place URL it is the PLACE, whereas
+    # the @ that precedes it is only where the map happened to be centred. They
+    # can sit a street apart, and the place is the one being pinned.
+    pats = [
+        r"!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)",
+        r"@(-?\d+\.\d+),(-?\d+\.\d+)",                       # .../@12.89,80.20,17z
+        r"[?&](?:q|ll|sll|daddr|saddr|center|destination|query)="
+        r"(-?\d+\.\d+),\s*(-?\d+\.\d+)",
+        r"\bgeo:(-?\d+\.\d+),(-?\d+\.\d+)",                  # geo: URI from a share sheet
+        r"(-?\d{1,2}\.\d{3,})\s*°?\s*[NS]?\s*,\s*(-?\d{1,3}\.\d{3,})\s*°?\s*[EW]?",
+    ]
+    m = None
+    for p in pats:
+        m = re.search(p, s, re.I)
+        if m:
+            break
     if not m:
-        m = re.search(r"[?&]q=(-?\d+\.\d+),\s*(-?\d+\.\d+)", s)
-    if not m:
-        m = re.search(r"(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})", s)
-    if not m:
+        if _short_link(s):
+            return None, None, "that share link doesn't contain any coordinates"
         return None, None, "couldn't find a plus code or coordinates in that"
 
     lat, lng = float(m.group(1)), float(m.group(2))
@@ -1145,6 +1163,132 @@ def parse_location(text):
             return None, None, "those look swapped — latitude comes first"
         return None, None, "that point is not in the Chennai area"
     return lat, lng, "coordinates"
+
+
+# --- the two network paths, for what cannot be read out of the text itself ----
+# Both are best-effort and fail closed: the caller still gets (None, None, reason)
+# and the pin is simply not saved.
+def _short_link(s):
+    """Is this one of Google's share links, which carry no coordinates?"""
+    import re
+    m = re.search(r"https?://(?:maps\.app\.goo\.gl|goo\.gl/maps|g\.co/kgs)/\S+", s, re.I)
+    return m.group(0).rstrip(".,;)") if m else None
+
+
+def expand_short_link(url, timeout=6):
+    """Follow a Maps share link to the real URL, which does carry coordinates.
+
+    NOTE: on PythonAnywhere's free plan outgoing requests are allowlisted and
+    goo.gl is NOT on the list, so this fails there ("Tunnel connection failed")
+    and the place-name lookup below is what actually answers. It works on the
+    laptop, and would start working on a paid plan, so it is tried first.
+    """
+    class _Keep(urllib.request.HTTPRedirectHandler):
+        # Google answers the share link with a redirect whose Location IS the
+        # answer; there is no need to fetch the (large) Maps page behind it.
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            raise _Redirected(newurl)
+
+    try:
+        opener = urllib.request.build_opener(_Keep)
+        req = urllib.request.Request(url, headers={"User-Agent": _UA})
+        with opener.open(req, timeout=timeout) as resp:
+            return resp.geturl()
+    except _Redirected as r:
+        return r.url
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+
+
+class _Redirected(Exception):
+    def __init__(self, url):
+        super().__init__(url)
+        self.url = url
+
+
+_UA = "OG-Gainz-CommandCenter/1.0 (+https://oggainz.pythonanywhere.com)"
+
+
+def geocode_place(text, timeout=7):
+    """A place name or address → (lat, lng, label) via OpenStreetMap's Nominatim.
+
+    Chosen because nominatim.openstreetmap.org IS on PythonAnywhere's allowlist
+    and needs no API key, so it works on the live server exactly as it does on
+    the laptop. Biased hard to Chennai: bounded viewbox, India only, so a
+    half-typed apartment name cannot return a match in another state.
+
+    Known-weak on the addresses this business actually gets ("Campus K school") —
+    that is why the result is reported back with the address it matched, so a
+    wrong match is visible instead of silently becoming a delivery point.
+    """
+    from urllib.parse import urlencode
+    q = (text or "").strip()
+    if len(q) < 3:
+        return None
+    params = urlencode({
+        "q": q if "chennai" in q.lower() else q + ", Chennai",
+        "format": "jsonv2", "limit": "1", "countrycodes": "in",
+        # left,top,right,bottom — greater Chennai, with bounded=1 to enforce it
+        "viewbox": "79.9,13.35,80.45,12.6", "bounded": "1",
+    })
+    req = urllib.request.Request(
+        "https://nominatim.openstreetmap.org/search?" + params,
+        headers={"User-Agent": _UA, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            got = json.loads(resp.read().decode())
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+    if not got:
+        return None
+    try:
+        lat, lng = float(got[0]["lat"]), float(got[0]["lon"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not _in_chennai(lat, lng):
+        return None
+    return lat, lng, (got[0].get("display_name") or q)
+
+
+def resolve_location(text, allow_network=True):
+    """parse_location, then the network paths it cannot cover. Same 3-tuple.
+
+    Order matters: coordinates already in the text are exact and free, so they
+    always win. Only when there are none do we go out — first expanding a share
+    link, then falling back to looking the words up as a place. The place lookup
+    is last because it is the only one that can be confidently WRONG.
+    """
+    lat, lng, how = parse_location(text)
+    if lat is not None or not allow_network:
+        return lat, lng, how
+
+    s = (text or "").strip()
+    if not s:
+        return None, None, "empty"
+
+    link = _short_link(s)
+    if link:
+        full = expand_short_link(link)
+        if full:
+            lat, lng, how2 = parse_location(full)
+            if lat is not None:
+                return lat, lng, "share link"
+        # The link could not be followed (or led nowhere useful). Any words typed
+        # alongside it are still worth a look-up; a bare link leaves nothing to go on.
+        rest = s.replace(link, " ").strip(" -–—·,")
+        if len(rest) < 3:
+            return None, None, ("that share link can't be opened from the server. "
+                                "Open it in Maps and copy the place NAME, or tap "
+                                "'Use my location' while you are standing there")
+        s = rest
+
+    if s.lower().startswith("http"):
+        return None, None, how
+    got = geocode_place(s)
+    if got:
+        return got[0], got[1], f"found by name - {got[2][:80]}"
+    return None, None, ("couldn't find that place near Chennai - try the plus code "
+                        "from the Maps place card, or tap 'Use my location'")
 
 
 def _in_chennai(lat, lng):

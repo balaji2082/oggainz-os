@@ -152,6 +152,32 @@ check("...and the usual box on Mon", label != "Test Salad")
 check("editing the variant did not touch the normal box",
       len(menu.sub_composition(c, SID)) > 0)
 
+# The kitchen cooking the right food is only half of it. Every screen that names
+# the day's meal has to agree with the prep list, or the order reads "Signature
+# Meal Pack" while the prep list beside it says salad -- which is what happened.
+print("\n== 3b. the day's lists call the box by its own name ==")
+wrow = next((r for r in core.deliveries_for_day(c, WED) if r["subscription_id"] == SID), None)
+check("the Wed order is in the day list", wrow is not None)
+check("...and is named after the variant", wrow and wrow["plan_name"] == "Test Salad",
+      wrow and wrow["plan_name"])
+check("...while the pack it came from is still readable",
+      wrow and wrow["pack_name"] == sub["plan_name"], wrow and wrow["pack_name"])
+mrow = next((r for r in core.deliveries_for_day(c, MON) if r["subscription_id"] == SID), None)
+check("a normal day still shows the pack name",
+      mrow and mrow["plan_name"] == sub["plan_name"], mrow and mrow["plan_name"])
+check("...and reports no variant", mrow and mrow["variant_name"] is None)
+
+# The kitchen count is keyed on that same name, so a salad must not be tallied
+# into the Signature pile.
+cooked = {p: n for p, m, n in core.today_summary(c, WED)["cook"]}
+check("the cook list counts the salad separately", cooked.get("Test Salad") == 1, str(cooked))
+
+_after_wed = (datetime.strptime(WED, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+brow = next((r for g in menu.backlog(c, _after_wed)["groups"] for r in g["rows"]
+             if r["subscription_id"] == SID and r["date"] == WED), None)
+check("the backlog names it the same way", brow and brow["plan_label"] == "Test Salad",
+      brow and brow["plan_label"])
+
 print("\n== 4. an extra meal comes out of the pack ==")
 d0, sk0, rem0 = counts(SID)
 did = core.add_extra_meal(c, SID, MON, slot="Dinner", status="Delivered",

@@ -22,10 +22,11 @@
   <div class="full"><label>Map pin
     {% if a and a.lat %}<span class="pill pill-ok">set</span>
     {% else %}<span class="pill" style="background:#c0392b;color:#fff">missing</span>{% endif %}</label>
-    <input name="pin" placeholder="Plus code (V6R3+XM) · Maps link · 12.8924, 80.2041">
+    <input name="pin" placeholder="Plus code · place name · 12.8924, 80.2041">
     <div class="small muted" style="margin-top:3px">
-      {% if a and a.lat %}Currently {{ a.lat }}, {{ a.lng }} — paste a new one to move it.
-      {% else %}Long-press the exact spot in Google Maps, copy, paste here.{% endif %}
+      {% if a and a.lat %}Currently {{ a.lat }}, {{ a.lng }} — enter a new one to move it.
+      {% else %}At the door? Use the button. Otherwise a plus code, a Maps link, or the
+      place name — it gets looked up when you save.{% endif %}
     </div></div>
 
   <div class="full"><label>Use this address automatically on…</label>

@@ -250,3 +250,80 @@ document.addEventListener('submit', async (ev) => {
     btn.disabled = false;
   }
 });
+
+/* ---------------------------------------------------------------------------
+ * "Use my location" on every map-pin box.
+ *
+ * The Google Maps app on a phone gives you no way to copy a latitude and
+ * longitude -- long-pressing shows them on desktop, but on Android the share
+ * sheet only offers a maps.app.goo.gl link, which carries no coordinates at all.
+ * The phone itself knows exactly where it is, so when you are standing at the
+ * customer's door this is both the easiest and the most accurate way to pin it.
+ *
+ * Attaches to any input named "pin" and to the pins-page rows, so a new form
+ * with a pin field gets the button without anyone remembering to add it.
+ * Requires HTTPS (the live site) -- on plain http the browser blocks the API,
+ * so we say so rather than showing a button that silently never works.
+ * ------------------------------------------------------------------------- */
+(function () {
+  var boxes = document.querySelectorAll('input[name="pin"], input.pin-in');
+  if (!boxes.length) return;
+
+  boxes.forEach(function (inp) {
+    var note = document.createElement('div');
+    note.className = 'muted';
+    note.style.cssText = 'font-size:.85em;margin-top:4px;flex-basis:100%';
+
+    if (!navigator.geolocation || !window.isSecureContext) {
+      // Don't offer it where it cannot work (http:// on the laptop).
+      note.textContent = 'Tip: paste a plus code, a Maps link, or just the place name.';
+      inp.insertAdjacentElement('afterend', note);
+      return;
+    }
+
+    var btn = document.createElement('button');
+    btn.type = 'button';                    // never submit the form it sits in
+    btn.className = 'btn btn-ghost btn-sm';
+    btn.textContent = '⊙ Use my location';
+    btn.style.cssText = 'margin-top:6px;flex:0 0 auto';
+
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      btn.textContent = 'Locating…';
+      note.style.color = '';
+      note.textContent = 'Asking the phone for a GPS fix — this can take a few seconds.';
+      navigator.geolocation.getCurrentPosition(
+        function (pos) {
+          var la = pos.coords.latitude, ln = pos.coords.longitude;
+          var acc = Math.round(pos.coords.accuracy || 0);
+          inp.value = la.toFixed(6) + ', ' + ln.toFixed(6);
+          btn.disabled = false;
+          btn.textContent = '⊙ Use my location';
+          // Accuracy is shown, not hidden: a 500 m fix means the phone used the
+          // mobile tower, not GPS, and that pin would put the zone and the
+          // petrol allowance wrong every single day it is used.
+          if (acc > 100) {
+            note.style.color = '#c0392b';
+            note.textContent = 'Rough fix, accurate to about ' + acc + ' m — step outside '
+                             + 'and tap again before saving.';
+          } else {
+            note.textContent = 'Located to about ' + acc + ' m. Save to keep it.';
+          }
+        },
+        function (err) {
+          btn.disabled = false;
+          btn.textContent = '⊙ Use my location';
+          note.style.color = '#c0392b';
+          note.textContent =
+            err.code === 1 ? 'Location permission was refused — allow it for this site in the browser settings.'
+          : err.code === 3 ? 'The phone took too long to find a fix. Try again outdoors.'
+          :                  'Could not get a location from the phone.';
+        },
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+      );
+    });
+
+    inp.insertAdjacentElement('afterend', btn);
+    btn.insertAdjacentElement('afterend', note);
+  });
+})();

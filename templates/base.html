@@ -8,7 +8,7 @@
   <link rel="icon" href="{{ url_for('static', filename='img/favicon.png') }}">
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
   <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v=asset_v('css/style.css')) }}">
 </head>
 <body>
 {% set nav = active_page %}
@@ -75,7 +75,7 @@
 {# Floating OG Agent on every page (the /agent page already IS the chat) #}
 {% if active_page != 'agent_home' %}{% include "_agent_fab.html" %}{% endif %}
 
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v=asset_v('js/app.js')) }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

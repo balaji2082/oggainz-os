@@ -29,10 +29,11 @@
     <div class="full"><label>Map pin
       {% if cust and cust.lat %}<span class="pill pill-ok">set</span>
       {% else %}<span class="pill" style="background:#c0392b;color:#fff">missing</span>{% endif %}</label>
-      <input name="pin" placeholder="Paste from Google Maps — 12.901234, 80.227891">
+      <input name="pin" placeholder="Plus code, coordinates, or the place name">
       <div class="muted" style="font-size:.85em;margin-top:4px">
-        {% if cust and cust.lat %}Currently {{ cust.lat }}, {{ cust.lng }}. Paste a new one to move it.
-        {% else %}Long-press the exact spot in Google Maps, copy the coordinates, paste here. A Maps link works too.
+        {% if cust and cust.lat %}Currently {{ cust.lat }}, {{ cust.lng }}. Enter a new one to move it.
+        {% else %}At the address? Use the button. Otherwise a plus code (<code>V6R3+XM</code>),
+        coordinates, a Maps link, or just the place name — it gets looked up on save.
         {% endif %}
       </div>
     </div>

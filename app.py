@@ -277,7 +277,29 @@ def inject_globals():
             "today": date.today().strftime("%Y-%m-%d"),
             "today_str": date.today().strftime("%Y-%m-%d"),
             "login_active": bool(APP_PASSWORD), "authed": session.get("authed"),
+            "asset_v": _asset_v,
             "deployed": bool(APP_PASSWORD)}
+
+
+_ASSET_V = {}
+
+
+def _asset_v(rel):
+    """A cache-busting stamp for a static file, from its own mtime.
+
+    The stylesheet and app.js were served on a bare URL, so a phone that had
+    already opened the Command Center kept its cached copy after a deploy — a
+    new button could ship and simply not appear, with no way to tell from the
+    phone whether the deploy had worked. Looked up once per file per process;
+    a Reload is what publishes new code anyway, and that resets it.
+    """
+    if rel not in _ASSET_V:
+        try:
+            _ASSET_V[rel] = str(int(os.path.getmtime(
+                os.path.join(app.static_folder, rel))))
+        except OSError:
+            _ASSET_V[rel] = "0"
+    return _ASSET_V[rel]
 
 
 # ---------------------------------------------------------------------------
@@ -1027,14 +1049,33 @@ def customer_detail(cid):
 
 
 def _parse_pin(text):
-    """(lat, lng) from a plus code, Maps URL or coordinate pair. See ops.parse_location."""
-    lat, lng, _ = ops.parse_location(text)
+    """(lat, lng) from a plus code, Maps link, coordinate pair or place name.
+    See ops.resolve_location."""
+    lat, lng, _ = ops.resolve_location(text)
     return lat, lng
+
+
+def _flash_pin_result(raw, lat, how):
+    """Say out loud what happened to a pasted pin.
+
+    Both halves matter. A pin that could not be read used to be dropped in
+    silence, so the customer stayed unpinned and nothing said why. And a pin
+    found from a place NAME is a guess — an accurate-looking one — so it is
+    announced with the address it matched, because a wrong pin quietly bills the
+    petrol allowance against the wrong distance every day it survives.
+    """
+    if not (raw or "").strip():
+        return
+    if lat is None:
+        flash(f"The map pin wasn't saved — {how}.", "")
+    elif (how or "").startswith("found by name"):
+        flash(f"Map pin {how}. Check it on the map if that isn't the right place.", "ok")
 
 
 def _save_customer_geo(c, f, cid):
     """Save the map pin and delivery hints. Shared by new + edit."""
-    lat, lng = _parse_pin(f.get("pin"))
+    lat, lng, how = ops.resolve_location(f.get("pin"))
+    _flash_pin_result(f.get("pin"), lat, how)
     if lat is None and (f.get("lat") or "").strip():
         try:
             lat, lng = float(f.get("lat")), float(f.get("lng"))
@@ -1414,7 +1455,7 @@ def customer_address_save(cid):
     c = conn()
     f = request.form
     aid = f.get("address_id", type=int)
-    lat, lng, how = ops.parse_location(f.get("pin"))
+    lat, lng, how = ops.resolve_location(f.get("pin"))
     weekdays = ",".join(sorted(f.getlist("weekdays")))
     fields = ((f.get("label") or "").strip() or "Address",
               (f.get("address") or "").strip(),
@@ -1446,6 +1487,8 @@ def customer_address_save(cid):
     c.close()
     if (f.get("pin") or "").strip() and lat is None:
         flash(f"Address saved, but the pin wasn't readable — {how}.", "")
+    elif (how or "").startswith("found by name"):
+        flash(f"Address saved — pin {how}. Check it if that isn't the right place.", "ok")
     else:
         flash("Address saved.", "ok")
     return redirect(url_for("customer_detail", cid=cid))
@@ -1719,7 +1762,7 @@ def porter_point_save():
     c = conn()
     f = request.form
     pid = f.get("id", type=int)
-    lat, lng, how = ops.parse_location(f.get("pin"))
+    lat, lng, how = ops.resolve_location(f.get("pin"))
     serves = ",".join(f.getlist("serves"))
     vals = ((f.get("code") or "").strip() or None,
             (f.get("name") or "").strip(),
@@ -1785,7 +1828,7 @@ def pins_save():
     """
     c = conn()
     aid = request.form.get("address_id", type=int)
-    lat, lng, how = ops.parse_location(request.form.get("pin"))
+    lat, lng, how = ops.resolve_location(request.form.get("pin"))
     if lat is None:
         c.close()
         return jsonify({"ok": False, "err": how})
@@ -1816,7 +1859,7 @@ def api_customer_location(cid):
         return jsonify({"ok": False, "err": "no such customer"}), 404
 
     if request.method == "POST":
-        lat, lng, how = ops.parse_location(request.form.get("pin"))
+        lat, lng, how = ops.resolve_location(request.form.get("pin"))
         if lat is None:
             c.close()
             return jsonify({"ok": False, "err": how})
@@ -1843,7 +1886,7 @@ def api_customer_location(cid):
 def pins_kitchen():
     """Set the kitchen pin. Everything measures from here, so it is confirmed explicitly."""
     c = conn()
-    lat, lng, how = ops.parse_location(request.form.get("pin"))
+    lat, lng, how = ops.resolve_location(request.form.get("pin"))
     if lat is None:
         c.close()
         flash(f"Couldn't set the kitchen pin — {how}. "

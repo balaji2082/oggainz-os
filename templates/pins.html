@@ -26,12 +26,13 @@
     </p>
   {% endif %}
   <form method="post" action="{{ url_for('pins_kitchen') }}" class="row" style="gap:8px">
-    <input name="pin" placeholder="Paste from Maps — 12.901234, 80.227891" style="flex:1;min-width:220px">
+    <input name="pin" placeholder="Coordinates, plus code, or the place name" style="flex:1;min-width:220px">
     <button class="btn btn-primary">Save kitchen pin</button>
   </form>
   <p class="muted" style="margin:8px 0 0;font-size:.85em">
-    In Google Maps, long-press your kitchen → the coordinates appear at the top → tap to copy → paste here.
-    A full Maps link works too.
+    Standing in the kitchen? <strong>⊙ Use my location</strong> is the accurate way.
+    Otherwise paste a plus code (<code>V6R3+XM</code>, on the Maps place card), coordinates,
+    or just the place name.
   </p>
 </div>
 
@@ -71,7 +72,10 @@
 {% if missing %}
 <h3 style="margin:22px 0 8px">Needs a pin</h3>
 <p class="muted" style="margin:0 0 10px;font-size:.9em">
-  Tap <em>Find</em> to open Maps on that address, long-press the right spot, copy, then paste and save.
+  At the door? <strong>⊙ Use my location</strong> — one tap, no copying. Otherwise paste the
+  plus code from the Maps place card, or type the building/place name and Save will look it up.
+  A <code>maps.app.goo.gl</code> share link holds no coordinates, so it only works if the
+  server can open it — the name is the more reliable thing to copy.
   Customers with live subscriptions are listed first — they’re the ones that break tonight’s route.
 </p>
 {# A stacked list rather than a table: this gets used one-handed on a phone,
@@ -90,7 +94,7 @@
     <div class="row" style="gap:7px;flex-wrap:wrap;align-items:stretch">
       <a class="btn btn-ghost btn-sm" href="{{ searchurl }}" target="_blank" rel="noopener"
          style="flex:0 0 auto">🔎 Find in Maps ↗</a>
-      <input class="pin-in" placeholder="Plus code or 12.901234, 80.227891"
+      <input class="pin-in" placeholder="Plus code, coordinates, or the place name"
              style="flex:1 1 190px;min-width:0">
       <button class="btn btn-sm btn-primary pin-save" type="button" style="flex:0 0 auto">Save</button>
     </div>
@@ -156,8 +160,11 @@ document.querySelectorAll('#pinlist .pin-save').forEach(function (btn) {
         // Confirm the distance before the card goes, so a pin that landed in the
         // wrong place is visible rather than silently accepted.
         msg.style.color = '';
-        msg.textContent = '✓ ' + d.km + ' km by road · ' + d.zone;
+        msg.textContent = '✓ ' + d.km + ' km by road · ' + d.zone + ' · ' + d.how;
         var next = tr.nextElementSibling;
+        // A pin found from a place NAME is a guess, so it stays on screen to be
+        // read rather than sliding away with the row after a second.
+        if ((d.how || '').indexOf('found by name') === 0) { btn.textContent = 'Saved'; return; }
         setTimeout(function () {
           tr.style.transition = 'opacity .3s'; tr.style.opacity = '0';
           setTimeout(function () {

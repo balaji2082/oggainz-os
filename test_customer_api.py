@@ -117,6 +117,43 @@ check("future days are flagged as projected, never as confirmed",
       all(m["status"] == "Expected" for m in j["meals"] if m["projected"]))
 check("bad date is rejected",
       cl.get(f"/api/v1/customer/{CID}/meals?from=notadate", headers=TOK).status_code == 400)
+check("every meal says which box it is",
+      all(m["plan"] for m in j["meals"]),
+      str([m for m in j["meals"] if not m["plan"]][:2]))
+
+# The forward days used to be drawn on every open kitchen day regardless of the
+# subscription's own schedule, so a Mon/Wed/Fri pack promised the customer meals
+# on Tuesday and Thursday too. The engine has to be the one deciding.
+import core as _core                                             # noqa: E402
+from datetime import datetime                                    # noqa: E402
+_c = db.get_db()
+_subs = {s["id"]: s for s in _c.execute(
+    "SELECT * FROM subscriptions WHERE customer_id=? "
+    "AND status IN ('Active','Ending Soon')", (CID,))}
+_bad = [m for m in j["meals"] if m["projected"] and m["subscription_id"] in _subs
+        and not _core.plan_for_day(_c, _subs[m["subscription_id"]], m["date"])["deliver"]]
+check("a projected day is one the schedule actually delivers on", not _bad, str(_bad[:2]))
+
+# ...and prove it against a pack that really is on a restricted schedule, rather
+# than relying on whichever customer this database copy happened to pick.
+if _subs:
+    _sid = sorted(_subs)[0]
+    _c.execute("UPDATE subscriptions SET schedule_mode='weekly' WHERE id=?", (_sid,))
+    _core.save_day_plan(_c, _sid, [{"weekday": wd, "active": 1, "slot": None,
+                                    "variant_id": None, "meals": 1, "note": None}
+                                   for wd in (0, 2, 4)])          # Mon / Wed / Fri
+    _c.commit()
+    _j = cl.get(f"/api/v1/customer/{CID}/meals", headers=TOK).get_json()
+    _days = {m["date"] for m in _j["meals"]
+             if m["projected"] and m["subscription_id"] == _sid}
+    _off = sorted(d for d in _days
+                  if datetime.strptime(d, "%Y-%m-%d").weekday() in (1, 3, 5, 6))
+    check("a Mon/Wed/Fri pack promises nothing on Tue/Thu", not _off, str(_off[:3]))
+    check("...but still promises the days it does deliver", len(_days) > 0)
+    _c.execute("UPDATE subscriptions SET schedule_mode='daily' WHERE id=?", (_sid,))
+    _c.execute("DELETE FROM subscription_day_plan WHERE subscription_id=?", (_sid,))
+    _c.commit()
+_c.close()
 
 check("invoices -> 200",
       cl.get(f"/api/v1/customer/{CID}/invoices", headers=TOK).status_code == 200)
