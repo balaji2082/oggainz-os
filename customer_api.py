@@ -23,13 +23,18 @@ WHO TALKS TO WHOM
 
 READ ONLY, DELIBERATELY
 -----------------------
-There is not one write path in this file. Skip, pause and pin come later (step 6)
-and, when they do, they will call `core.add_pause()` and friends rather than
-writing SQL — those functions already encode invariants that were each learned
-from a real bug. Reimplementing them here is how they get relearned the hard way.
+There is not one write path in *this* file, and there still isn't. Skip and pause
+arrived as build-order step 6 and live in `customer_writes.py`, which this module
+registers at the bottom of `register()` — kept separate precisely so this
+sentence stays true and the read half remains something you can reason about
+without checking whether it changes anything.
 
-Until then the whole customer app can be built, deployed and used with zero
-ability to change anything in the business.
+As promised, those writes call `core.add_pause()` and friends rather than writing
+SQL: those functions already encode invariants that were each learned from a real
+bug, and reimplementing them is how they get relearned the hard way.
+
+The map pin (also step 6) is still not built — it needs a map component and is
+not on the current list.
 """
 
 import hmac
@@ -42,6 +47,7 @@ from flask import jsonify, request
 import core
 import db
 import menu
+import validity
 
 # Set OG_API_TOKEN in the environment (PythonAnywhere's WSGI file) to switch the
 # API on. With no token set every endpoint returns 503 — so a half-finished
@@ -99,8 +105,7 @@ def register(app):
             return _fail("unauthorised", 401)
         # An /api/v1/ path that matches no route must answer in JSON like every
         # other API response. Flask has already tried to route by now, so a None
-        # url_rule means there is nothing here — including the write endpoints,
-        # which do not exist yet by design.
+        # url_rule means there is genuinely nothing there.
         if request.url_rule is None:
             return _fail("not found", 404)
 
@@ -227,17 +232,20 @@ def register(app):
                 "slot": s["slot"],
                 "preferred_timing": s["preferred_timing"],
                 "status": s["status"],
-                "live": s["status"] in ("Active", "Ending Soon"),
+                # Expired counts as live: it still owes meals and the customer
+                # needs to see that, not have the pack quietly vanish into history.
+                "live": s["status"] in ("Active", "Ending Soon", "Expired"),
                 "start_date": _iso(s["start_date"]),
                 "meals_total": s["total_meals_scheduled"],
                 "meals_delivered": s["delivered_count"],
                 "meals_skipped": s["skipped_count"],
                 "meals_remaining": s["remaining_meals"],
                 # Only meaningful when Balaji has switched validity on for this
-                # pack. Off by default, and an unenforced pack must show the
-                # customer no countdown at all.
+                # pack (validity.py). Off by default, and an unenforced pack
+                # must show the customer no countdown at all.
                 "expires_on": (_iso(s["expires_on"]) if enforced else None),
                 "validity_enforced": enforced,
+                "validity_days_left": (validity.days_left(c, s) if enforced else None),
                 "paused": pause is not None,
                 "paused_until": _iso(pause["end_date"]) if pause else None,
                 "composition": comp,
@@ -379,3 +387,10 @@ def register(app):
             })
         c.close()
         return jsonify({"ok": True, "customer_id": cid, "addresses": out})
+
+    # -- the write half -----------------------------------------------------
+    # Registered here rather than from app.py so that adding skip and pause
+    # touched exactly one existing file, by two lines. Everything they do lives
+    # in customer_writes.py and is guarded by the same token gate above.
+    import customer_writes
+    customer_writes.register(app)

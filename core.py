@@ -433,11 +433,29 @@ def recompute_subscription(conn, sub_id, commit=True):
     scheduled = sub["total_meals_scheduled"] or 0
     remaining = max(scheduled - delivered, 0)
 
+    # [validity.py] Enforced, past its expiry, and still owed meals — the window
+    # closed with food unclaimed. Mutually exclusive with Completed by
+    # construction (this requires remaining > 0; Completed requires
+    # delivered >= scheduled, i.e. remaining <= 0), so inserting it here cannot
+    # change which subscriptions land on Completed. sub["enforce_validity"] is 0
+    # for every pack that exists today, so this branch never fires until Balaji
+    # turns validity on for one — see docs/01 §7.2.0 and validity.py.
+    expired = bool(sub["enforce_validity"]) and sub["expires_on"] \
+        and _today_iso() > sub["expires_on"] and remaining > 0
+
     # Pause is now driven by date windows (subscription_pauses): the sub shows as
     # Paused only while a window covers *today*. A finished freeze flips back to its
     # real state on its own; an open-ended freeze stays Paused until resumed.
+    #
+    # Paused is still checked FIRST, exactly as before validity existed — a pack
+    # that is both paused and (newly) expired shows as Paused, the state the
+    # customer actually asked for. Placing Expired after it, rather than before,
+    # keeps every pre-existing Paused/Completed decision byte-for-byte identical
+    # to what it was before this file changed.
     if is_paused_on(conn, sub_id, _today_iso()):
         status = "Paused"
+    elif expired:
+        status = "Expired"
     elif scheduled and delivered >= scheduled:
         status = "Completed"
     elif 0 < remaining <= ending_soon_threshold(conn):
@@ -567,6 +585,13 @@ def ensure_day_rows(conn, day_iso):
     ).fetchall()
     for s in subs:
         if is_paused_on(conn, s["id"], day_iso):     # frozen this day → no order
+            continue
+        # [validity.py] Enforced and past its expiry: the window is closed, so
+        # no further orders generate. Meals already delivered or still Pending
+        # from before the deadline are untouched — this only stops NEW rows.
+        # s["enforce_validity"] is 0 for every pack that exists today (default
+        # OFF, docs/01 §7.2.0), so this is a no-op until Balaji turns it on.
+        if s["enforce_validity"] and s["expires_on"] and day_iso > s["expires_on"]:
             continue
         # Their own weekly schedule decides whether this weekday is a delivery day
         # at all, which slot it lands in, and which box gets cooked.

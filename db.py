@@ -646,7 +646,20 @@ MIGRATIONS = {
                       ("expires_on", "TEXT"),
                       ("validity_note", "TEXT"),
                       ("late_delivery_agreed", "INTEGER DEFAULT 0"),
-                      ("schedule_mode", "TEXT DEFAULT 'daily'")],
+                      ("schedule_mode", "TEXT DEFAULT 'daily'"),
+                      # --- added Aug 2026, Balaji's instruction (validity.py) ---
+                      # validity_override lets ONE pack disagree with the global
+                      # switch below: NULL = follow the global switch, 'on' /
+                      # 'off' = an explicit decision that wins regardless of it.
+                      # enforce_validity (above) stays the column every reader
+                      # already checks — validity.sync() keeps it in step with
+                      # whichever of these two actually applies. Default NULL
+                      # means "not yet decided", which resolves to the global
+                      # switch, which defaults OFF — so this changes nothing
+                      # until Balaji turns something on.
+                      ("validity_override", "TEXT"),
+                      ("validity_changed_at", "TEXT"),
+                      ("validity_changed_by", "TEXT")],
     # The negotiated add-on rate. The catalog price is a starting suggestion, not
     # a constraint — Ashok pays ~₹49 per 50g of chicken where the catalog says
     # ₹60. Today that difference gets absorbed into the typed total and the
@@ -682,6 +695,14 @@ APP_SETTINGS_DEFAULTS = {
     "fee_band_free_km":        "5",
     "fee_band_mid_km":         "10",
     "fee_band_far_km":         "15",
+    # The master validity switch (validity.py). OFF: no pack expires, matching
+    # every day before this setting existed. ON: every pack whose own
+    # validity_override is NULL is enforced against its plan's validity_days —
+    # a pack Balaji has explicitly turned on or off keeps that explicit decision
+    # regardless of this switch (docs/01 §7.2.0's [LAW] still holds: a promise
+    # made in one WhatsApp conversation is never silently broken by a flag
+    # flipped for everyone else).
+    "validity_enforced_globally": "0",
 }
 
 

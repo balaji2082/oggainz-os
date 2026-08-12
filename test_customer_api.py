@@ -205,11 +205,20 @@ check("reading months of future meals creates NO order rows",
       before["deliveries"] == after["deliveries"],
       f"{before['deliveries']} -> {after['deliveries']}")
 
-print("\n== 5. writes are refused (there are none yet) ==")
-for path in [f"/api/v1/customer/{CID}/skip", f"/api/v1/customer/{CID}/pause",
-             f"/api/v1/customer/{CID}/pin"]:
-    check(f"POST {path} -> 404/405, not implemented",
-          cl.post(path, headers=TOK, json={}).status_code in (404, 405))
+print("\n== 5. the write endpoints live elsewhere, and the unbuilt one is still unbuilt ==")
+# Skip and pause arrived as build-order step 6 and are tested by
+# test_customer_writes.py. What this file still guarantees is the paragraph
+# above: that every READ endpoint above wrote nothing at all.
+for path in [f"/api/v1/customer/{CID}/skip", f"/api/v1/customer/{CID}/pause"]:
+    check(f"POST {path} exists and validates its input",
+          cl.post(path, headers=TOK, json={}).status_code == 400)
+check("POST /pin is still not implemented (needs a map component)",
+      cl.post(f"/api/v1/customer/{CID}/pin", headers=TOK, json={}).status_code in (404, 405))
+# A GET must never be a way in to a write endpoint. It answers 404 rather than
+# 405 because the token gate runs before routing resolves the method — which is
+# the better of the two answers anyway: it does not confirm the route is there.
+for path in [f"/api/v1/customer/{CID}/skip", f"/api/v1/customer/{CID}/pause"]:
+    check(f"GET {path} is refused", cl.get(path, headers=TOK).status_code in (404, 405))
 
 print("\n== 6. the API is off unless the token is configured ==")
 import importlib                                                 # noqa: E402
