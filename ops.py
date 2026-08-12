@@ -1080,28 +1080,67 @@ def check_provider(conn):
 # ---------------------------------------------------------------------------
 # Pin coverage — what still needs a map pin
 # ---------------------------------------------------------------------------
+# How far back a delivered trial stays on the pin page. Long enough that a trial
+# from this week or last can still be given a location — that is when it matters,
+# because a trial that converts brings its pin with it — and short enough that the
+# work list stays a work list instead of a year of history.
+TRIAL_PIN_WINDOW_DAYS = 14
+
+
 def pin_status(conn):
-    """Which delivery ADDRESSES still need a pin, live subscribers first.
+    """Which delivery stops still need a pin, the ones riding soonest first.
 
     Keyed on addresses rather than customers, because a customer can have a
     pinned home and an unpinned office — and the unpinned one silently drops out
     of the route on the days it is used.
+
+    Trials are listed alongside them. A trial box is carried to a real door by
+    the same rider on the same run, so it needs a pin for exactly the same
+    reasons; leaving trials out meant a trial customer could never be given a
+    location and rode every time as "no pin", with no distance and no share of
+    the km allowance. Only recent and upcoming trials are listed — an old
+    delivered trial is history, not work — but one that already has a pin is
+    always shown, so a location that was set never looks lost.
+
+    Every row is a plain dict with the same shape, `kind` saying which table it
+    came from and `pin_id` its key in that table.
     """
-    rows = conn.execute(
-        "SELECT a.*, c.name, c.locality, c.phone, "
-        "  (SELECT COUNT(*) FROM subscriptions s "
-        "    WHERE s.customer_id=c.id AND s.status IN ('Active','Ending Soon')) AS active_subs "
-        "FROM customer_addresses a JOIN customers c ON c.id=a.customer_id "
-        "WHERE a.active=1 ORDER BY c.id, a.is_default DESC, a.id").fetchall()
-    missing, pinned = [], []
-    for r in rows:
-        (pinned if (r["lat"] is not None and r["lng"] is not None) else missing).append(r)
-    missing.sort(key=lambda r: (-(r["active_subs"] or 0), r["customer_id"]))
+    out = []
+    for r in conn.execute(
+            "SELECT a.*, c.name, c.locality, c.phone, "
+            "  (SELECT COUNT(*) FROM subscriptions s "
+            "    WHERE s.customer_id=c.id AND s.status IN ('Active','Ending Soon')) AS active_subs "
+            "FROM customer_addresses a JOIN customers c ON c.id=a.customer_id "
+            "WHERE a.active=1 ORDER BY c.id, a.is_default DESC, a.id").fetchall():
+        d = dict(r)
+        d.update({"kind": "address", "pin_id": r["id"], "sort_key": r["customer_id"],
+                  "blocking": (r["active_subs"] or 0) > 0,
+                  "label": r["label"] or "Home"})
+        out.append(d)
+
+    cutoff = (datetime.now() - timedelta(days=TRIAL_PIN_WINDOW_DAYS)).strftime("%Y-%m-%d")
+    for r in conn.execute(
+            "SELECT * FROM trial_orders "
+            "WHERE lat IS NOT NULL "                       # never hide a pin already set
+            "   OR COALESCE(delivery_status,'Pending') <> 'Delivered' "   # still to ride
+            "   OR COALESCE(delivery_date, date) >= ? "                   # recent enough
+            "ORDER BY COALESCE(delivery_date, date) DESC, id DESC", (cutoff,)).fetchall():
+        d = dict(r)
+        # A trial's own address is all it has; there is no customer row behind it.
+        d.update({"kind": "trial", "pin_id": r["id"], "sort_key": r["id"],
+                  "customer_id": r["id"], "name": (r["name"] or "—").strip(),
+                  "label": "Trial", "locality": "", "active_subs": 0,
+                  "blocking": (r["delivery_status"] or "Pending") == "Pending"})
+        out.append(d)
+
+    missing = [r for r in out if r["lat"] is None or r["lng"] is None]
+    pinned = [r for r in out if r["lat"] is not None and r["lng"] is not None]
+    missing.sort(key=lambda r: (not r["blocking"], r["sort_key"]))
     return {
         "missing": missing,
         "pinned": pinned,
-        "blocking": [r for r in missing if (r["active_subs"] or 0) > 0],
-        "total": len(rows),
+        "blocking": [r for r in missing if r["blocking"]],
+        "total": len(out),
     }
 
 

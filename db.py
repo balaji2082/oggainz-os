@@ -618,6 +618,11 @@ MIGRATIONS = {
                            # of the two set the one currently stored.
                            ("pin_source", "TEXT"),      # customer | admin
                            ("pin_set_at", "TEXT")],
+    # A trial is a real box that a real rider carries to a real door, so it needs
+    # a pin like any other stop. Without these it could never have one: the trial
+    # had nowhere to store a location, so every trial rode as "no pin", with no
+    # distance and no share of the km allowance, and never appeared on the pin page.
+    "trial_orders": [("lat", "REAL"), ("lng", "REAL")],
     # --- added Aug 2026 for the OG Gainz app (og-gainz-app/docs/03 §2.1) ---
     # ALL of these are defaults-only: every one of them leaves existing packs
     # behaving exactly as they do today. Nothing here switches anything on.
@@ -706,37 +711,70 @@ def seed_app_settings(conn):
     conn.commit()
 
 
-def backfill_addresses(conn):
-    """Give every customer who has an address a matching default address row.
+def ensure_address_row(conn, cid):
+    """Make sure customer `cid` has at least one delivery address row. Returns its id.
 
-    Runs once. Multi-address support reads from customer_addresses, so without
-    this every existing customer would look like they had no delivery location
-    at all. The original columns on `customers` are left untouched as a safety
-    net — nothing is moved or deleted, only copied.
+    Every map screen — the pin list, the route, the zone, the km allowance — reads
+    `customer_addresses`, never the old columns on `customers`. So a customer with
+    no row here is INVISIBLE to all of them: they cannot be pinned, and once pinned
+    on the customer row they still never appear in the pinned list, because nothing
+    on those screens ever looks at that row. This is the one place that guarantees
+    a customer can be seen at all.
+
+    Idempotent. When usable rows already exist the DEFAULT one is returned:
+    callers use this to know where a single pin belongs, and for a customer with
+    a home and an office that has to be the home they deliver to, not whichever
+    row happened to be typed in first.
+
+    ACTIVE beats default in the ordering, and a customer whose every address has
+    been archived gets a fresh one. The guarantee this function exists to make is
+    that a pin always lands somewhere the map screens can see — returning an
+    archived row would quietly break it in exactly the way this whole fix is about.
     """
-    if get_setting(conn, "addresses_backfilled_v1"):
-        return
-    rows = conn.execute(
-        "SELECT id, address, locality, lat, lng, zone, corridor, drop_type, map_note "
-        "FROM customers").fetchall()
+    live = conn.execute(
+        "SELECT id FROM customer_addresses WHERE customer_id=? AND active=1 "
+        "ORDER BY is_default DESC, id", (cid,)).fetchone()
+    if live:
+        return live["id"]
+    r = conn.execute(
+        "SELECT id, address, lat, lng, zone, corridor, drop_type, map_note "
+        "FROM customers WHERE id=?", (cid,)).fetchone()
+    if r is None:
+        return None
+    # Created even when there is no address text yet: an empty row is what puts
+    # the customer on the "needs a pin" list, which is where the location gets
+    # given. Skipping them is exactly how a new customer went missing.
+    cur = conn.execute(
+        "INSERT INTO customer_addresses(customer_id,label,address,lat,lng,zone,"
+        "corridor,drop_type,map_note,is_default,active,sort,created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,1,1,10,?)",
+        (r["id"], r["drop_type"] or "Home", r["address"], r["lat"], r["lng"], r["zone"],
+         r["corridor"], r["drop_type"], r["map_note"], now_iso()))
+    conn.commit()
+    return cur.lastrowid
+
+
+def backfill_addresses(conn):
+    """Give every customer a delivery address row, on every startup.
+
+    This used to run ONCE, behind a settings flag. That was the bug: every
+    customer created after it ran — by the customer form, by a lead conversion,
+    by an import — got no address row, and so never appeared on the map pin page
+    at all. They could not be pinned, and pinning them from the customer form
+    (which writes the old `customers.lat`) left them still missing from the pinned
+    list. It is cheap and idempotent, so it now self-heals instead.
+
+    The original columns on `customers` are left untouched as a safety net —
+    nothing is moved or deleted, only copied.
+    """
     made = 0
-    for r in rows:
+    for r in conn.execute("SELECT id FROM customers").fetchall():
         has_any = conn.execute(
             "SELECT 1 FROM customer_addresses WHERE customer_id=?", (r["id"],)).fetchone()
-        if has_any:
-            continue
-        if not ((r["address"] or "").strip() or r["lat"] is not None):
-            continue                       # nothing worth copying
-        label = r["drop_type"] or "Home"
-        conn.execute(
-            "INSERT INTO customer_addresses(customer_id,label,address,lat,lng,zone,"
-            "corridor,drop_type,map_note,is_default,active,sort,created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,1,1,10,?)",
-            (r["id"], label, r["address"], r["lat"], r["lng"], r["zone"],
-             r["corridor"], r["drop_type"], r["map_note"], now_iso()))
-        made += 1
-    set_setting(conn, "addresses_backfilled_v1", "1")
-    conn.commit()
+        if not has_any and ensure_address_row(conn, r["id"]):
+            made += 1
+    if made:
+        conn.commit()
     return made
 
 

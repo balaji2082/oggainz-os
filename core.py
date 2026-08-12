@@ -651,7 +651,11 @@ def deliveries_for_day(conn, day_iso):
     return conn.execute(
         "SELECT d.*, COALESCE(c.phone, t.phone) AS phone, c.locality, "
         "       COALESCE(c.address, t.address) AS address, s.preferred_timing, "
-        "       c.lat, c.lng, c.zone, c.corridor, c.drop_type, c.map_note, "
+        # A trial carries its own pin: it has no customer row to hold one, so
+        # without the COALESCE every trial rode as "no pin" — no distance, no
+        # zone, no share of the km allowance — however carefully it was pinned.
+        "       COALESCE(c.lat, t.lat) AS lat, COALESCE(c.lng, t.lng) AS lng, "
+        "       c.zone, c.corridor, c.drop_type, c.map_note, "
         "       COALESCE(s.notes,'') AS sub_notes, "
         "       (SELECT COUNT(*) FROM customer_addresses ca "
         "          WHERE ca.customer_id=d.customer_id AND ca.active=1) AS n_addresses, "

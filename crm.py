@@ -169,6 +169,9 @@ def convert_lead(conn, lid):
             (cid, lead["name"], lead["phone"], lead["locality"], None,
              f"Converted from lead {lid}." + (f" {lead['notes']}" if lead["notes"] else ""),
              db.now_iso()))
+        # Without an address row the new customer is invisible to the pin page
+        # and the route — they could never be given a location at all.
+        db.ensure_address_row(conn, cid)
     conn.execute("UPDATE leads SET stage=?, customer_id=?, updated_at=? WHERE id=?",
                  (WON, cid, db.now_iso(), lid))
     conn.commit()

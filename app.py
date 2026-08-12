@@ -1073,7 +1073,14 @@ def _flash_pin_result(raw, lat, how):
 
 
 def _save_customer_geo(c, f, cid):
-    """Save the map pin and delivery hints. Shared by new + edit."""
+    """Save the map pin and delivery hints. Shared by new + edit.
+
+    The pin is written to the customer's DEFAULT ADDRESS as well as to the
+    customer row. Every map screen reads the address — so writing only the
+    customer row, as this used to, meant a pin saved here changed nothing at all:
+    the customer stayed on the "needs a pin" list, never showed a distance, and
+    rode the evening route as unpinned.
+    """
     lat, lng, how = ops.resolve_location(f.get("pin"))
     _flash_pin_result(f.get("pin"), lat, how)
     if lat is None and (f.get("lat") or "").strip():
@@ -1083,10 +1090,20 @@ def _save_customer_geo(c, f, cid):
             lat = lng = None
     if lat is not None:
         c.execute("UPDATE customers SET lat=?, lng=? WHERE id=?", (lat, lng, cid))
+    corridor = (f.get("corridor") or "").strip() or None
+    drop_type = (f.get("drop_type") or "").strip() or None
+    map_note = (f.get("map_note") or "").strip() or None
     c.execute("UPDATE customers SET corridor=?, drop_type=?, map_note=? WHERE id=?",
-              ((f.get("corridor") or "").strip() or None,
-               (f.get("drop_type") or "").strip() or None,
-               (f.get("map_note") or "").strip() or None, cid))
+              (corridor, drop_type, map_note, cid))
+    aid = db.ensure_address_row(c, cid)      # a customer with no address row is invisible
+    if aid:
+        if lat is not None:
+            c.execute("UPDATE customer_addresses SET lat=?, lng=? WHERE id=?", (lat, lng, aid))
+        if (f.get("address") or "").strip():
+            c.execute("UPDATE customer_addresses SET address=? WHERE id=?",
+                      ((f.get("address") or "").strip(), aid))
+        c.execute("UPDATE customer_addresses SET corridor=?, drop_type=?, map_note=? WHERE id=?",
+                  (corridor, drop_type, map_note, aid))
     return lat is not None
 
 
@@ -1827,16 +1844,24 @@ def pins_save():
     not a customer).
     """
     c = conn()
-    aid = request.form.get("address_id", type=int)
+    kind = request.form.get("kind") or "address"
     lat, lng, how = ops.resolve_location(request.form.get("pin"))
     if lat is None:
         c.close()
         return jsonify({"ok": False, "err": how})
-    c.execute("UPDATE customer_addresses SET lat=?, lng=? WHERE id=?", (lat, lng, aid))
-    a = c.execute("SELECT * FROM customer_addresses WHERE id=?", (aid,)).fetchone()
-    c.commit()
-    if a and a["is_default"]:
-        ops.set_default_address(c, a["customer_id"], aid)   # mirror onto the customer row
+    if kind == "trial":
+        # A trial has no customer row and no address row — the pin lives on the
+        # trial itself, and the route reads it from there.
+        c.execute("UPDATE trial_orders SET lat=?, lng=? WHERE id=?",
+                  (lat, lng, request.form.get("address_id")))
+        c.commit()
+    else:
+        aid = request.form.get("address_id", type=int)
+        c.execute("UPDATE customer_addresses SET lat=?, lng=? WHERE id=?", (lat, lng, aid))
+        a = c.execute("SELECT * FROM customer_addresses WHERE id=?", (aid,)).fetchone()
+        c.commit()
+        if a and a["is_default"]:
+            ops.set_default_address(c, a["customer_id"], aid)  # mirror onto the customer row
     km, src = ops.road_km_from_kitchen(c, lat, lng)      # road, not straight-line
     zone = ops.zone_for_km(c, km)
     left = len(ops.pin_status(c)["missing"])
@@ -1864,6 +1889,11 @@ def api_customer_location(cid):
             c.close()
             return jsonify({"ok": False, "err": how})
         c.execute("UPDATE customers SET lat=?, lng=? WHERE id=?", (lat, lng, cid))
+        # The route and the pin list read the ADDRESS, so the pin has to land
+        # there too or setting it here would look saved and change nothing.
+        aid = db.ensure_address_row(c, cid)
+        if aid:
+            c.execute("UPDATE customer_addresses SET lat=?, lng=? WHERE id=?", (lat, lng, aid))
         c.commit()
         cust = c.execute("SELECT * FROM customers WHERE id=?", (cid,)).fetchone()
 
@@ -1929,14 +1959,25 @@ def _save_trial(c, f, tid):
     d = f.get("date") or date.today().strftime("%Y-%m-%d")
     dd = f.get("delivery_date") or None
     plan_id = int(f["plan_id"]) if f.get("plan_id") else None
+    # This is INSERT OR REPLACE, so every column has to be carried through or it
+    # is erased. The pin is only replaced when a new one was actually typed —
+    # otherwise an edit to the amount would quietly throw the location away.
+    prev = c.execute("SELECT lat, lng FROM trial_orders WHERE id=?", (tid,)).fetchone()
+    lat, lng = (prev["lat"], prev["lng"]) if prev else (None, None)
+    if (f.get("pin") or "").strip():
+        plat, plng, how = ops.resolve_location(f.get("pin"))
+        _flash_pin_result(f.get("pin"), plat, how)
+        if plat is not None:
+            lat, lng = plat, plng
     c.execute("""INSERT OR REPLACE INTO trial_orders(id,date,name,phone,order_text,amount,
                    payment_status,month,conversion,address,notes,delivery_date,meal_type,
-                   delivery_status,plan_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   delivery_status,plan_id,lat,lng,created_at)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
               (tid, d, f.get("name"), f.get("phone"), f.get("order_text"),
                float(f.get("amount") or 0), f.get("payment_status", "Paid"),
                core.month_label_iso(d), f.get("conversion"), f.get("address"),
                f.get("notes"), dd, f.get("meal_type", "Lunch"),
-               f.get("delivery_status", "Pending"), plan_id, db.now_iso()))
+               f.get("delivery_status", "Pending"), plan_id, lat, lng, db.now_iso()))
     c.commit()
     core.sync_trial_delivery(c, tid)     # add/update/remove its slot in the day's orders
 

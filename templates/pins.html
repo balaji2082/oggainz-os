@@ -59,7 +59,7 @@
 <div class="card">
   <div class="row" style="justify-content:space-between;align-items:center">
     <div>
-      <strong>{{ pinned|length }} of {{ st.total }}</strong> addresses pinned
+      <strong>{{ pinned|length }} of {{ st.total }}</strong> delivery points pinned
       {% if st.blocking %}
         · <span style="color:#c0392b">{{ st.blocking|length }} with live subscriptions still missing</span>
       {% endif %}
@@ -82,10 +82,12 @@
    where a three-column table forces the whole page to scroll sideways. #}
 <div id="pinlist">
   {% for cust, searchurl in missing %}
-  <div class="card pin-card" data-aid="{{ cust.id }}" style="margin-bottom:10px">
+  <div class="card pin-card" data-aid="{{ cust.pin_id }}" data-kind="{{ cust.kind }}"
+       style="margin-bottom:10px">
     <div>
       <strong>{{ cust.name }}</strong> <span class="pill">{{ cust.label }}</span>
       {% if cust.active_subs %}<span class="pill pill-ok" title="has a live subscription">{{ cust.active_subs }} active</span>{% endif %}
+      {% if cust.kind == 'trial' and cust.blocking %}<span class="pill pill-ok" title="not delivered yet">riding</span>{% endif %}
     </div>
     <div class="muted" style="font-size:.85em;margin-top:2px">
       {{ cust.customer_id }} · {{ cust.locality or '—' }}</div>
@@ -126,7 +128,9 @@
         <td style="white-space:nowrap">{{ km }} km
           {% if src == 'estimate' %}<div class="muted" style="font-size:.8em">approx.</div>{% endif %}</td>
         <td><span class="pill">{{ zone }}</span></td>
-        <td><a class="btn btn-ghost btn-sm" href="{{ url_for('customer_detail', cid=cust.customer_id) }}">Edit</a></td>
+        <td><a class="btn btn-ghost btn-sm"
+               href="{{ url_for('trial_edit', tid=cust.pin_id) if cust.kind == 'trial'
+                        else url_for('customer_detail', cid=cust.customer_id) }}">Edit</a></td>
       </tr>
     {% endfor %}
     </tbody>
@@ -151,6 +155,7 @@ document.querySelectorAll('#pinlist .pin-save').forEach(function (btn) {
     btn.disabled = true; msg.textContent = 'Saving…';
     var body = new FormData();
     body.append('address_id', tr.dataset.aid);
+    body.append('kind', tr.dataset.kind || 'address');
     body.append('pin', val);
     fetch('{{ url_for("pins_save") }}', { method: 'POST', body: body })
       .then(function (r) { return r.json(); })
