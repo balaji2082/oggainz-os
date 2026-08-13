@@ -170,15 +170,23 @@ check("the carry-forward promise is in the message",
 check("it says when the pack now runs to", j.get("pack_runs_to"), j)
 
 c = db.get_db()
-check("[LAW] the day became a one-day pause window, not a deleted row",
-      core.is_paused_on(c, SUB, DAY))
-win = c.execute("SELECT * FROM subscription_pauses WHERE subscription_id=? AND "
-                "start_date=? AND end_date=?", (SUB, DAY, DAY)).fetchone()
-check("the window is marked as a skip for anyone reading the table",
-      win and win["reason"] == "skip via app", win["reason"] if win else None)
-check("no Pending delivery row survives inside it",
-      c.execute("SELECT COUNT(*) n FROM deliveries WHERE subscription_id=? AND date=? "
-                "AND status='Pending'", (SUB, DAY)).fetchone()["n"] == 0)
+# [LAW] Balaji, 13 Aug 2026 — the row STAYS and is marked, so the day is still
+# on the kitchen sheet with an X against it. The first design deleted it via a
+# one-day pause window, which left no record that a skip had ever happened.
+srow = c.execute("SELECT * FROM deliveries WHERE subscription_id=? AND date=? "
+                 "AND COALESCE(is_extra,0)=0", (SUB, DAY)).fetchone()
+check("[LAW] the order row still EXISTS after a skip", srow is not None,
+      "the row was deleted — Balaji cannot see the skip on the day's sheet")
+check("...and is marked Skipped", srow and srow["status"] == "Skipped",
+      srow["status"] if srow else None)
+check("...and records that the CUSTOMER did it, not Balaji",
+      srow and srow["skip_source"] == "customer", srow["skip_source"] if srow else None)
+check("no one-day pause window is created any more",
+      c.execute("SELECT COUNT(*) n FROM subscription_pauses WHERE subscription_id=? "
+                "AND start_date=? AND end_date=?", (SUB, DAY, DAY)).fetchone()["n"] == 0)
+check("a skipped meal still carries forward (does not consume the pack)",
+      c.execute("SELECT remaining_meals FROM subscriptions WHERE id=?",
+                (SUB,)).fetchone()["remaining_meals"] > 0)
 logged = c.execute("SELECT * FROM skip_requests WHERE customer_id=? AND target_date=? "
                    "ORDER BY id DESC LIMIT 1", (CID, DAY)).fetchone()
 check("[RULE] even an instant action is logged", logged is not None)
@@ -193,9 +201,9 @@ r2 = post(f"/api/v1/customer/{CID}/skip", {"date": DAY, "subscription_id": SUB})
 j2 = r2.get_json()
 check("skipping twice is idempotent", j2.get("outcome") == "applied" and j2.get("already"), j2)
 c = db.get_db()
-check("...and leaves exactly one window",
-      c.execute("SELECT COUNT(*) n FROM subscription_pauses WHERE subscription_id=? "
-                "AND start_date=? AND end_date=?", (SUB, DAY, DAY)).fetchone()["n"] == 1)
+check("...and leaves exactly one order row",
+      c.execute("SELECT COUNT(*) n FROM deliveries WHERE subscription_id=? AND date=? "
+                "AND COALESCE(is_extra,0)=0", (SUB, DAY)).fetchone()["n"] == 1)
 c.close()
 
 
@@ -221,9 +229,7 @@ check("...and it names the pack it belongs to",
 pj = cl.get(f"/api/v1/customer/{CID}/packs", headers=TOK).get_json()
 pack = [p for p in pj.get("packs", []) if p["id"] == SUB]
 check("the pack lists its pause windows", pack and "pauses" in pack[0], pack[0].keys() if pack else None)
-check("...including this future one-day skip, which never covers today",
-      pack and any(w["start"] == DAY and w["kind"] == "skip" for w in pack[0]["pauses"]),
-      pack[0].get("pauses") if pack else None)
+# The pauses array is now for genuine freezes only; a skip lives on the row.
 
 
 print("\n== 2c. a pack never promises more meals than it owes ==")
@@ -258,7 +264,12 @@ j = r.get_json()
 check("unskip returns 200", r.status_code == 200, r.status_code)
 check("outcome is 'applied'", j.get("outcome") == "applied", j)
 c = db.get_db()
-check("the pause window is gone", not core.is_paused_on(c, SUB, DAY))
+back = c.execute("SELECT * FROM deliveries WHERE subscription_id=? AND date=? "
+                 "AND COALESCE(is_extra,0)=0", (SUB, DAY)).fetchone()
+check("the order is Pending again, not deleted", back and back["status"] == "Pending",
+      back["status"] if back else "row missing")
+check("and no longer attributed to the customer",
+      back and back["skip_source"] is None, back["skip_source"] if back else None)
 c.close()
 j2 = post(f"/api/v1/customer/{CID}/unskip", {"date": DAY, "subscription_id": SUB}).get_json()
 check("unskipping twice is idempotent", j2.get("already") is True, j2)
@@ -287,8 +298,9 @@ check("[deviation, docs/05 §2] the message promises nothing",
 RID = j.get("request_id")
 
 c = db.get_db()
-check("[LAW §6.1] the meal is NOT paused while the request is pending",
-      not core.is_paused_on(c, SUB, DAY))
+check("[LAW §6.1] the meal is NOT skipped while the request is pending",
+      c.execute("SELECT status FROM deliveries WHERE subscription_id=? AND date=? "
+                "AND COALESCE(is_extra,0)=0", (SUB, DAY)).fetchone()["status"] != "Skipped")
 check("[LAW §6.1] the kitchen count is unchanged",
       c.execute("SELECT COUNT(*) n FROM deliveries WHERE subscription_id=? AND date=?",
                 (SUB, DAY)).fetchone()["n"] == pending_before)
@@ -311,7 +323,8 @@ d = post(f"/api/v1/requests/{RID}/decide", {"outcome": "declined", "reason": "al
 check("declining returns 200", d.status_code == 200, d.status_code)
 c = db.get_db()
 check("[LAW §8.3] a declined request leaves the meal scheduled",
-      not core.is_paused_on(c, SUB, DAY))
+      c.execute("SELECT status FROM deliveries WHERE subscription_id=? AND date=? "
+                "AND COALESCE(is_extra,0)=0", (SUB, DAY)).fetchone()["status"] == "Pending")
 rq = c.execute("SELECT * FROM skip_requests WHERE id=?", (RID,)).fetchone()
 check("the decline reason is recorded for the customer to see",
       rq["decline_reason"] == "already packed", rq["decline_reason"])

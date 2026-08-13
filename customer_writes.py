@@ -25,11 +25,20 @@ THE LAWS THIS FILE EXISTS TO OBEY
       list. Removing it early is exactly the failure of silently dropping an
       order.
 
-[LAW] docs/05 §2.5 — a one-day skip is a ONE-DAY PAUSE WINDOW, not a deleted
-      delivery row. `core.ensure_day_rows()` regenerates deleted Pending rows on
-      every operating day the sub is not paused on, so a deleted row comes back
-      the next morning. This was found by reading the generator, not by seeing it
-      fail in production.
+[LAW] Balaji, 13 Aug 2026 — a customer's skip MARKS the order `Skipped`; it
+      never deletes it, and it is no longer a one-day pause window.
+
+      The original design used a pause window, because that is the only durable
+      way to stop `ensure_day_rows` regenerating a *deleted* row. It was durable
+      and it was wrong for the business: the day disappeared from the kitchen
+      sheet, so nothing recorded that a skip had happened and Balaji could not
+      see it where he actually works. Marking is equally durable — the generator
+      skips any date that already has a row, whatever its status — and it leaves
+      the X on the day, which is what he does by hand.
+
+      A PAUSE still removes rows. That distinction is the point: a paused
+      stretch should generate no orders at all, and a skipped day should appear
+      and be visibly skipped.
 
 [LAW] docs/02 §8.5 — Balaji has no cutoff. He can act for anyone on any date.
 
@@ -236,29 +245,101 @@ def _serialise_request(r):
 # ---------------------------------------------------------------------------
 # Applying, once a decision has been made (by the clock or by Balaji)
 # ---------------------------------------------------------------------------
-def _apply_skip(conn, sub, day_iso, *, cooked):
-    """Take one day off this pack.
+def _delivery_row(conn, sub_id, day_iso):
+    """This pack's own order row on that date, whatever its status."""
+    return conn.execute(
+        "SELECT * FROM deliveries WHERE subscription_id=? AND date=? "
+        "AND COALESCE(is_extra,0)=0 ORDER BY id LIMIT 1", (sub_id, day_iso)).fetchone()
 
-    `cooked=False` — nothing has been bought yet, so the day becomes a one-day
-    pause window and generates no order at all (docs/05 §2.5).
 
-    `cooked=True` — Balaji is allowing a late skip. The food exists, so the
-    honest record is the row marked `Skipped`: it was made, it wasn't delivered.
+def _apply_skip(conn, sub, day_iso, *, cooked=False):
+    """Take one day off this pack, leaving the day ON the kitchen sheet.
+
+    [LAW] Balaji's instruction, 13 Aug 2026: a customer's skip MARKS the order
+    `Skipped`. It does not delete it.
+
+    The first design made a skip a one-day pause window, because that is the
+    only durable way to stop `ensure_day_rows` regenerating a deleted row. It
+    worked, and it was wrong for the business: the day vanished from the day's
+    order list, so nothing recorded that a skip had ever happened, and Balaji
+    could not see it where he actually works. He marks skips by hand with an X;
+    the app must produce the same thing, distinguishable as the customer's doing.
+
+    Marking is durable for the same reason deleting was not: `ensure_day_rows`
+    checks whether ANY row exists for the date before creating one, so a Skipped
+    row suppresses regeneration exactly as a Pending one does.
+
     Per docs/02 §3.2 a Skipped meal still carries forward and does not consume
-    the pack, so the late skip costs Balaji the food and the customer keeps the
-    meal. That policy is deliberate and generous; it is not changed here.
+    the pack — `recompute_subscription` counts only Delivered against the total.
+    That policy is deliberate and generous, and is unchanged here.
+
+    `cooked` is kept for the late path: it means the food was already made when
+    the skip was allowed. It changes nothing mechanically — the row is marked
+    either way — but it is the honest distinction the request log records.
     """
-    if cooked:
-        row = conn.execute(
-            "SELECT id FROM deliveries WHERE subscription_id=? AND date=? "
-            "AND status='Pending' ORDER BY id LIMIT 1", (sub["id"], day_iso)).fetchone()
-        if row:
-            core.mark_delivery(conn, row["id"], "Skipped")
-            return
-        # No row was ever generated for that day — nothing was cooked after all,
-        # so fall through to the clean mechanism rather than inventing a row.
-    if not core.is_paused_on(conn, sub["id"], day_iso):
-        core.add_pause(conn, sub["id"], day_iso, day_iso, reason="skip via app")
+    row = _delivery_row(conn, sub["id"], day_iso)
+
+    if row is None:
+        # A future day whose row has not been generated yet. Ask the engine to
+        # make the day, rather than inventing a row here — plan_for_day decides
+        # the slot and which box is cooked, and duplicating that is how the app
+        # and the kitchen start disagreeing.
+        core.ensure_day_rows(conn, day_iso)
+        row = _delivery_row(conn, sub["id"], day_iso)
+
+    if row is None:
+        # The generator declined — the pack owes nothing more, or this weekday
+        # is not one of its delivery days. There is genuinely no meal to skip,
+        # and a pause window here would silently create one.
+        return False
+
+    if row["status"] != "Skipped":
+        core.mark_delivery(conn, row["id"], "Skipped")
+    conn.execute(
+        "UPDATE deliveries SET skip_source='customer', skipped_at=? WHERE id=?",
+        (db.now_iso(), row["id"]))
+    conn.commit()
+    return True
+
+
+def _undo_skip(conn, sub, day_iso):
+    """Put a skipped day back on. The exact inverse of _apply_skip.
+
+    Also undoes a skip made under the ORIGINAL design, which wrote a one-day
+    pause window instead of marking the row. Those windows exist in the live
+    database — Balaji made several while testing — and without this they would
+    be permanently un-undoable: the app would show the day as skipped and offer
+    no way back, which is exactly what he reported on the 14th and the 17th.
+    """
+    undone = False
+
+    row = _delivery_row(conn, sub["id"], day_iso)
+    if row is not None and row["status"] == "Skipped":
+        core.mark_delivery(conn, row["id"], "Pending")
+        conn.execute(
+            "UPDATE deliveries SET skip_source=NULL, skipped_at=NULL WHERE id=?", (row["id"],))
+        conn.commit()
+        undone = True
+
+    legacy = _one_day_pause(conn, sub["id"], day_iso)
+    if legacy is not None:
+        core.delete_pause(conn, legacy["id"])
+        undone = True
+
+    return undone
+
+
+def _is_skipped(conn, sub_id, day_iso):
+    """Is this day off — however it was taken off?
+
+    Covers both the current mechanism (the row marked Skipped) and the original
+    one (a one-day pause window), so a day skipped last week still reads as
+    skipped today and can still be undone.
+    """
+    row = _delivery_row(conn, sub_id, day_iso)
+    if row is not None and row["status"] == "Skipped":
+        return True
+    return _one_day_pause(conn, sub_id, day_iso) is not None
 
 
 def _apply_pause(conn, sub, start_iso, end_iso, reason):
@@ -292,9 +373,9 @@ def register(app):
                 return _fail("the kitchen is closed that day — there is nothing to skip", 409)
 
             # Already skipped? Say so and succeed. A tap that arrived twice
-            # because the connection dropped must not become two pause windows
+            # because the connection dropped must not be treated as an error
             # (docs/02 §7.5 — every action is idempotent).
-            if core.is_paused_on(conn, sub["id"], day):
+            if _is_skipped(conn, sub["id"], day):
                 return jsonify({
                     "ok": True, "outcome": "applied", "already": True,
                     "applied": [day], "pending": [],
@@ -320,7 +401,8 @@ def register(app):
                     "pack_runs_to": _project_last_day(conn, sub),
                 })
 
-            _apply_skip(conn, sub, day, cooked=False)
+            if not _apply_skip(conn, sub, day):
+                return _fail("there is no meal on that day to skip", 409)
             return jsonify({
                 "ok": True, "outcome": "applied", "request_id": rid,
                 "applied": [day], "pending": [],
@@ -351,8 +433,7 @@ def register(app):
             if err:
                 return _fail(err, 409)
 
-            window = _one_day_pause(conn, sub["id"], day)
-            if not window:
+            if not _is_skipped(conn, sub["id"], day):
                 return jsonify({
                     "ok": True, "outcome": "applied", "already": True,
                     "applied": [day], "pending": [],
@@ -374,7 +455,7 @@ def register(app):
                     "pack_runs_to": _project_last_day(conn, sub),
                 })
 
-            core.delete_pause(conn, window["id"])
+            _undo_skip(conn, sub, day)
             return jsonify({
                 "ok": True, "outcome": "applied", "request_id": rid,
                 "applied": [day], "pending": [],
@@ -620,9 +701,7 @@ def register(app):
                 elif r["kind"] == "resume":
                     core.resume_subscription(conn, sub["id"], r["target_date"])
                 elif r["kind"] == "undo":
-                    window = _one_day_pause(conn, sub["id"], r["target_date"])
-                    if window:
-                        core.delete_pause(conn, window["id"])
+                    _undo_skip(conn, sub, r["target_date"])
 
             conn.execute(
                 "UPDATE skip_requests SET outcome=?, decided_at=?, decided_by=?, "

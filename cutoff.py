@@ -46,6 +46,29 @@ def now_ist():
     return datetime.utcnow() + IST_OFFSET
 
 
+def _setting(conn, key, default=None):
+    """A setting, read at most once per connection.
+
+    `/deadlines` describes up to 120 days in one call, and each day was asking
+    the settings table for the cutoff time and the mode independently — 285
+    queries for a single request. The values cannot change midway through one
+    request, so reading them once is not a cache with a staleness problem; it is
+    just not asking the same question ninety times.
+
+    Keyed on the connection object, so it dies with the request.
+    """
+    store = getattr(conn, "_og_setting_cache", None)
+    if store is None:
+        store = {}
+        try:
+            conn._og_setting_cache = store
+        except AttributeError:
+            return db.get_setting(conn, key, default)
+    if key not in store:
+        store[key] = db.get_setting(conn, key, default)
+    return store[key]
+
+
 def cutoff_time(conn):
     """The configured deadline as a `time`. Falls back to 18:00 if unreadable.
 
@@ -54,7 +77,7 @@ def cutoff_time(conn):
     the worst possible failure direction. It falls back to the documented
     default and carries on.
     """
-    raw = (db.get_setting(conn, "skip_cutoff_time") or DEFAULT_CUTOFF).strip()
+    raw = (_setting(conn, "skip_cutoff_time") or DEFAULT_CUTOFF).strip()
     try:
         hh, mm = raw.split(":")[:2]
         return time(int(hh), int(mm))
@@ -86,7 +109,7 @@ def deadline_for(conn, day_iso):
                                    Monday's meal cuts off at 6 PM Friday.
     """
     day = datetime.strptime(day_iso, "%Y-%m-%d").date()
-    mode = (db.get_setting(conn, "skip_cutoff_applies_to") or "calendar_day").strip()
+    mode = (_setting(conn, "skip_cutoff_applies_to") or "calendar_day").strip()
     base = _previous_operating_day(conn, day) if mode == "operating_day" else day - timedelta(days=1)
     return datetime.combine(base, cutoff_time(conn))
 
@@ -129,12 +152,12 @@ def describe(conn, day_iso, at=None):
 
 def late_requests_allowed(conn):
     """Whether a past-deadline request may be raised at all (docs/02 §9)."""
-    return (db.get_setting(conn, "late_requests_allowed") or "1").strip() not in ("0", "", "false", "no")
+    return (_setting(conn, "late_requests_allowed") or "1").strip() not in ("0", "", "false", "no")
 
 
 def pause_max_days(conn):
     """Optional cap on a single pause window. None = unlimited."""
-    raw = (db.get_setting(conn, "pause_max_days") or "").strip()
+    raw = (_setting(conn, "pause_max_days") or "").strip()
     try:
         n = int(raw)
         return n if n > 0 else None
@@ -148,7 +171,7 @@ def freeze_eligible(conn, plan_name):
     An empty setting means every plan is eligible — an unset value must not
     silently switch the feature off for everyone.
     """
-    raw = (db.get_setting(conn, "freeze_eligible_plans") or "").strip()
+    raw = (_setting(conn, "freeze_eligible_plans") or "").strip()
     if not raw:
         return True
     allowed = [p.strip().lower() for p in raw.split(",") if p.strip()]

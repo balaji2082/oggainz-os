@@ -581,7 +581,20 @@ MIGRATIONS = {
                       # it is not the subscription's usual one. Stored on the row so
                       # the history still shows what actually went out even if the
                       # schedule is changed months later.
-                      ("variant_id", "INTEGER")],
+                      ("variant_id", "INTEGER"),
+                      # --- added Aug 2026 ---
+                      # Who took this day off. 'customer' means they did it in
+                      # the app; NULL means Balaji marked it by hand, which is
+                      # every Skipped row that existed before this.
+                      #
+                      # A customer's skip now MARKS the order Skipped instead of
+                      # deleting it. It used to create a one-day pause window,
+                      # which removed the row entirely — so the day disappeared
+                      # from the kitchen sheet and left no record that anything
+                      # had been skipped at all. A skipped day that leaves no
+                      # trace cannot be counted, queried, or discussed later.
+                      ("skip_source", "TEXT"),
+                      ("skipped_at", "TEXT")],
     "trial_orders":  [("notes", "TEXT"), ("delivery_date", "TEXT"),
                       ("meal_type", "TEXT"), ("delivery_status", "TEXT"),
                       ("plan_id", "INTEGER")],   # which pack the trial is of → prep list

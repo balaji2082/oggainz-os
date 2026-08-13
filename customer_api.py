@@ -391,6 +391,11 @@ def register(app):
                 # One day off is a skip; a stretch is a freeze. Same mechanism
                 # underneath (docs/05 §2.5), but they are different words to a
                 # customer and the interface must not call a skip a pause.
+                # A one-day window is a skip made under the ORIGINAL design,
+                # before a skip marked the row instead. Real rows now carry
+                # their own Skipped status and are returned above, so this only
+                # ever fires for those legacy windows — which must keep
+                # rendering as skipped so they can still be undone.
                 one_day = win["start_date"] == win["end_date"]
                 meals.append({
                     "date": iso, "slot": slot,
