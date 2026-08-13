@@ -520,6 +520,30 @@ def register(app):
                         "requests": [_serialise_request(r) for r in rows]})
 
     # -- Balaji's queue -----------------------------------------------------
+    @app.route("/api/v1/activity")
+    def api_activity():
+        """Everything customers have done lately, decided or not.
+
+        The queue below answers "what needs me?". This answers "what happened?",
+        which is a different and equally necessary question — a skip applied
+        before the deadline never enters the queue, by design, so without this
+        there was no single place to see that a customer had skipped at all.
+        Every action is logged (docs/03 §2.2), so this is a complete record.
+        """
+        limit = min(int(request.args.get("limit") or 60), 200)
+        conn = db.get_db()
+        rows = conn.execute(
+            "SELECT r.*, c.name AS customer_name FROM skip_requests r "
+            "LEFT JOIN customers c ON c.id=r.customer_id "
+            "ORDER BY r.requested_at DESC, r.id DESC LIMIT ?", (limit,)).fetchall()
+        out = []
+        for r in rows:
+            item = _serialise_request(r)
+            item["customer_name"] = r["customer_name"]
+            out.append(item)
+        conn.close()
+        return jsonify({"ok": True, "activity": out})
+
     @app.route("/api/v1/requests")
     def api_requests():
         """Everything waiting on a decision, with the history that informs it.
