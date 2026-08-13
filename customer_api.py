@@ -224,6 +224,18 @@ def register(app):
             rules = [{"label": menu.rule_label(r), "weekdays": r["weekdays"]}
                      for r in menu.rules_for_sub(c, s["id"])]
             pause = core.current_pause(c, s["id"])
+            # Every window, not only the one covering today. `paused` below
+            # answers "is this pack frozen right now"; the calendar needs to
+            # shade a freeze that starts next Tuesday as well, and a one-day
+            # skip three weeks out is a window that will never cover today.
+            windows = [{
+                "start": _iso(p["start_date"]),
+                "end": _iso(p["end_date"]),
+                # A one-day window created by the app's skip button. Named so
+                # the interface can say "skipped" rather than "paused" — the
+                # words are not interchangeable to a customer (docs/02 §7.4).
+                "kind": ("skip" if p["start_date"] == p["end_date"] else "pause"),
+            } for p in core.pauses_for(c, s["id"])]
             enforced = bool(s["enforce_validity"]) if "enforce_validity" in keys else False
             packs.append({
                 "id": s["id"],
@@ -248,6 +260,7 @@ def register(app):
                 "validity_days_left": (validity.days_left(c, s) if enforced else None),
                 "paused": pause is not None,
                 "paused_until": _iso(pause["end_date"]) if pause else None,
+                "pauses": windows,
                 "composition": comp,
                 "rules": rules,
             })
@@ -294,9 +307,12 @@ def register(app):
         # Fill the forward gap with expected days, clearly flagged. No meal count
         # is computed here — "remaining" always comes from the engine.
         have = {(m["date"], m["slot"]) for m in meals}
+        # 'Paused' belongs here too. A pack frozen right now still has days after
+        # the freeze ends, and leaving it out made a paused customer's calendar
+        # look permanently empty rather than paused-then-resuming.
         live = c.execute(
             "SELECT * FROM subscriptions WHERE customer_id=? "
-            "AND status IN ('Active','Ending Soon')", (cid,)).fetchall()
+            "AND status IN ('Active','Ending Soon','Paused')", (cid,)).fetchall()
         today = date.today().isoformat()
         for s in live:
             # Ask the schedule engine day by day rather than assuming every open
@@ -323,6 +339,49 @@ def register(app):
                                   "subscription_id": s["id"], "projected": True})
                     have.add((iso, slot))
                 cur += timedelta(days=1)
+
+        # -- days the customer has taken off ---------------------------------
+        #
+        # [LAW] A skipped day must be VISIBLE, not merely absent.
+        #
+        # This is the bug that made skip look broken from the app for its whole
+        # first day of life. Skipping writes a one-day pause window, which
+        # correctly deletes the Pending delivery row — so the day had no row to
+        # report, and the projection above deliberately steps over paused days.
+        # The skip worked perfectly in the database and the customer saw the day
+        # silently disappear, which reads exactly like nothing happened.
+        #
+        # A day the customer removed on purpose is an event with a name. It is
+        # reported as one, over the WHOLE window rather than only from today,
+        # because the calendar shows history too.
+        for s in live:
+            cur = datetime.strptime(frm, "%Y-%m-%d").date()
+            last = datetime.strptime(to, "%Y-%m-%d").date()
+            while cur <= last:
+                iso = cur.isoformat()
+                cur += timedelta(days=1)
+                if not core.is_operating_day(c, iso):
+                    continue
+                win = core.current_pause(c, s["id"], iso)
+                if not win:
+                    continue
+                p = core.plan_for_day(c, s, iso)
+                slot = p["slot"] or s["slot"] or "Lunch"
+                if (iso, slot) in have:
+                    continue
+                # One day off is a skip; a stretch is a freeze. Same mechanism
+                # underneath (docs/05 §2.5), but they are different words to a
+                # customer and the interface must not call a skip a pause.
+                one_day = win["start_date"] == win["end_date"]
+                meals.append({
+                    "date": iso, "slot": slot,
+                    "status": "Skipped" if one_day else "Paused",
+                    "plan": s["plan_name"], "note": None,
+                    "subscription_id": s["id"], "projected": True,
+                    "pause_start": _iso(win["start_date"]),
+                    "pause_end": _iso(win["end_date"]),
+                })
+                have.add((iso, slot))
         c.close()
         meals.sort(key=lambda m: (m["date"], m["slot"] == "Dinner"))
         return jsonify({"ok": True, "customer_id": cid, "from": frm, "to": to,

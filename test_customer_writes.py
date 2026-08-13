@@ -199,6 +199,33 @@ check("...and leaves exactly one window",
 c.close()
 
 
+print("\n== 2b. THE REGRESSION: a skipped day must be VISIBLE through the API ==")
+# This is the bug that made skip look completely broken from the app on day one.
+# The skip worked perfectly in the database; the read API then hid the result,
+# because add_pause deletes the Pending row and the projection stepped over
+# paused days. The customer tapped skip and watched the day silently vanish,
+# which is indistinguishable from nothing happening.
+#
+# Asserting the WRITE succeeded is not enough. What the customer's screen can
+# actually see afterwards is the thing that was broken, so that is what is tested.
+j = cl.get(f"/api/v1/customer/{CID}/meals?from={DAY}&to={DAY}", headers=TOK).get_json()
+rows = [m for m in j.get("meals", []) if m["date"] == DAY]
+check("the skipped day still appears in the meals list", len(rows) > 0,
+      "the day vanished entirely — this is the original bug")
+check("...and it is reported as Skipped, not as an ordinary meal",
+      any(m["status"] == "Skipped" for m in rows), [m.get("status") for m in rows])
+check("...and it names the pack it belongs to",
+      all(m.get("subscription_id") for m in rows), rows)
+
+# The same fact, from the packs endpoint, which is what the calendar shades from.
+pj = cl.get(f"/api/v1/customer/{CID}/packs", headers=TOK).get_json()
+pack = [p for p in pj.get("packs", []) if p["id"] == SUB]
+check("the pack lists its pause windows", pack and "pauses" in pack[0], pack[0].keys() if pack else None)
+check("...including this future one-day skip, which never covers today",
+      pack and any(w["start"] == DAY and w["kind"] == "skip" for w in pack[0]["pauses"]),
+      pack[0].get("pauses") if pack else None)
+
+
 print("\n== 3. undo obeys the same deadline ==")
 r = post(f"/api/v1/customer/{CID}/unskip", {"date": DAY, "subscription_id": SUB})
 j = r.get_json()
