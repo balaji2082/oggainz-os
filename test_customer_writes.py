@@ -226,6 +226,32 @@ check("...including this future one-day skip, which never covers today",
       pack[0].get("pauses") if pack else None)
 
 
+print("\n== 2c. a pack never promises more meals than it owes ==")
+# Balaji's protein shake pack was finishing on the Friday and the app kept
+# showing shakes the following week. `ensure_day_rows` has always capped itself
+# at remaining_meals; this projection did not, so it advertised an expected meal
+# every weekday to the end of the window. Promising food that is not coming is
+# worse than showing nothing — it also hides that the pack needs renewing.
+j = cl.get(f"/api/v1/customer/{CID}/meals?from={cutoff.today_iso()}"
+           f"&to={(cutoff.now_ist().date() + timedelta(days=120)).isoformat()}",
+           headers=TOK).get_json()
+by_sub = {}
+for m in j.get("meals", []):
+    if m.get("projected") and m.get("status") == "Expected":
+        by_sub[m["subscription_id"]] = by_sub.get(m["subscription_id"], 0) + 1
+c = db.get_db()
+for sid, projected in by_sub.items():
+    # Deliberately not named `row` — that holds the subscription under test for
+    # the whole file, and shadowing it here broke §6 with a baffling KeyError.
+    owed_row = c.execute("SELECT remaining_meals FROM subscriptions WHERE id=?", (sid,)).fetchone()
+    owed = (owed_row["remaining_meals"] or 0) if owed_row else 0
+    check(f"{sid}: {projected} expected days never exceeds {owed} owed",
+          projected <= owed, f"{projected} > {owed}")
+if not by_sub:
+    print("  .... no forward projection in this copy to check")
+c.close()
+
+
 print("\n== 3. undo obeys the same deadline ==")
 r = post(f"/api/v1/customer/{CID}/unskip", {"date": DAY, "subscription_id": SUB})
 j = r.get_json()

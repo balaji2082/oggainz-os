@@ -322,11 +322,29 @@ def register(app):
             vnames = {v["id"]: v["name"] for v in c.execute(
                 "SELECT id, name FROM subscription_variants WHERE subscription_id=?",
                 (s["id"],)).fetchall()}
+
+            # [LAW] Never promise more meals than the pack still owes.
+            #
+            # `ensure_day_rows` has always capped itself this way; this
+            # projection did not, so a pack with two meals left advertised an
+            # expected meal every weekday to the end of the window. A protein
+            # shake pack finishing on Friday kept showing shakes the week after,
+            # which is worse than showing nothing: it promises food that is not
+            # coming and it hides the fact that the pack needs renewing.
+            #
+            # Pending rows already on the books count against the same budget,
+            # exactly as the generator counts them.
+            owed = s["remaining_meals"] or 0
+            planned = c.execute(
+                "SELECT COUNT(*) FROM deliveries WHERE subscription_id=? AND status='Pending'",
+                (s["id"],)).fetchone()[0]
+            budget = max(owed - planned, 0)
+
             day = max(frm, today)
             end = to
             cur = datetime.strptime(day, "%Y-%m-%d").date()
             last = datetime.strptime(end, "%Y-%m-%d").date()
-            while cur <= last:
+            while cur <= last and budget > 0:
                 iso = cur.isoformat()
                 p = core.plan_for_day(c, s, iso)
                 slot = p["slot"] or "Lunch"
@@ -338,6 +356,7 @@ def register(app):
                                   "note": None,
                                   "subscription_id": s["id"], "projected": True})
                     have.add((iso, slot))
+                    budget -= 1
                 cur += timedelta(days=1)
 
         # -- days the customer has taken off ---------------------------------
