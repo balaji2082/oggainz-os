@@ -79,7 +79,14 @@ WRITABLE_SETTINGS = {
 
 # The words the interface uses. Kept here so the API and the app cannot drift
 # apart on the one promise that matters (docs/02 §7.4).
-CARRY_FORWARD = "You don't lose the meal — it moves to the end of your pack."
+#
+# Balaji, 14 Aug 2026: shortened from "You don't lose the meal — it moves to the
+# end of your pack." The promise is unchanged and is still made every single
+# time; it is simply made in two words instead of a sentence that led with the
+# worry rather than the answer. It appeared on the confirmation, again on the
+# acknowledgement, again on the pause summary and again in the toast — and a
+# reassurance repeated four times reads as less true each time, not more.
+CARRY_FORWARD = "Carried forward."
 
 
 def _fail(msg, code):
@@ -536,7 +543,7 @@ def register(app):
             else:
                 outcome, message = "applied", (
                     f"Paused {_pretty(applied[0])} to {_pretty(applied[-1])}. "
-                    f"{len(applied)} meal{'s' if len(applied) != 1 else ''} moved. {CARRY_FORWARD}")
+                    f"{len(applied)} meal{'s' if len(applied) != 1 else ''} carried forward.")
 
             return jsonify({
                 "ok": True, "outcome": outcome, "request_id": rid,

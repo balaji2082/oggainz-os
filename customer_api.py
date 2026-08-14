@@ -306,7 +306,21 @@ def register(app):
 
         # Fill the forward gap with expected days, clearly flagged. No meal count
         # is computed here — "remaining" always comes from the engine.
-        have = {(m["date"], m["slot"]) for m in meals}
+        #
+        # [LAW] Balaji, 14 Aug 2026 — keyed by SUBSCRIPTION, date and slot.
+        #
+        # It was keyed on (date, slot) alone, which is only ever correct for a
+        # customer holding one pack. Ashok holds a Protein Shake and an Athlete
+        # Meal Pack and BOTH deliver at Lunch: whichever subscription this loop
+        # reached first claimed the day, and the second was stepped over as
+        # though it already had a meal there. His Athlete calendar showed
+        # nothing at all on the 17th, 18th and 19th and then meals from the
+        # 20th, because the shake had quietly taken the first three days.
+        #
+        # Two packs on one day is not a duplicate to be collapsed; it is a
+        # customer who ordered two things. C001, C012 and C015 each hold two
+        # same-slot packs and all three were losing days this way.
+        have = {(m["subscription_id"], m["date"], m["slot"]) for m in meals}
         # 'Paused' belongs here too. A pack frozen right now still has days after
         # the freeze ends, and leaving it out made a paused customer's calendar
         # look permanently empty rather than paused-then-resuming.
@@ -349,13 +363,13 @@ def register(app):
                 p = core.plan_for_day(c, s, iso)
                 slot = p["slot"] or "Lunch"
                 if (p["deliver"] and core.is_operating_day(c, iso)
-                        and (iso, slot) not in have
+                        and (s["id"], iso, slot) not in have
                         and not core.is_paused_on(c, s["id"], iso)):
                     meals.append({"date": iso, "slot": slot, "status": "Expected",
                                   "plan": vnames.get(p["variant_id"]) or s["plan_name"],
                                   "note": None,
                                   "subscription_id": s["id"], "projected": True})
-                    have.add((iso, slot))
+                    have.add((s["id"], iso, slot))
                     budget -= 1
                 cur += timedelta(days=1)
 
@@ -386,7 +400,7 @@ def register(app):
                     continue
                 p = core.plan_for_day(c, s, iso)
                 slot = p["slot"] or s["slot"] or "Lunch"
-                if (iso, slot) in have:
+                if (s["id"], iso, slot) in have:
                     continue
                 # One day off is a skip; a stretch is a freeze. Same mechanism
                 # underneath (docs/05 §2.5), but they are different words to a
@@ -405,7 +419,7 @@ def register(app):
                     "pause_start": _iso(win["start_date"]),
                     "pause_end": _iso(win["end_date"]),
                 })
-                have.add((iso, slot))
+                have.add((s["id"], iso, slot))
         c.close()
         meals.sort(key=lambda m: (m["date"], m["slot"] == "Dinner"))
         return jsonify({"ok": True, "customer_id": cid, "from": frm, "to": to,

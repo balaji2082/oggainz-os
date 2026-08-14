@@ -46,6 +46,7 @@ if os.path.abspath(db.DB_PATH) == os.path.abspath(LIVE_DB):
 import core                                                      # noqa: E402
 import cutoff                                                    # noqa: E402
 import app as A                                                  # noqa: E402
+import customer_writes                                            # noqa: E402
 
 FAILS, N = [], 0
 TOK = {"X-OG-Service-Token": "test-service-token"}
@@ -165,8 +166,12 @@ j = r.get_json()
 check("skip returns 200", r.status_code == 200, r.status_code)
 check("outcome is 'applied'", j.get("outcome") == "applied", j)
 check("the skipped day comes back in `applied`", j.get("applied") == [DAY], j)
+# Asserted against the CONSTANT, not a copy of its wording. This hard-coded
+# "moves to the end of your pack" and so it broke the moment the sentence was
+# shortened — it was testing the phrasing, not the promise. That the promise is
+# made at all is the rule (docs/02 §7.4); the words are Balaji's to change.
 check("the carry-forward promise is in the message",
-      "moves to the end of your pack" in (j.get("message") or ""), j.get("message"))
+      customer_writes.CARRY_FORWARD in (j.get("message") or ""), j.get("message"))
 check("it says when the pack now runs to", j.get("pack_runs_to"), j)
 
 c = db.get_db()
