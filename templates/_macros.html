@@ -30,14 +30,28 @@
       {% endif %}
       <button class="iconbtn note {{ 'on' if r.day_note }}" title="Note for today's order"
               onclick="toggleNote(this)">📝</button>
-      <button class="iconbtn skip {{ 'on' if r.status=='Skipped' }}" title="Skip"
-              onclick="mark(this, {{ r.id }}, 'Skipped')">✕</button>
-      <button class="iconbtn deliver {{ 'on' if r.status=='Delivered' }}" title="Delivered"
-              onclick="mark(this, {{ r.id }}, 'Delivered')">✓</button>
+      {# A meal the CUSTOMER skipped in the app is theirs to undo, not ours.
+         The buttons are disabled rather than hidden: the row must still read as
+         skipped at a glance, and a missing control is a puzzle where a disabled
+         one is an explanation. See app.py api_mark, which refuses it server-side
+         too — this is the courtesy, that is the guarantee. #}
+      {% set by_customer = (r.skip_source == 'customer' and r.status == 'Skipped') %}
+      <button class="iconbtn skip {{ 'on' if r.status=='Skipped' }}{{ ' locked' if by_customer }}"
+              title="{{ 'The customer skipped this in the app — only they can put it back'
+                        if by_customer else 'Skip' }}"
+              {% if by_customer %}disabled{% else %}onclick="mark(this, {{ r.id }}, 'Skipped')"{% endif %}>✕</button>
+      <button class="iconbtn deliver {{ 'on' if r.status=='Delivered' }}{{ ' locked' if by_customer }}"
+              title="{{ 'The customer skipped this in the app — only they can put it back'
+                        if by_customer else 'Delivered' }}"
+              {% if by_customer %}disabled{% else %}onclick="mark(this, {{ r.id }}, 'Delivered')"{% endif %}>✓</button>
     </div>
   </div>
 
   <div class="drow-meta">{{ r.plan_name or r.trial_order or 'Meal' }}</div>
+  {% if r.skip_source == 'customer' and r.status == 'Skipped' %}
+  <div class="drow-line"><span class="mi client-skip">🙋 Skipped by the customer in the app
+    — don't cook this. Only they can put it back.</span></div>
+  {% endif %}
   {% if r.preferred_timing or r.locality %}
   <div class="drow-line">
     {% if r.preferred_timing %}<span class="mi">🕐 {{ r.preferred_timing }}</span>{% endif %}

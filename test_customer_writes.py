@@ -278,7 +278,23 @@ check("unskipping twice is idempotent", j2.get("already") is True, j2)
 # ===========================================================================
 print("\n== 4. after the deadline nothing is touched until Balaji decides ==")
 
-setting("skip_cutoff_time", "00:00")     # every future day is now past its deadline
+# Move the CLOCK, not the setting.
+#
+# The deadline for day D falls on D-1, so no time-of-day can put a day four days
+# out into the past. This section used to set the cutoff to 00:00 and rely on
+# DAY being tomorrow — but DAY drifts later whenever nearer days are already
+# skipped in the copy, and the whole section then silently became a no-op that
+# still reported success. It only surfaced once Balaji's own testing left the
+# 14th skipped in the live database.
+#
+# now_ist() is the single source of "now" for both the endpoint and the request
+# log, so overriding it reproduces exactly the case under test: someone acting
+# at 11pm the night before, five hours past a 6pm deadline.
+setting("skip_cutoff_time", "18:00")
+_real_now_ist = cutoff.now_ist
+cutoff.now_ist = lambda: datetime.combine(
+    datetime.strptime(DAY, "%Y-%m-%d").date() - timedelta(days=1),
+    datetime.strptime("23:00", "%H:%M").time())
 
 c = db.get_db()
 pending_before = c.execute(
@@ -334,6 +350,8 @@ check("deciding twice does not re-apply", again.get("already") is True, again)
 
 
 # ===========================================================================
+cutoff.now_ist = _real_now_ist            # back to the real clock
+
 print("\n== 6. a pause splits around the deadline instead of failing ==")
 
 # Two future operating days: the first past its deadline, the second still open.
@@ -491,6 +509,70 @@ setting("skip_cutoff_applies_to", ORIGINAL_MODE or "calendar_day")
 setting("freeze_eligible_plans", ORIGINAL_FREEZE or "Elite Meal Pack,Athlete Meal Pack")
 
 print(f"\n{N - len(FAILS)}/{N} passed")
+if FAILS:
+    print("FAILED:")
+    for f in FAILS:
+        print("  -", f)
+    sys.exit(1)
+print("all good")
+
+
+# ===========================================================================
+print("\n== 13. Balaji cannot undo a skip the CUSTOMER made ==")
+# [LAW] Balaji, 13 Aug 2026. One mis-tap in the Command Center used to turn
+# "the customer told us not to cook" into "cook and deliver this" — silently,
+# with nothing on screen looking wrong, and the customer not expecting food.
+setting("skip_cutoff_time", "23:59")
+post(f"/api/v1/customer/{CID}/skip", {"date": DAY, "subscription_id": SUB})
+
+c = db.get_db()
+drow = c.execute("SELECT id, status, skip_source FROM deliveries WHERE subscription_id=? "
+                 "AND date=? AND COALESCE(is_extra,0)=0", (SUB, DAY)).fetchone()
+c.close()
+check("the skip is attributed to the customer",
+      drow and drow["skip_source"] == "customer", drow["skip_source"] if drow else None)
+
+with cl.session_transaction() as sess:
+    sess["authed"] = True
+    sess["role"] = "admin"
+
+for attempt in ("Delivered", "Pending"):
+    r = cl.post(f"/api/delivery/{drow['id']}/mark", data={"status": attempt})
+    check(f"marking it '{attempt}' is refused", r.status_code == 409, r.status_code)
+    body = r.get_json() or {}
+    check(f"...and says why, not 'could not save'",
+          body.get("locked") is True and "only they can put it back" in (body.get("error") or "").lower(),
+          body)
+
+c = db.get_db()
+still = c.execute("SELECT status FROM deliveries WHERE id=?", (drow["id"],)).fetchone()
+check("the meal is STILL skipped after both attempts", still["status"] == "Skipped", still["status"])
+c.close()
+
+# Balaji's own skips stay fully his to change — skip_source is NULL on those.
+c = db.get_db()
+own = c.execute("SELECT id FROM deliveries WHERE status='Pending' AND subscription_id!=? "
+                "AND COALESCE(is_extra,0)=0 LIMIT 1", (SUB,)).fetchone()
+c.close()
+if own:
+    r1 = cl.post(f"/api/delivery/{own['id']}/mark", data={"status": "Skipped"})
+    r2 = cl.post(f"/api/delivery/{own['id']}/mark", data={"status": "Pending"})
+    check("a skip Balaji made himself is still his to undo",
+          r1.status_code == 200 and r2.status_code == 200, (r1.status_code, r2.status_code))
+else:
+    print("  .... no other pending row in this copy to check")
+
+# put it back so the copy stays reusable
+post(f"/api/v1/customer/{CID}/unskip", {"date": DAY, "subscription_id": SUB})
+
+
+# --- put the settings back so the copy is reusable --------------------------
+setting("skip_cutoff_time", ORIGINAL_CUTOFF or "18:00")
+setting("skip_cutoff_applies_to", ORIGINAL_MODE or "calendar_day")
+setting("freeze_eligible_plans", ORIGINAL_FREEZE or "Elite Meal Pack,Athlete Meal Pack")
+
+print("")
+print(str(N - len(FAILS)) + "/" + str(N) + " passed")
 if FAILS:
     print("FAILED:")
     for f in FAILS:

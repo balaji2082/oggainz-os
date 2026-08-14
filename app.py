@@ -375,6 +375,28 @@ def day_toggle():
 def api_mark(did):
     status = request.form.get("status", "Delivered")
     c = conn()
+
+    # [LAW] Balaji, 13 Aug 2026 — a meal the CUSTOMER skipped cannot be
+    # un-skipped from this side. Only they can put it back, in the app.
+    #
+    # Without this, one mis-tap silently turns "the customer told us not to
+    # cook" into "cook and deliver this". They are not expecting food and
+    # nobody tells them it is coming, so a meal is cooked and wasted — or
+    # delivered to a house nobody is in. The failure is quiet, which is what
+    # makes it dangerous: nothing on the screen would look wrong afterwards.
+    #
+    # Balaji's own skips are untouched. `skip_source` is NULL on every row he
+    # marked himself, including every one that existed before the column did.
+    row = c.execute("SELECT status, skip_source FROM deliveries WHERE id=?", (did,)).fetchone()
+    if row is not None and row["status"] == "Skipped" \
+            and ("skip_source" in row.keys() and row["skip_source"] == "customer"):
+        c.close()
+        return jsonify({
+            "ok": False, "locked": True,
+            "error": "The customer skipped this meal in the app. "
+                     "Only they can put it back — ask them to undo it there.",
+        }), 409
+
     core.mark_delivery(c, did, status)
     d = today_iso()
     s = core.today_summary(c, d)

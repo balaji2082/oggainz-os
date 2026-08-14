@@ -36,6 +36,10 @@ async function mark(btn, deliveryId, status) {
       body: 'status=' + encodeURIComponent(target)
     });
     const data = await res.json();
+    // A meal the customer skipped in the app is theirs to undo, not ours
+    // (app.py api_mark). Say exactly that rather than "could not save", which
+    // reads like a bug and invites a second tap.
+    if (!data.ok && data.locked) { showToast(data.error, false); return; }
     if (!data.ok) throw new Error();
     applyRowStatus(row, target);
     updateCounters(data);
@@ -203,6 +207,7 @@ async function markPast(btn, deliveryId, status) {
       body: 'status=' + encodeURIComponent(status)
     });
     const data = await res.json();
+    if (!data.ok && data.locked) { btn.disabled = false; showToast(data.error, false); return; }
     if (!data.ok) throw new Error();
     row.style.transition = 'opacity .3s'; row.style.opacity = '.35';
     row.querySelectorAll('button').forEach(b => b.disabled = true);

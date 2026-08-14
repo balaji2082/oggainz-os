@@ -144,6 +144,10 @@ h3{font-size:1rem; font-weight:700}
   font-size:.92rem; transition:.12s; flex-shrink:0}
 .iconbtn.deliver.on{background:var(--lime); border-color:var(--lime); color:#fff}
 .iconbtn.skip.on{background:var(--orange); border-color:var(--orange); color:#fff}
+/* A meal the customer skipped in the app. Locked to us — still clearly skipped,
+   but visibly not ours to change (app.py api_mark refuses it server-side too). */
+.iconbtn.locked{opacity:.5; cursor:not-allowed}
+.mi.client-skip{color:var(--orange); font-weight:600}
 .iconbtn.note.on{background:#ffe9a8; border-color:#f0d27a}
 .iconbtn:active{transform:scale(.92)}
 /* Per-order note: the saved line + the inline editor */
