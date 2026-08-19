@@ -2287,6 +2287,12 @@ def revenue():
         "sold_value": sum(b["value"] for b in subs_days),
         "sold_count": sum(b["count"] for b in subs_days),
         "received": sum(b["received"] for b in subs_days),
+        # The template has always printed these two. They were never put in the
+        # dict, and Jinja renders a missing key as nothing rather than raising --
+        # so "Food sold" and "Delivery sold" read a confident Rs 0 on every month
+        # that was ever looked at, for as long as the panel has existed.
+        "sold_food": sum(b["food"] for b in subs_days),
+        "sold_delivery": sum(b["delivery"] for b in subs_days),
     }
     # Unified day/week breakdown tables (delivered + sold side by side).
     day_table = _merge_period(days, "day", subs_days)
