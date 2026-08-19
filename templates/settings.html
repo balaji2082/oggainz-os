@@ -57,8 +57,19 @@
       <span class="muted small">only if you run your own — the public demo server is non-commercial</span></label>
       <input name="osrm_base_url" value="{{ dist.osrm_url }}" placeholder="http://your-host:5000"></div>
 
-    <div><label>Petrol rate ₹/km</label>
+    <div class="full"><label>Rider fare ₹ per km
+      <span class="muted small">every allowance on every route and payout is this × the
+        measured loop, kitchen out and back again</span></label>
       <input name="petrol_rate" type="number" step="any" value="{{ dist.petrol_rate }}"></div>
+
+    <div class="full"><label style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" name="porter_auto" value="1" {{ 'checked' if dist.porter_auto }}>
+      Let the app send far orders to Porter on its own</label>
+      <span class="muted small">Off is right while a rider actually rides the long
+        run. On, anything past {{ dist.porter_min or 12 }} km that isn’t on a corridor
+        he is already riding is booked to Porter instead — it drops out of his printed
+        route, out of his km and out of his allowance. Either way, a handoff point
+        chosen by hand on an order always wins.</span></div>
     <div><label>Hyperlocal ≤ km</label>
       <input name="zone_hyperlocal_km" type="number" step="any" value="{{ dist.z1 }}"></div>
     <div><label>Near ≤ km</label>

@@ -785,6 +785,30 @@ tr.rowlink:hover{background:var(--cream)}
   border-bottom:1px dashed var(--line)}
 .ing-note{color:var(--orange-d); font-weight:600}
 .prep-total{margin-top:14px; padding-top:10px; border-top:2px solid var(--forest)}
+
+/* Prep drawers. One part of the list open at a time — the whole thing laid out
+   flat put the dinner packs four scrolls below the lunch chicken, which is no
+   use to someone working off a phone propped against a shelf. A shut drawer
+   still says how much is in it and how much is done. */
+.drawer{border:1px solid var(--line); border-radius:var(--r-sm); background:#fff;
+  margin-bottom:8px; overflow:hidden}
+.drawer:last-child{margin-bottom:0}
+.drawer>summary{list-style:none; cursor:pointer; display:flex; align-items:center; gap:9px;
+  padding:11px 13px; font-size:.9rem; background:#f7faf8}
+.drawer>summary::-webkit-details-marker{display:none}
+.drawer .d-ico{font-size:1rem; line-height:1; flex:none}
+.drawer .d-lbl{flex:1; font-weight:800; color:var(--forest)}
+.drawer .d-amt{font-weight:800; font-size:.85rem; color:var(--forest);
+  background:#e7f6ec; border-radius:8px; padding:2px 9px; white-space:nowrap}
+.drawer .chev{color:var(--muted); font-size:1.1rem; transition:transform .2s; line-height:1}
+.drawer[open]>summary{border-bottom:1px solid var(--line)}
+.drawer[open] .chev{transform:rotate(90deg)}
+.drawer-body{padding:4px 13px 11px}
+.drawer-body .prep-packs{margin-top:6px}
+/* Everything in this drawer is ticked off — worth seeing without opening it. */
+.drawer-done>summary{background:#f2fbf5}
+.drawer-done .d-amt{background:var(--forest); color:#fff}
+.drawer-done .d-lbl{text-decoration:line-through; opacity:.7}
 .prep-packs{margin-top:10px; display:flex; flex-direction:column; gap:6px}
 .pack-line{border:1px solid var(--line); border-radius:var(--r-sm); background:#fbfdfb}
 .pack-line summary{display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer;

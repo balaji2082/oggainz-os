@@ -315,3 +315,55 @@ is unchanged and works as before.
 
 Tests: `python test_money.py` (60 checks — the gate, the off-switch, and the coupling
 between the two front doors).
+
+---
+
+## 19 August 2026 update — the rider's route, his money, and a tidier prep list
+
+**⚠️ This one is a 3-step deploy, not the usual 2.** There is a new library, so `pip install`
+sits between the pull and the Reload. Skip it and the app still runs — but the route QR on
+the shift sheet stays missing, which is the thing this update was meant to fix.
+
+In a **Bash** console:
+
+```
+workon ogenv
+cd oggainz-os && git pull
+pip install -r requirements.txt
+```
+
+Then **Web** → **Reload**.
+
+All additive. No schema change, no migration — `route_batches` already had the columns this
+uses; they were simply never written to.
+
+- **The morning route was being thrown away.** Any stop more than 12 km from the kitchen that
+  was not on a corridor the rider was already riding got classed "book a Porter" on its own,
+  and dropped out of the printed route, out of the map link, and out of the kilometres the
+  allowance is paid on. Every Tambaram-side stop is 12.5–14.8 km, so the entire morning run
+  vanished: printing Route 1 for 10 Aug gave **1 stop, 1.3 km and ₹4** for a ride of about
+  41 km. Now **putting an order on someone's route is the decision to ride it**, whatever the
+  distance says — and Porter suggestions are **off by default** (Settings → Distance). A
+  handoff point chosen by hand on an order still wins over both. Same day now prints
+  **5 stops, 41.1 km, ₹123**.
+- **The route QR was missing on the live site only.** `qrcode` was never listed in
+  `requirements.txt`, and the code catches the failure and prints no QR rather than erroring —
+  so it worked on the laptop and silently did not here. Fixed, and the sheet now prints the
+  full map link as text whenever the QR cannot be drawn, so the sheet is never a dead end.
+- **The ride home is visible.** It was always inside the total — the loop is measured
+  kitchen → stops → kitchen — but nothing said so. Section C now ends with a
+  *↩ Back to the kitchen* row, and the figures are spelled out:
+  *Out 28.4 + Return 12.7 = Full trip 41.1 km × ₹3 = ₹123.*
+- **Rider payout, new page** (More → *Rider payout*). The week's conveyance per rider,
+  Monday to Sunday. Every route now stamps its km and what it owes, so Friday's cash has a
+  source instead of coming out of memory. Where the rider corrected the distance at close-out
+  ("Actual km" on the Routes screen) **his figure is used and labelled as his**; otherwise the
+  measured route is used and labelled measured.
+- **Rider fare** (Settings → Distance) is the old "Petrol rate ₹/km" renamed, not a new
+  setting. Every route, sheet and payout figure follows it.
+- **Prep list is drawers now** (Today → Prep list). Item-wise prep and meal packs open
+  separately, per slot, plus a whole-day list. A shut drawer still shows its own progress
+  (`3/8`) and turns green when everything in it is ticked.
+
+Tests: `python test_routes.py` (33 checks — who rides what, what a route measures, what it
+owes, and that a hand-picked Porter handoff still wins).

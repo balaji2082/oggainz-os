@@ -55,6 +55,14 @@ DEFAULTS = {
     "zone_mid_km":          "12",
     "porter_min_km":        "12",     # beyond this, consider a Porter handoff
     "rider_max_km":         "10",     # at or under this and on-corridor, rider delivers
+    # Porter is OPT-IN, and off by default. The automatic rule in assign_modes()
+    # used to send every far order to a Porter on its own, which quietly emptied
+    # the rider's route: on 10 Aug the entire Tambaram run — two in Tambaram,
+    # Chrompet, Nanganallur — was classed 'porter_direct', so printing Route 1
+    # gave one Perumbakkam stop, 1.3 km and a Rs 4 allowance for a ~50 km ride.
+    # No Porter has ever actually been booked. A far order is now ridden unless
+    # a handoff point is chosen for it by hand.
+    "porter_auto":          "0",
     "avg_speed_kmph":       "20",     # Chennai evening traffic, two-wheeler
     "dwell_min":            "2.5",    # minutes parked per drop
     "depart_time":          "18:40",  # 6:40 PM, per the run-of-show
@@ -443,19 +451,32 @@ def assign_modes(conn, stops):
     tonight the rider is passing Medavakkam anyway, or that a particular Porter
     driver is reliable at that junction. `assigned_point` on a stop (from the
     delivery row, or standing on the address) overrides every heuristic below.
+
+    PUTTING AN ORDER ON A ROUTE ALSO WINS. Deciding that an order rides on
+    someone's run IS the decision to ride it, whatever the distance says. Before
+    this, a Tambaram order placed on the rider's own route was still classed
+    'porter_direct' at 14 km and dropped out of both the printed route and the
+    km the allowance is paid on.
+
+    And the automatic rule only runs at all when `porter_auto` is switched on.
+    Off — the default — a pinned order is ridden unless a handoff point was
+    chosen for it by hand.
     """
     rider_max = fnum(conn, "rider_max_km")
     porter_min = fnum(conn, "porter_min_km")
+    auto = str(setting(conn, "porter_auto") or "0") == "1"
     points = {p["id"]: dict(p) for p in conn.execute(
         "SELECT * FROM porter_points ORDER BY sort, id")}
     active = [p for p in points.values() if p["active"]]
 
     # Corridors the rider is definitely riding: those with a stop he must deliver
-    # himself (short enough to be unambiguous). Manually-assigned handoffs do not
-    # count — he is going to the porter point, not to the customer.
+    # himself (short enough to be unambiguous), plus every corridor on a route he
+    # has been given. Manually-assigned handoffs do not count — he is going to the
+    # porter point, not to the customer.
     ridden = {s["corridor"] for s in stops
-              if s.get("pinned") and s["km"] is not None and s["km"] <= rider_max
-              and not s.get("assigned_point")}
+              if s.get("pinned") and not s.get("assigned_point")
+              and (s.get("batch_no") is not None
+                   or (s["km"] is not None and s["km"] <= rider_max))}
 
     for s in stops:
         # --- manual assignment, set on the order or standing on the address ---
@@ -478,6 +499,14 @@ def assign_modes(conn, stops):
             s["assign_missing"] = True
 
         if not s.get("pinned"):
+            s["mode"], s["porter_point"] = "rider", None
+            continue
+
+        # --- on somebody's route, or Porter suggestions switched off ----------
+        # Either way the answer is the same: he rides it. This is the branch that
+        # keeps a 14 km Tambaram stop on the run it was assigned to instead of
+        # quietly turning it into a Porter booking nobody made.
+        if s.get("batch_no") is not None or not auto:
             s["mode"], s["porter_point"] = "rider", None
             continue
 
@@ -592,6 +621,85 @@ def ensure_batches(conn, day_iso, slot, n):
                 "VALUES(?,?,?,?,?)",
                 (day_iso, slot, i, f"Route {i}", db.now_iso()))
     conn.commit()
+
+
+def record_estimate(conn, day_iso, slot, batch_no, route):
+    """Save what a route measured, so the week's conveyance can be added up later.
+
+    The allowance is paid weekly, in cash, on kilometres nobody writes down. The
+    columns to hold it have existed since the table was created and were never
+    written, so a week's pay had no source but memory. Every time a route is
+    built for a real batch, its figures are stamped here.
+
+    `actual_km` is never touched — that is the rider-corrected number and it wins
+    over anything measured.
+    """
+    if batch_no is None:
+        return
+    rate = fnum(conn, "petrol_rate")
+    est = route.get("est_km") or 0
+    conn.execute(
+        "INSERT INTO route_batches(date, slot, batch_no, name, est_km, allowance, created_at) "
+        "VALUES(?,?,?,?,?,?,?) "
+        "ON CONFLICT(date, slot, batch_no) DO UPDATE SET est_km=excluded.est_km, "
+        "allowance=excluded.allowance",
+        (day_iso, slot, int(batch_no), f"Route {batch_no}", est,
+         round(est * rate), db.now_iso()))
+    conn.commit()
+
+
+def payout_week(conn, start_iso, end_iso):
+    """Every route ridden between two dates, and what it owes, grouped by rider.
+
+    This is the sheet the weekly cash handover is counted from. Kilometres come
+    from the rider's own corrected figure when he gave one, and from the measured
+    route when he did not — the source is named on every line, because paying an
+    estimate as though it were measured is how trust goes.
+    """
+    rate = fnum(conn, "petrol_rate")
+    rows = conn.execute(
+        "SELECT * FROM route_batches WHERE date>=? AND date<=? "
+        "ORDER BY date, slot DESC, batch_no", (start_iso, end_iso)).fetchall()
+
+    riders, days = {}, []
+    for r in rows:
+        n = conn.execute(
+            "SELECT COUNT(*) n FROM deliveries WHERE date=? AND meal_type=? "
+            "AND batch_no=? AND status IN ('Pending','Delivered')",
+            (r["date"], r["slot"], r["batch_no"])).fetchone()["n"]
+        if not n:
+            continue              # a route nobody ended up riding owes nothing
+
+        km, src = r["actual_km"], "rider"
+        if km is None:
+            km, src = r["est_km"], "measured"
+        if km is None:
+            # Never measured and never opened. Measure it now rather than pay zero.
+            route = build_route(conn, r["date"], r["slot"], batch=r["batch_no"])
+            km, src = route["est_km"], "measured"
+            record_estimate(conn, r["date"], r["slot"], r["batch_no"], route)
+        km = float(km or 0)
+
+        rider = (r["rider"] or "").strip() or "— no rider named —"
+        line = {"date": r["date"], "slot": r["slot"], "batch_no": r["batch_no"],
+                "name": r["name"] or f"Route {r['batch_no']}", "rider": rider,
+                "orders": n, "km": round(km, 1), "km_source": src,
+                "amount": round(km * rate)}
+        days.append(line)
+        b = riders.setdefault(rider, {"rider": rider, "km": 0.0, "amount": 0,
+                                      "runs": 0, "orders": 0, "lines": []})
+        b["km"] += km
+        b["amount"] += line["amount"]
+        b["runs"] += 1
+        b["orders"] += n
+        b["lines"].append(line)
+
+    for b in riders.values():
+        b["km"] = round(b["km"], 1)
+    out = sorted(riders.values(), key=lambda b: -b["amount"])
+    return {"rate": rate, "riders": out, "lines": days,
+            "total_km": round(sum(b["km"] for b in out), 1),
+            "total_amount": sum(b["amount"] for b in out)}
 
 
 def _group_by_point(handoffs):
@@ -721,6 +829,10 @@ def build_route(conn, day_iso, slot, rows=None, batch=None, split=True):
         for o in (s.get("orders") or []):
             o["seq"] = i
             o["eta"] = s["eta"]
+    # The ride home. The loop has always been measured kitchen -> stops -> kitchen,
+    # so this leg is already inside est_km and already paid for — but it was never
+    # shown, so on a 50 km Tambaram round trip there was no way to see that the
+    # return was counted. It is printed on the sheet now, as its own line.
     back = legs[-1] if legs else 0.0
     t += timedelta(minutes=(back / speed) * 60)
 
@@ -750,6 +862,8 @@ def build_route(conn, day_iso, slot, rows=None, batch=None, split=True):
         "measured": km_source not in ("estimate", "none"),
         "rate": rate,
         "allowance": round(est_km * rate),
+        "return_km": round(back, 2) if ordered else 0.0,
+        "outbound_km": round(max(est_km - back, 0), 1) if ordered else 0.0,
         "return_eta": _clock(t) if ordered else None,
         "late_by": max(0, late_by),
         "shift_end": _clock(end),

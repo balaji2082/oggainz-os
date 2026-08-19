@@ -62,6 +62,13 @@ TEXT = {
         "scan":          "Scan for route",
         "total_km":      "Total distance",
         "back_by":       "Back at kitchen",
+        "back_to_base":  "Back to the kitchen",
+        "trip_out":      "Out",
+        "trip_back":     "Return",
+        "trip_total":    "Full trip",
+        "no_qr":         "No QR on this print — type this link, or ask Balaji to send it:",
+        "no_route":      "No route on this sheet. Nobody has been given these orders to "
+                         "ride yet — check the Routes screen before leaving.",
         "Hyperlocal":    "Hyperlocal",
         "Near":          "Near",
         "Mid":           "Mid",
@@ -141,6 +148,14 @@ TEXT = {
         "scan":          "வழிக்கு ஸ்கேன்",
         "total_km":      "மொத்த தூரம்",
         "back_by":       "சமையலறைக்குத் திரும்ப",
+        "back_to_base":  "சமையலறைக்குத் திரும்பும் தூரம்",
+        "trip_out":      "போகும் தூரம்",
+        "trip_back":     "திரும்பும் தூரம்",
+        "trip_total":    "மொத்த பயணம்",
+        "no_qr":         "இந்த பிரிண்டில் QR இல்லை — இந்த லிங்கை டைப் செய்யுங்கள், "
+                         "அல்லது பாலாஜியிடம் அனுப்பச் சொல்லுங்கள்:",
+        "no_route":      "இந்த ஷீட்டில் வழி இல்லை. இந்த ஆர்டர்கள் யாருக்கும் "
+                         "ஒதுக்கப்படவில்லை — புறப்படும் முன் Routes திரையைப் பாருங்கள்.",
         "Hyperlocal":    "மிக அருகில்",
         "Near":          "அருகில்",
         "Mid":           "நடுத்தரம்",

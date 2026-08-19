@@ -57,43 +57,74 @@
   <div class="tile"><div class="k">Skipped</div><div class="v" id="cnt-skipped">{{ s.skipped }}</div></div>
 </div>
 
+{# The prep list is worked standing at a bench with a phone in one hand, so it
+   opens one thing at a time. Everything used to be laid out at once and the
+   dinner packs were four scrolls below the lunch chicken. Now each part is a
+   drawer that says enough while shut — how many items, how many are ticked —
+   to be worth not opening. #}
+{% macro ing_rows(comps, gkey) %}
+<div class="ing-list">
+  {% for r in comps %}
+  {% set tkey = gkey ~ '|' ~ r.name %}
+  <div class="ing-row {{ 'ticked' if tkey in ticks }}">
+    <label class="ing-check" title="Tick when prepped">
+      <input type="checkbox" data-key="{{ tkey }}" {{ 'checked' if tkey in ticks }}
+             onchange="prepTick(this)"></label>
+    <span class="ing-emoji">{{ r.emoji or '🍽️' }}</span>
+    <span class="ing-name">{{ r.name }}</span>
+    <span class="spacer"></span>
+    <span class="ing-qty">{{ r.display }}</span>
+  </div>
+  {% if r.breakdown or r.notes %}
+  <div class="ing-sub">{% if r.breakdown %}{{ r.breakdown }}{% endif %}
+    {% if r.notes %}<span class="ing-note">✎ {{ r.notes }}</span>{% endif %}</div>
+  {% endif %}
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{% macro ing_drawer(label, comps, gkey, cls='') %}
+{% set ns = namespace(done=0) %}
+{% for r in comps %}{% if (gkey ~ '|' ~ r.name) in ticks %}{% set ns.done = ns.done + 1 %}{% endif %}{% endfor %}
+<details class="drawer {{ cls }} {{ 'drawer-done' if comps and ns.done == comps|length }}">
+  <summary><span class="d-ico">🥘</span><span class="d-lbl">{{ label }}</span>
+    <span class="d-amt">{{ ns.done }}/{{ comps|length }}</span><span class="chev">›</span></summary>
+  <div class="drawer-body">{{ ing_rows(comps, gkey) }}</div>
+</details>
+{% endmacro %}
+
 {% macro prep_slot(title, p, gkey) %}
 {% if p.meals %}
+{% set ns = namespace(boxes=0) %}
+{% for pk in p.packs %}{% set ns.boxes = ns.boxes + pk.n %}{% endfor %}
 <div class="prep-group">
   <h4 class="prep-h">{{ title }} <span class="muted small">· {{ p.meals }} meal{{ 's' if p.meals != 1 }}</span></h4>
-  <div class="ing-list">
-    {% for r in p.components %}
-    {% set tkey = gkey ~ '|' ~ r.name %}
-    <div class="ing-row {{ 'ticked' if tkey in ticks }}">
-      <label class="ing-check" title="Tick when prepped">
-        <input type="checkbox" data-key="{{ tkey }}" {{ 'checked' if tkey in ticks }}
-               onchange="prepTick(this)"></label>
-      <span class="ing-emoji">{{ r.emoji or '🍽️' }}</span>
-      <span class="ing-name">{{ r.name }}</span>
-      <span class="spacer"></span>
-      <span class="ing-qty">{{ r.display }}</span>
-    </div>
-    {% if r.breakdown or r.notes %}
-    <div class="ing-sub">{% if r.breakdown %}{{ r.breakdown }}{% endif %}
-      {% if r.notes %}<span class="ing-note">✎ {{ r.notes }}</span>{% endif %}</div>
-    {% endif %}
-    {% endfor %}
-  </div>
-  <div class="prep-packs">
-    {% for pk in p.packs %}
-    <details class="pack-line">
-      <summary><span class="qty">{{ pk.n }}×</span> {{ pk.label }}<span class="chev">›</span></summary>
-      <div class="pack-orders">
-        {% if pk.detail %}<div class="pack-detail">{{ pk.detail }}</div>{% endif %}
-        {% for o in pk.orders %}
-        <div class="pack-order"><b>{{ o.name }}</b>
-          {% if not pk.detail and o.detail %}<span class="muted small">— {{ o.detail }}</span>{% endif %}
-          {% if o.note %}<span class="ing-note">📝 {{ o.note }}</span>{% endif %}</div>
+
+  {{ ing_drawer('Item-wise prep — cook from this', p.components, gkey) }}
+
+  {% if p.packs %}
+  <details class="drawer">
+    <summary><span class="d-ico">🍱</span><span class="d-lbl">Meal packs — pack from this</span>
+      <span class="d-amt">{{ ns.boxes }} box{{ 'es' if ns.boxes != 1 }}</span><span class="chev">›</span></summary>
+    <div class="drawer-body">
+      <div class="prep-packs">
+        {% for pk in p.packs %}
+        <details class="pack-line">
+          <summary><span class="qty">{{ pk.n }}×</span> {{ pk.label }}<span class="chev">›</span></summary>
+          <div class="pack-orders">
+            {% if pk.detail %}<div class="pack-detail">{{ pk.detail }}</div>{% endif %}
+            {% for o in pk.orders %}
+            <div class="pack-order"><b>{{ o.name }}</b>
+              {% if not pk.detail and o.detail %}<span class="muted small">— {{ o.detail }}</span>{% endif %}
+              {% if o.note %}<span class="ing-note">📝 {{ o.note }}</span>{% endif %}</div>
+            {% endfor %}
+          </div>
+        </details>
         {% endfor %}
       </div>
-    </details>
-    {% endfor %}
-  </div>
+    </div>
+  </details>
+  {% endif %}
 </div>
 {% endif %}
 {% endmacro %}
@@ -121,24 +152,7 @@
     {% if prep.total.meals and (prep.lunch.meals and prep.dinner.meals) %}
     <div class="prep-group prep-total">
       <h4 class="prep-h">Σ Whole day <span class="muted small">· {{ prep.total.meals }} meals</span></h4>
-      <div class="ing-list">
-        {% for r in prep.total.components %}
-        {% set tkey = 'All|' ~ r.name %}
-        <div class="ing-row {{ 'ticked' if tkey in ticks }}">
-          <label class="ing-check" title="Tick when prepped">
-            <input type="checkbox" data-key="{{ tkey }}" {{ 'checked' if tkey in ticks }}
-                   onchange="prepTick(this)"></label>
-          <span class="ing-emoji">{{ r.emoji or '🍽️' }}</span>
-          <span class="ing-name">{{ r.name }}</span>
-          <span class="spacer"></span>
-          <span class="ing-qty">{{ r.display }}</span>
-        </div>
-        {% if r.breakdown or r.notes %}
-        <div class="ing-sub">{% if r.breakdown %}{{ r.breakdown }}{% endif %}
-          {% if r.notes %}<span class="ing-note">✎ {{ r.notes }}</span>{% endif %}</div>
-        {% endif %}
-        {% endfor %}
-      </div>
+      {{ ing_drawer('Everything for the day, in one buy', prep.total.components, 'All') }}
     </div>
     {% endif %}
     {% if prep.unmapped %}

@@ -158,6 +158,16 @@ def conn():
     return db.get_db()
 
 
+def plain(v):
+    """3.0 -> '3', 3.5 -> '3.5'. A per-km rate is read off a printed sheet by the
+    person being paid on it, so it should look like the number he was told."""
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return v
+    return str(int(n)) if n == int(n) else f"{n:g}"
+
+
 def inr(v):
     """Format a number as Indian rupees with lakh/crore grouping."""
     try:
@@ -201,6 +211,7 @@ def wa_link(phone):
 
 
 app.jinja_env.filters["inr"] = inr
+app.jinja_env.filters["plain"] = plain
 app.jinja_env.filters["fdate"] = fmt_date
 app.jinja_env.filters["wa"] = wa_link
 
@@ -1282,6 +1293,7 @@ def sheet(d, slot):
     batch_row = None
     unrouted = []
     if batch is not None:
+        ops.record_estimate(c, d, slot, batch, route)
         batch_row = c.execute(
             "SELECT * FROM route_batches WHERE date=? AND slot=? AND batch_no=?",
             (d, slot, batch)).fetchone()
@@ -1618,16 +1630,21 @@ def routes_board():
     per = []
     for b in saved:
         r = ops.build_route(c, day, slot, batch=b["batch_no"])
+        # Stamp the figures on the batch row. The allowance is handed over in cash
+        # at the end of the week, and until now nothing wrote down what a run
+        # measured — so Friday's number came out of memory.
+        ops.record_estimate(c, day, slot, b["batch_no"], r)
         per.append({"b": b, "route": r,
                     "n": len(r["stops"]) + len(r["porter_direct"]) + len(r["unpinned"])})
     riders = [r["rider"] for r in c.execute(
         "SELECT DISTINCT rider FROM route_batches WHERE rider IS NOT NULL "
         "AND rider != '' ORDER BY rider")]
     unassigned = sum(1 for o in orders if not o["batch_no"])
+    rate = ops.fnum(c, "petrol_rate")
     c.close()
     return render_template("routes.html", day=day, slot=slot, n=n, orders=orders,
                            per=per, riders=riders, unassigned=unassigned,
-                           whole=whole)
+                           rate=rate, whole=whole)
 
 
 @app.route("/routes/suggest", methods=["POST"])
@@ -1688,6 +1705,35 @@ def routes_save():
         bits.append(f"{standing} set for every delivery")
     flash(", ".join(bits) + "." if bits else "Routes saved.", "ok")
     return redirect(url_for("routes_board", d=day, slot=slot, n=n))
+
+
+@app.route("/routes/payout")
+def routes_payout():
+    """What the week's riding owes, per rider — the sheet the cash is counted from.
+
+    Salary is monthly and conveyance is weekly, so this deliberately covers a
+    Monday-to-Sunday week and nothing else. Kilometres are the rider's own
+    corrected figure where he gave one; otherwise the measured route, marked as
+    such. The kitchen -> stops -> kitchen loop is what is measured, so the ride
+    back is already inside every number on this page.
+    """
+    c = conn()
+    anchor_day = request.args.get("d") or today_iso()
+    try:
+        ad = datetime.strptime(anchor_day, "%Y-%m-%d").date()
+    except ValueError:
+        ad = date.today()
+    start = ad - timedelta(days=ad.weekday())          # Monday of that week
+    end = start + timedelta(days=6)
+    data = ops.payout_week(c, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+    c.close()
+    return render_template(
+        "payout.html", data=data,
+        start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"),
+        label=f"{start.strftime('%d %b')} – {end.strftime('%d %b %Y')}",
+        prev_d=(start - timedelta(days=7)).strftime("%Y-%m-%d"),
+        next_d=(start + timedelta(days=7)).strftime("%Y-%m-%d"),
+        today_str=today_iso())
 
 
 # ---------------------------------------------------------------------------
@@ -2371,6 +2417,8 @@ def settings_distance():
     for k in ("petrol_rate", "zone_hyperlocal_km", "zone_near_km", "zone_mid_km"):
         if (f.get(k) or "").strip():
             db.set_setting(c, k, f.get(k).strip())
+    # An unticked checkbox posts nothing, so this is written every save either way.
+    db.set_setting(c, "porter_auto", "1" if f.get("porter_auto") else "0")
     c.commit()
     if f.get("test"):
         res = ops.check_provider(c)
@@ -2415,6 +2463,8 @@ def settings():
         "ors_pref": ops.setting(c, "ors_preference"),
         "osrm_url": ops.setting(c, "osrm_base_url"),
         "petrol_rate": ops.setting(c, "petrol_rate"),
+        "porter_auto": str(ops.setting(c, "porter_auto") or "0") == "1",
+        "porter_min": ops.setting(c, "porter_min_km"),
         "z1": ops.setting(c, "zone_hyperlocal_km"),
         "z2": ops.setting(c, "zone_near_km"),
         "z3": ops.setting(c, "zone_mid_km"),

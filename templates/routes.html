@@ -7,7 +7,10 @@
 <p class="muted" style="margin:-4px 0 14px">
   Split a slot between riders. Tambaram and Sholinganallur are opposite directions —
   riding both is an hour of wasted road. Each route gets its own map, its own km and
-  its own ₹3/km allowance.
+  its own allowance at <strong>₹{{ rate|plain }}/km</strong> — measured as the full loop,
+  kitchen out and back again.
+  <a href="{{ url_for('settings') }}#distance">Change the rate ›</a> ·
+  <a href="{{ url_for('routes_payout', d=day) }}">This week&rsquo;s payout ›</a>
 </p>
 
 <form method="get" action="{{ url_for('routes_board') }}" class="card row"

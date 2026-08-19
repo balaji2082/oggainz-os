@@ -1,2 +1,8 @@
 Flask==3.0.3
 openpyxl==3.1.5
+# The route QR on the shift sheet. ops.qr_data_uri() swallows an ImportError and
+# returns nothing, so a server without these prints a sheet with no way to open
+# the map and no error anywhere -- which is exactly what happened on the live
+# site. pillow is what qrcode draws the PNG with.
+qrcode==8.2
+pillow

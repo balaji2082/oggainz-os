@@ -173,12 +173,25 @@ async function saveNote(btn) {
 }
 
 // --- Prep list: tick an ingredient off as "prepped" (kitchen self-check) ---
+// A shut drawer shows "3/7 done", so the count has to follow the tick — otherwise
+// closing the drawer reports a number that stopped being true when he ticked.
+function prepCount(cb) {
+  const drawer = cb.closest('.drawer');
+  if (!drawer) return;
+  const boxes = drawer.querySelectorAll('.ing-row input[type=checkbox]');
+  const done = drawer.querySelectorAll('.ing-row input[type=checkbox]:checked').length;
+  const amt = drawer.querySelector('.d-amt');
+  if (amt) amt.textContent = done + '/' + boxes.length;
+  drawer.classList.toggle('drawer-done', boxes.length > 0 && done === boxes.length);
+}
+
 async function prepTick(cb) {
   const row = cb.closest('.ing-row');
   const dayEl = cb.closest('[data-day]');
   const day = dayEl ? dayEl.dataset.day : '';
   const on = cb.checked;
   row.classList.toggle('ticked', on);
+  prepCount(cb);
   try {
     const res = await fetch('/api/prep/tick', {
       method: 'POST',
@@ -192,6 +205,7 @@ async function prepTick(cb) {
   } catch (e) {
     cb.checked = !on;                        // roll back the optimistic tick
     row.classList.toggle('ticked', cb.checked);
+    prepCount(cb);
     showToast('Could not save the tick — try again', false);
   }
 }

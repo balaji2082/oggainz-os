@@ -107,6 +107,12 @@ table.route td { border-bottom: .6pt solid #aaa; font-size: 9.7pt; }
              border: 1.2pt solid #000; padding: 7pt; }
 .routefoot img { width: 86pt; height: 86pt; }
 .bigkm { font-size: 19pt; font-weight: 800; line-height: 1.1; }
+.tripsplit { font-size: 8.8pt; color: #333; margin-top: 2pt; }
+.tripsplit span { margin-right: 7pt; white-space: nowrap; }
+.qrfallback { margin-top: 4pt; font-size: 8pt; color: #444; }
+.qrfallback span { font-family: "Consolas", monospace; font-size: 7.2pt;
+                   word-break: break-all; color: #000; }
+tr.backrow td { background: #f2f4f3; font-size: 9pt; }
 
 /* ---------- close-out ---------- */
 .close { border: 1.2pt solid #000; padding: 8pt; }
@@ -328,8 +334,20 @@ table.route td { border-bottom: .6pt solid #aaa; font-size: 9.7pt; }
         <td class="porter">{{ T.porter_direct }}</td>
       </tr>
       {% endfor %}
+      {# The ride home is paid for like every other leg, so it is printed like
+         every other leg. It was always inside the total and never visible. #}
+      <tr class="backrow">
+        <td>↩</td>
+        <td><strong>{{ T.back_to_base }}</strong></td>
+        <td></td>
+        <td>{{ route.return_km }}</td>
+        <td>{{ route.return_eta or '–' }}</td>
+        <td>{{ T.rider }}</td>
+      </tr>
     </tbody>
   </table>
+  {% else %}
+    <div class="warn"><b>!</b> {{ T.no_route }}</div>
   {% endif %}
 
   {% if route.unpinned %}
@@ -339,14 +357,27 @@ table.route td { border-bottom: .6pt solid #aaa; font-size: 9.7pt; }
 
   <div class="routefoot">
     {% if qr %}<img src="{{ qr }}" alt="route QR">{% endif %}
-    <div>
+    <div style="flex:1">
       <div style="font-size:8.6pt;text-transform:uppercase;letter-spacing:.05em;color:#666">{{ T.scan }}</div>
       <div class="bigkm">{% if not route.measured %}<span style="font-size:11pt">{{ T.est_mark }}</span> {% endif %}{{ route.est_km }} km &nbsp;·&nbsp; ₹{{ route.allowance }}</div>
+      {# Out + back + rate, written out. The allowance is cash in his hand every
+         week; he should be able to check it without being told the answer. #}
+      <div class="tripsplit">
+        <span>{{ T.trip_out }} <b>{{ route.outbound_km }}</b></span>
+        <span>+ {{ T.trip_back }} <b>{{ route.return_km }}</b></span>
+        <span>= {{ T.trip_total }} <b>{{ route.est_km }} km</b></span>
+        <span>× ₹{{ route.rate|plain }} = <b>₹{{ route.allowance }}</b></span>
+      </div>
       <div class="muted" style="font-size:8.2pt">
         {%- if route.measured %}{{ T.measured_by % {'src': route.km_source} }}
         {%- else %}{{ T.est_mark }}{% endif -%}
       </div>
       {% if route.return_eta %}<div class="muted" style="font-size:9.2pt">{{ T.back_by }} ≈ {{ route.return_eta }}</div>{% endif %}
+      {# A sheet with no way to open the map is a sheet he cannot ride from, so
+         the link is printed in full whenever the QR could not be drawn. #}
+      {% if not qr and route.stops %}
+        <div class="qrfallback">{{ T.no_qr }}<br><span>{{ route.maps_url }}</span></div>
+      {% endif %}
     </div>
   </div>
 
