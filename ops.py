@@ -63,6 +63,15 @@ DEFAULTS = {
     # No Porter has ever actually been booked. A far order is now ridden unless
     # a handoff point is chosen for it by hand.
     "porter_auto":          "0",
+    # Which run a corridor rides on, by default. Assigning routes by hand, order
+    # by order, every single day does not survive contact with a real week: on
+    # 19 Aug only 7 of 32 addresses had ever been given one, so Kumaran in
+    # Nanganallur -- squarely on the Tambaram run -- appeared on NOBODY's route
+    # sheet, while the whole-slot sheet mixed Semmancheri in with Chrompet.
+    # A locality already knows its corridor, so a corridor can know its route,
+    # and every customer lands on the right run from the day they are added.
+    # Route 1 then MEANS the Tambaram side, every day, without being re-decided.
+    "corridor_routes":      '{"Local": 1, "West": 1, "OMR-N": 2, "OMR-S": 2}',
     "avg_speed_kmph":       "20",     # Chennai evening traffic, two-wheeler
     "dwell_min":            "2.5",    # minutes parked per drop
     "depart_time":          "18:40",  # 6:40 PM, per the run-of-show
@@ -231,6 +240,39 @@ def zone_for_km(conn, km):
     return "Long"
 
 
+def corridor_routes(conn):
+    """{corridor: batch_no} — the standing answer to "whose run is this?"."""
+    raw = setting(conn, "corridor_routes")
+    try:
+        m = json.loads(raw) if raw else {}
+    except (ValueError, TypeError):
+        return {}
+    out = {}
+    for k, v in (m or {}).items():
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if k in CORRIDORS and 1 <= n <= 6:
+            out[k] = n
+    return out
+
+
+def route_label(conn, batch_no):
+    """'West · Tambaram side' — a route named after the ground it covers.
+
+    'Route 1' says nothing, and a number that means a different direction on
+    different days is worse than no name at all.
+    """
+    carried = [c for c, b in corridor_routes(conn).items() if b == batch_no]
+    if not carried:
+        return f"Route {batch_no}"
+    places = {"West": "Tambaram side", "OMR-N": "Sholinganallur side",
+              "OMR-S": "Navalur side", "Local": "Perumbakkam"}
+    named = [places[c] for c in ("West", "OMR-N", "OMR-S", "Local") if c in carried]
+    return " + ".join(named) if named else f"Route {batch_no}"
+
+
 def corridor_for(locality, address=""):
     """Best-guess corridor from the locality text. Overridable per customer.
 
@@ -384,19 +426,24 @@ def _stop_from_row(conn, r, klat, klng, day_iso=None, acache=None):
         assigned = addr["porter_point_id"]
         assigned_from = "address" if assigned is not None else None
 
-    # Which route this order rides on. The order's own value wins; otherwise the
-    # standing preference saved on the address ("Nanganallur always rides West").
+    # Which route this order rides on. Most specific wins: this order tonight,
+    # then the standing preference saved on the address ("Nanganallur always
+    # rides West"), then the corridor's own default. The corridor fallback is
+    # what stops a new customer being invisible on every route sheet until
+    # somebody remembers to tick a box for them.
     batch_no = r["batch_no"] if "batch_no" in keys else None
     standing = (addr["batch_no"]
                 if addr is not None and "batch_no" in addr.keys() else None)
-    if batch_no is None:
-        batch_no = standing
+    batch_from = "order" if batch_no is not None else None
+    if batch_no is None and standing is not None:
+        batch_no, batch_from = standing, "address"
 
     name = r["name"] or "—"
     base = {
         "assigned_point": assigned,
         "assigned_from": assigned_from,
         "batch_no": batch_no,
+        "batch_from": batch_from,
         "standing_batch": standing,
         "delivery_id": r["id"],
         "name": name,
@@ -413,7 +460,14 @@ def _stop_from_row(conn, r, klat, klng, day_iso=None, acache=None):
         "status": r["status"],
     }
     if lat is None or lng is None:
-        base.update({"km": None, "zone": None, "corridor": None, "pinned": False})
+        # No pin, but the locality text still names a corridor, and an order with
+        # no pin still has to be carried by somebody.
+        corr = pick("corridor") or corridor_for(r["locality"], base["address"])
+        if base["batch_no"] is None and corr:
+            fallback = corridor_routes(conn).get(corr)
+            if fallback:
+                base["batch_no"], base["batch_from"] = fallback, "corridor"
+        base.update({"km": None, "zone": None, "corridor": corr, "pinned": False})
         return base
     # ROAD distance from the kitchen — this is the number printed on the sheet
     # and the number zones are banded on. Straight-line is kept only for the
@@ -421,6 +475,10 @@ def _stop_from_row(conn, r, klat, klng, day_iso=None, acache=None):
     km, src = road_km_from_kitchen(conn, lat, lng)
     zone = pick("zone") or zone_for_km(conn, km)
     corr = pick("corridor") or corridor_for(r["locality"], base["address"]) or "Local"
+    if base["batch_no"] is None:
+        fallback = corridor_routes(conn).get(corr)
+        if fallback:
+            base["batch_no"], base["batch_from"] = fallback, "corridor"
     base.update({"lat": lat, "lng": lng, "km": round(km, 2), "km_source": src,
                  "straight_km": round(haversine(klat, klng, lat, lng), 2),
                  "zone": zone, "corridor": corr, "pinned": True})
@@ -609,6 +667,39 @@ def batch_rows(conn, day_iso, slot):
         "SELECT * FROM route_batches WHERE date=? AND slot=? ORDER BY batch_no",
         (day_iso, slot))]
     return rows
+
+
+def batches_on_day(conn, day_iso, slot, rows=None):
+    """The runs this slot actually splits into, worked out from the orders.
+
+    Read from `route_batches` alone this came back empty for any day nobody had
+    opened the Routes screen for -- so the sheet offered no way to print one
+    rider's run, and the only sheet available was the whole slot with Chrompet
+    and Semmancheri interleaved. A route exists because orders ride on it.
+    """
+    route = build_route(conn, day_iso, slot, rows=rows, split=False)
+    seen = {}
+    for group in (route["stops"], route["porter_direct"], route["unpinned"]):
+        for st in group:
+            if not st.get("delivery_id"):
+                continue
+            b = st.get("batch_no")
+            if b is None:
+                continue
+            seen.setdefault(int(b), 0)
+            seen[int(b)] += 1
+    saved = {r["batch_no"]: r for r in batch_rows(conn, day_iso, slot)}
+    out = []
+    for b in sorted(seen):
+        row = saved.get(b) or {}
+        name = (row.get("name") or "").strip()
+        # "Route 1" is the name ensure_batches writes when it has nothing better;
+        # it carries no information, so the corridor name replaces it.
+        if not name or name == f"Route {b}":
+            name = route_label(conn, b)
+        out.append({"batch_no": b, "name": name, "rider": row.get("rider"),
+                    "n": seen[b]})
+    return out
 
 
 def ensure_batches(conn, day_iso, slot, n):

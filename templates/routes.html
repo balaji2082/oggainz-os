@@ -30,6 +30,40 @@
   <button class="btn btn-ghost btn-sm">Show</button>
 </form>
 
+{# Set once, applies every day after. This is the difference between routes that
+   are right on a morning nobody opened this screen, and routes that are not. #}
+<div class="card" style="border-left:4px solid #7cb342">
+  <strong>Which run each direction rides</strong>
+  <p class="small muted" style="margin:4px 0 10px">
+    The standing answer, used for every order unless you set that customer or that
+    day differently. A new customer lands on the right run the moment their locality
+    is known — nothing to tick.
+  </p>
+  <form method="post" action="{{ url_for('routes_corridors') }}">
+    <input type="hidden" name="d" value="{{ day }}">
+    <input type="hidden" name="slot" value="{{ slot }}">
+    <div class="list">
+      {% for corr, desc in corridors.items() %}
+      <div class="litem" style="box-shadow:none;align-items:center;gap:10px">
+        <div class="grow" style="min-width:180px">
+          <div class="t">{{ corr }}</div>
+          <div class="s">{{ desc }}</div>
+        </div>
+        <div style="min-width:140px">
+          <select name="corr_{{ corr }}" style="width:100%">
+            <option value="" {{ 'selected' if not cmap.get(corr) }}>— decide per order —</option>
+            {% for i in [1,2,3,4,5,6] %}
+              <option value="{{ i }}" {{ 'selected' if cmap.get(corr) == i }}>Route {{ i }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="form-actions"><button class="btn btn-primary btn-sm">Save directions</button></div>
+  </form>
+</div>
+
 {% if not orders %}
   <div class="card"><p class="muted" style="margin:0">No orders for {{ day }} {{ slot }}.</p></div>
 {% else %}
@@ -60,7 +94,7 @@
   <div class="row" style="gap:10px;align-items:flex-end">
     <div style="flex:1;min-width:130px"><label>Route {{ p.b.batch_no }} name</label>
       <input name="bname_{{ p.b.batch_no }}" value="{{ p.b.name or '' }}"
-             placeholder="West run"></div>
+             placeholder="{{ labels.get(p.b.batch_no) or 'West run' }}"></div>
     <div style="flex:1;min-width:130px"><label>Rider</label>
       <input name="rider_{{ p.b.batch_no }}" value="{{ p.b.rider or '' }}"
              list="riderlist" placeholder="Name"></div>
@@ -118,6 +152,7 @@
           {% if o.corridor %} · <strong>{{ o.corridor }}</strong>{% endif %}
           {% if o.km %} · {{ o.km }} km{% endif %}
           {% if o.mode == 'porter_handoff' %} · hand off{% elif o.mode == 'porter_direct' %} · Porter direct{% endif %}
+          {% if o.batch_from == 'corridor' %} · <span class="muted">by direction</span>{% endif %}
         </div>
       </div>
       <div style="min-width:150px">

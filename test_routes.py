@@ -117,7 +117,12 @@ check("the far stops are in the map link",
 
 print("\n== 2. putting an order on a route is the decision to ride it ==")
 db.set_setting(c, "porter_auto", "1")            # old behaviour switched back on
+# "On no route at all" now takes clearing the direction map too, since a corridor
+# supplies a route on its own. That is the point of section 7 -- here it has to be
+# out of the way so the Porter fallback is what is actually under test.
+db.set_setting(c, "corridor_routes", "{}")
 c.execute("UPDATE deliveries SET batch_no=NULL WHERE date=? AND meal_type=?", (DAY, SLOT))
+c.execute("UPDATE customer_addresses SET batch_no=NULL")
 c.commit()
 before = modes_of(ops.build_route(c, DAY, SLOT, split=False))
 check("with suggestions ON and no route, the far order goes to Porter",
@@ -215,7 +220,81 @@ check("the rider's own km wins over the measured one", line["km"] == 99.0, line[
 check("and it is labelled as his figure", line["km_source"] == "rider", line["km_source"])
 
 
-print("\n== 7. the pages all still render ==")
+print("\n== 7. a direction knows its own run, so nobody has to be ticked ==")
+# On 19 Aug 2026 only 7 of 32 active addresses had ever been given a route by
+# hand. Kumaran, added that week in Nanganallur -- squarely the Tambaram run --
+# therefore belonged to no route at all: he was missing from every per-rider
+# sheet, and the only sheet that showed him mixed Chrompet with Semmancheri.
+db.set_setting(c, "corridor_routes",
+               '{"Local": 1, "West": 1, "OMR-N": 2, "OMR-S": 2}')
+c.execute("UPDATE deliveries SET batch_no=NULL WHERE date=? AND meal_type=?", (DAY, SLOT))
+c.execute("UPDATE customer_addresses SET batch_no=NULL")
+c.commit()
+
+whole = ops.build_route(c, DAY, SLOT, split=False)
+everyone = whole["stops"] + whole["porter_direct"] + whole["unpinned"]
+orders = [s for s in everyone if s.get("delivery_id")]
+check("every order has a route without one being set by hand",
+      all(s.get("batch_no") for s in orders),
+      [s["name"] for s in orders if not s.get("batch_no")])
+check("...and it came from the direction it is in",
+      all(s.get("batch_from") == "corridor" for s in orders))
+for s in orders:
+    want = {"West": 1, "Local": 1, "OMR-N": 2, "OMR-S": 2}.get(s.get("corridor"))
+    if want:
+        check(f"{s['name'][:16]} ({s['corridor']}) rides route {want}",
+              s["batch_no"] == want, s["batch_no"])
+
+check("the runs are discoverable without opening the Routes screen",
+      len(ops.batches_on_day(c, DAY, SLOT)) >= 1)
+check("a run is named after the ground it covers, not a number",
+      "Route" not in ops.route_label(c, 1), ops.route_label(c, 1))
+
+# Anything set by hand still wins, at either level.
+one = orders[0]
+other = 2 if one["batch_no"] == 1 else 1
+c.execute("UPDATE deliveries SET batch_no=? WHERE id=?", (other, one["delivery_id"]))
+c.commit()
+m = {s["delivery_id"]: s for s in
+     (lambda r: r["stops"] + r["porter_direct"] + r["unpinned"])(
+         ops.build_route(c, DAY, SLOT, split=False))}
+check("a route set on the order beats the direction's default",
+      m[one["delivery_id"]]["batch_no"] == other)
+check("...and says so", m[one["delivery_id"]]["batch_from"] == "order")
+c.execute("UPDATE deliveries SET batch_no=NULL WHERE id=?", (one["delivery_id"],))
+c.commit()
+
+if one.get("address_id"):
+    c.execute("UPDATE customer_addresses SET batch_no=? WHERE id=?",
+              (other, one["address_id"]))
+    c.commit()
+    m = {s["delivery_id"]: s for s in
+         (lambda r: r["stops"] + r["porter_direct"] + r["unpinned"])(
+             ops.build_route(c, DAY, SLOT, split=False))}
+    check("a standing route on the address beats the direction's default",
+          m[one["delivery_id"]]["batch_no"] == other)
+    check("...and says so", m[one["delivery_id"]]["batch_from"] == "address")
+    c.execute("UPDATE customer_addresses SET batch_no=NULL WHERE id=?",
+              (one["address_id"],))
+    c.commit()
+
+# Switched off, nothing is assumed -- the old behaviour is still reachable.
+db.set_setting(c, "corridor_routes", "{}")
+none_set = ops.build_route(c, DAY, SLOT, split=False)
+check("with no directions mapped, nothing is auto-assigned",
+      not any(s.get("batch_no") for s in none_set["stops"] if s.get("delivery_id")))
+db.set_setting(c, "corridor_routes",
+               '{"Local": 1, "West": 1, "OMR-N": 2, "OMR-S": 2}')
+
+
+print("\n== 8. the printed sheet carries no per-order clock times ==")
+sheet_html = cl.get(f"/sheet/{DAY}/Lunch?batch=1").get_data(as_text=True)
+check("no 'Approx.' column on the route table", "Approx." not in sheet_html)
+check("no per-stop eta field is rendered", 'data-k="r1.eta"' not in sheet_html)
+check("the stop order is still there", 'data-k="r1.n"' in sheet_html)
+
+
+print("\n== 9. the pages all still render ==")
 for path in ["/today", f"/sheet/{DAY}/Lunch", f"/sheet/{DAY}/Lunch?batch=1",
              f"/sheet/{DAY}/Lunch?batch=1&lang=ta", f"/sheet/{DAY}/Dinner",
              f"/routes?d={DAY}&slot=Lunch", f"/routes/payout?d={DAY}",

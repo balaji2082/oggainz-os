@@ -610,10 +610,38 @@ def ensure_day_rows(conn, day_iso):
         # Never PLAN more meals than the pack still owes: Pending rows already on
         # the books (any date) count against remaining, so browsing several future
         # days can't stack up extra orders for a nearly-finished subscription.
+        #
+        # But "already planned" must never mean "planned for a LATER day". Opening
+        # a future date generates that date's rows, so S061 -- one meal left --
+        # had its last meal parked on Mon 24 Aug simply because that day was looked
+        # at first, and Thu 20 Aug, the next day he was actually due, generated
+        # nothing and left him off the prep list entirely. The meal was not lost,
+        # it was just four days out of place, and nothing on the screen said so.
+        #
+        # A pack's remaining meals belong on its EARLIEST delivery days. So when the
+        # books are full but a planned row sits later than the day being generated,
+        # the furthest one is pulled back to here instead of skipping the day.
         planned = conn.execute(
-            "SELECT COUNT(*) FROM deliveries WHERE subscription_id=? AND status='Pending'",
-            (s["id"],)).fetchone()[0]
-        if planned >= (s["remaining_meals"] or 0):
+            "SELECT id, date, COALESCE(is_extra,0) AS is_x FROM deliveries "
+            "WHERE subscription_id=? AND status='Pending' ORDER BY date",
+            (s["id"],)).fetchall()
+        if len(planned) >= (s["remaining_meals"] or 0):
+            # An extra was added by hand for a chosen date and is not the
+            # generator's to move; nor is a row someone has written on.
+            movable = [r for r in planned if r["date"] > day_iso and not r["is_x"]]
+            if not movable:
+                continue
+            move_id = movable[-1]["id"]
+            if conn.execute(
+                    "SELECT 1 FROM deliveries WHERE id=? AND (day_note IS NOT NULL "
+                    "OR address_id IS NOT NULL OR porter_point_id IS NOT NULL "
+                    "OR batch_no IS NOT NULL)", (move_id,)).fetchone():
+                continue
+            conn.execute(
+                "UPDATE deliveries SET date=?, month=?, meal_type=?, variant_id=? "
+                "WHERE id=?",
+                (day_iso, month_label, plan["slot"], plan["variant_id"], move_id))
+            created += 1
             continue
         conn.execute(
             "INSERT INTO deliveries(date,subscription_id,customer_id,name,meal_type,status,month,notes,created_at,variant_id) "

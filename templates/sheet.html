@@ -269,7 +269,7 @@ tr.backrow td { background: #f2f4f3; font-size: 9pt; }
       <div class="note" data-k="o{{ loop.index }}.nt" contenteditable="false"
            {% if not o.note %}style="display:none"{% endif %}>{% if o.note %}{{ T.note }}: {{ o.note }}{% endif %}</div>
       {% if o.stop and o.stop.mode == 'porter_handoff' %}
-        <div class="note"><strong>{{ T.porter_handoff }}: {{ o.stop.porter_point.name }}</strong>{% if o.stop.eta %} · {{ o.stop.eta }}{% endif %}
+        <div class="note"><strong>{{ T.porter_handoff }}: {{ o.stop.porter_point.name }}</strong>
         {%- if o.stop.porter_point.note %}<br>{{ o.stop.porter_point.note }}{% endif %}</div>
       {% elif o.stop and o.stop.mode == 'porter_direct' %}
         <div class="note"><strong>{{ T.porter_direct }}</strong></div>
@@ -308,9 +308,13 @@ tr.backrow td { background: #f2f4f3; font-size: 9pt; }
   {% if route.stops %}
   <table class="route">
     <thead><tr>
+      {# No per-stop clock times. They were guesses off an average speed, and a
+         printed 7:24 PM reads as a promise to whoever is holding the sheet --
+         to the rider, and to any customer who sees it. The order of the stops
+         is the instruction; the time is not. #}
       <th style="width:28pt">{{ T.stop }}</th><th>{{ T.customer }}</th>
       <th style="width:64pt">{{ T.zone }}</th><th style="width:44pt">km</th>
-      <th style="width:54pt">{{ T.eta }}</th><th style="width:132pt">{{ T.who }}</th>
+      <th style="width:150pt">{{ T.who }}</th>
     </tr></thead>
     <tbody>
       {% for s in route.stops %}
@@ -320,7 +324,6 @@ tr.backrow td { background: #f2f4f3; font-size: 9pt; }
             <span class="muted">{{ s.locality }}</span></td>
         <td><span class="zone">{{ T[s.zone] }}</span></td>
         <td data-k="r{{ loop.index }}.km" contenteditable="false">{{ s.km }}</td>
-        <td data-k="r{{ loop.index }}.eta" contenteditable="false">{{ s.eta }}</td>
         <td>{% if s.mode == 'porter_handoff' %}<span class="porter">{{ T.porter_handoff }}<br>{{ s.porter_point.name }}</span>
             {% else %}{{ T.rider }}{% endif %}</td>
       </tr>
@@ -330,7 +333,7 @@ tr.backrow td { background: #f2f4f3; font-size: 9pt; }
         <td>–</td>
         <td><strong>{{ s.name }}</strong> <span class="muted">{{ s.locality }}</span></td>
         <td><span class="zone">{{ T[s.zone] }}</span></td>
-        <td>{{ s.km }}</td><td>–</td>
+        <td>{{ s.km }}</td>
         <td class="porter">{{ T.porter_direct }}</td>
       </tr>
       {% endfor %}
@@ -341,7 +344,6 @@ tr.backrow td { background: #f2f4f3; font-size: 9pt; }
         <td><strong>{{ T.back_to_base }}</strong></td>
         <td></td>
         <td>{{ route.return_km }}</td>
-        <td>{{ route.return_eta or '–' }}</td>
         <td>{{ T.rider }}</td>
       </tr>
     </tbody>

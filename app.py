@@ -1280,15 +1280,13 @@ def sheet(d, slot):
     # Every route for this slot, so the sheet can offer a switcher. Without this
     # the split is invisible: you open the sheet, see all nine orders, and have
     # no way to know two runs exist or how to reach them.
-    batches = []
-    for b in ops.batch_rows(c, d, slot):
-        n = c.execute(
-            "SELECT COUNT(*) n FROM deliveries WHERE date=? AND meal_type=? "
-            "AND batch_no=? AND status IN ('Pending','Delivered')",
-            (d, slot, b["batch_no"])).fetchone()["n"]
-        if n:
-            b["n"] = n
-            batches.append(b)
+    #
+    # Worked out from the orders themselves, not from saved batch rows. Read from
+    # `route_batches` this was empty for any day the Routes screen had not been
+    # opened for, so the switcher vanished and the only sheet on offer was the
+    # whole slot -- Chrompet and Semmancheri on one page, which is two directions
+    # and two riders pretending to be one run.
+    batches = ops.batches_on_day(c, d, slot, rows=rows)
 
     batch_row = None
     unrouted = []
@@ -1297,15 +1295,26 @@ def sheet(d, slot):
         batch_row = c.execute(
             "SELECT * FROM route_batches WHERE date=? AND slot=? AND batch_no=?",
             (d, slot, batch)).fetchone()
+        batch_row = dict(batch_row) if batch_row else {}
+        # Fall back to the corridor's own name, so the page is headed "Tambaram
+        # side" rather than a bare number that means nothing to whoever rides it.
+        if not (batch_row.get("name") or "").strip() or                 batch_row.get("name") == f"Route {batch}":
+            batch_row["name"] = ops.route_label(c, batch)
         # An order nobody has put on a route would otherwise appear on no sheet
         # at all. It still has to be cooked and delivered, so it is printed here
         # as a warning rather than silently dropped.
+        routed = set()
+        whole = ops.build_route(c, d, slot, rows=rows, split=False)
+        for grp in (whole["stops"], whole["porter_direct"], whole["unpinned"]):
+            for st in grp:
+                if st.get("delivery_id") and st.get("batch_no") is not None:
+                    routed.add(st["delivery_id"])
         for r in rows:
             if (r["meal_type"] or "Lunch") != slot:
                 continue
             if r["status"] not in ("Pending", "Delivered"):
                 continue
-            if r["batch_no"] is None:
+            if r["id"] not in routed:
                 unrouted.append(r["name"])
 
     slot_key = "dinner" if slot == "Dinner" else "lunch"
@@ -1621,6 +1630,7 @@ def routes_board():
             "km": s.get("km"), "zone": s.get("zone"),
             "corridor": s.get("corridor"), "pinned": s.get("pinned"),
             "mode": s["mode"], "batch_no": s.get("batch_no"),
+            "batch_from": s.get("batch_from"),
             "standing": s.get("standing_batch"), "address_id": s.get("address_id"),
         })
     orders.sort(key=lambda o: ((o["corridor"] or "zz"), -(o["km"] or 0),
@@ -1641,10 +1651,13 @@ def routes_board():
         "AND rider != '' ORDER BY rider")]
     unassigned = sum(1 for o in orders if not o["batch_no"])
     rate = ops.fnum(c, "petrol_rate")
+    cmap = ops.corridor_routes(c)
+    labels = {b["batch_no"]: ops.route_label(c, b["batch_no"]) for b in saved}
     c.close()
     return render_template("routes.html", day=day, slot=slot, n=n, orders=orders,
                            per=per, riders=riders, unassigned=unassigned,
-                           rate=rate, whole=whole)
+                           rate=rate, whole=whole, cmap=cmap, labels=labels,
+                           corridors=ops.CORRIDORS)
 
 
 @app.route("/routes/suggest", methods=["POST"])
@@ -1705,6 +1718,38 @@ def routes_save():
         bits.append(f"{standing} set for every delivery")
     flash(", ".join(bits) + "." if bits else "Routes saved.", "ok")
     return redirect(url_for("routes_board", d=day, slot=slot, n=n))
+
+
+@app.route("/routes/corridors", methods=["POST"])
+def routes_corridors():
+    """Set which run each direction rides on, once, for every day after.
+
+    Assigning ten orders to routes by hand every morning is a job nobody keeps
+    doing, and the day it is skipped the sheet silently goes back to one mixed
+    run. A locality already resolves to a corridor, so the corridor holds the
+    answer and a customer added tomorrow is on the right route immediately.
+    """
+    c = conn()
+    f = request.form
+    day = f.get("d") or today_iso()
+    slot = "Dinner" if f.get("slot") == "Dinner" else "Lunch"
+    m = {}
+    for corr in ops.CORRIDORS:
+        raw = (f.get(f"corr_{corr}") or "").strip()
+        if raw:
+            try:
+                v = int(raw)
+            except ValueError:
+                continue
+            if 1 <= v <= 6:
+                m[corr] = v
+    db.set_setting(c, "corridor_routes", json.dumps(m))
+    if m:
+        ops.ensure_batches(c, day, slot, max(m.values()))
+    c.commit(); c.close()
+    flash("Saved. Every order now rides the route its direction is set to, "
+          "unless you say otherwise for a customer or a day.", "ok")
+    return redirect(url_for("routes_board", d=day, slot=slot))
 
 
 @app.route("/routes/payout")

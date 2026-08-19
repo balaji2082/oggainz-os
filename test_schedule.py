@@ -61,8 +61,14 @@ A.app.config["TESTING"] = True
 cl = A.app.test_client()
 c = db.get_db()
 
+# Section 1 checks that a pack with no schedule set behaves as it always has, so
+# the pack under test has to BE one of those. Taking simply the first pack with
+# meals left picked an on-demand one once the live data moved on, and the suite
+# reported two failures that were only ever the fixture choosing badly.
 sub = c.execute("SELECT * FROM subscriptions WHERE status IN ('Active','Ending Soon') "
-                "AND COALESCE(remaining_meals,0) > 3 ORDER BY id LIMIT 1").fetchone()
+                "AND COALESCE(remaining_meals,0) > 3 "
+                "AND COALESCE(schedule_mode,'daily')='daily' "
+                "ORDER BY id LIMIT 1").fetchone()
 if not sub:
     sys.exit("no active subscription in this database copy to test against")
 SID = sub["id"]
@@ -271,7 +277,56 @@ c.execute("DELETE FROM deliveries WHERE subscription_id=?", (NEW,))
 c.execute("DELETE FROM subscriptions WHERE id=?", (NEW,))
 c.commit()
 
-print("\n== 8. the pages all still render ==")
+print("\n== 8. a pack's last meal sits on its NEXT day, not a browsed future one ==")
+# S061 lost its final meal exactly this way on 19 Aug 2026: someone opened Mon
+# 24 Aug, the row generated there, and every day in between then refused to
+# generate because the pack already had "one planned". Raja dropped off the prep
+# list for the day he was actually due, and nothing on any screen said why.
+lastsub = c.execute(
+    "SELECT id FROM subscriptions WHERE status IN ('Active','Ending Soon') "
+    "AND COALESCE(remaining_meals,0) > 2 AND COALESCE(schedule_mode,'daily')='daily' "
+    "ORDER BY id LIMIT 1").fetchone()["id"]
+c.execute("DELETE FROM deliveries WHERE subscription_id=? AND status='Pending'", (lastsub,))
+c.execute("UPDATE subscriptions SET remaining_meals=1 WHERE id=?", (lastsub,))
+c.commit()
+
+core.ensure_day_rows(c, THU)                       # the far day is looked at first
+far = [r["date"] for r in c.execute(
+    "SELECT date FROM deliveries WHERE subscription_id=? AND status='Pending'",
+    (lastsub,)).fetchall()]
+check("looking at a future day plans the meal there", far == [THU], far)
+
+core.ensure_day_rows(c, MON)                       # then the day it is really due
+now = [r["date"] for r in c.execute(
+    "SELECT date FROM deliveries WHERE subscription_id=? AND status='Pending' ORDER BY date",
+    (lastsub,)).fetchall()]
+check("the meal moves back to the earlier day", now == [MON], now)
+check("and it is still exactly one meal, not two", len(now) == 1, now)
+
+core.ensure_day_rows(c, MON)
+core.ensure_day_rows(c, TUE)
+again = c.execute("SELECT COUNT(*) FROM deliveries WHERE subscription_id=? AND "
+                  "status='Pending'", (lastsub,)).fetchone()[0]
+check("running the generator again never stacks a second meal", again == 1, again)
+check("the pack's own counts are untouched",
+      c.execute("SELECT remaining_meals FROM subscriptions WHERE id=?",
+                (lastsub,)).fetchone()[0] == 1)
+
+# A row somebody has written on belongs to the date it was written for.
+c.execute("DELETE FROM deliveries WHERE subscription_id=? AND status='Pending'", (lastsub,))
+c.commit()
+core.ensure_day_rows(c, THU)
+c.execute("UPDATE deliveries SET day_note='ring the bell twice' "
+          "WHERE subscription_id=? AND date=?", (lastsub, THU))
+c.commit()
+core.ensure_day_rows(c, MON)
+kept = [r["date"] for r in c.execute(
+    "SELECT date FROM deliveries WHERE subscription_id=? AND status='Pending'",
+    (lastsub,)).fetchall()]
+check("a row with a hand-written note is left where it is", kept == [THU], kept)
+
+
+print("\n== 9. the pages all still render ==")
 for path in ["/today", "/subscriptions", f"/subscriptions/{SID}",
              f"/subscriptions/{SID}/edit", "/subscriptions/new",
              f"/subscriptions/new?renew={SID}", f"/subscriptions/{SID}/variant/{vid}",
