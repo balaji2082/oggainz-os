@@ -367,3 +367,52 @@ uses; they were simply never written to.
 
 Tests: `python test_routes.py` (33 checks — who rides what, what a route measures, what it
 owes, and that a hand-picked Porter handoff still wins).
+
+---
+
+## 20 August 2026 update — routes that hold, a meal that stopped hiding
+
+Back to the usual **2 steps**: `git pull` + **Reload**. No new libraries this time.
+
+```
+workon ogenv
+cd oggainz-os && git pull
+```
+
+Then **Web** → **Reload**.
+
+- **Routes now follow the direction, not a daily tick.** A route used to be set order
+  by order, by hand, every day — and only 7 of 32 active addresses had ever been given
+  one. So a customer added last week in Nanganallur was on *nobody's* route sheet, and
+  the only sheet that showed him mixed Chrompet in with Semmancheri. Now a corridor
+  carries the standing answer (West + Local → Route 1, OMR-N + OMR-S → Route 2,
+  editable at the top of the **Routes** screen). Route 1 means the Tambaram side every
+  day, and a customer added tomorrow is on the right run as soon as their locality is
+  known. Setting a route on one order, or ticking "every time" on an address, still
+  wins over it. Routes are named after the ground they cover instead of a number.
+- **A pack's last meal no longer hides on a future date.** The generator counted
+  Pending rows on any date against what a pack still owed, so opening a day next week
+  planned the final meal *there*, and every day in between then generated nothing —
+  the customer simply vanished off the prep list with no explanation. Remaining meals
+  now sit on the earliest delivery days, and a row planned later gets pulled back.
+  Extras and rows with a note on them stay where they were put.
+- **No per-stop clock times on the printed sheet.** They were guesses from an average
+  speed, and a printed "7:24 PM" reads as a promise. The stop order is the instruction.
+- **"Food sold" and "Delivery sold" stopped reading ₹0** on every month. The figures
+  were never passed to the page; June really sold ₹70,240 of food and ₹2,350 of delivery.
+
+### One-off: splitting Gowtham's pack across two months
+
+Not part of the deploy — run it once, by hand, when you want it:
+
+```
+python fix_gowtham_split.py            # shows the plan, writes nothing
+python fix_gowtham_split.py --apply
+```
+
+S066 is ₹4,800 for 24 meals (₹200 each) booked 29 Jul, but 3 meals were eaten in July
+and 21 in August, and the whole ₹4,800 sits in July. The script splits it into a 3-meal
+July pack at ₹600 and leaves S066 as 21 August meals at ₹4,200. It backs the database up
+first, runs in one transaction, and does nothing if it has already been run.
+
+Tests: `python test_routes.py` (56), `python test_schedule.py` (67).
