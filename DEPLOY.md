@@ -401,12 +401,30 @@ Then **Web** → **Reload**.
 - **"Food sold" and "Delivery sold" stopped reading ₹0** on every month. The figures
   were never passed to the page; June really sold ₹70,240 of food and ₹2,350 of delivery.
 
-### One-off: splitting Gowtham's pack across two months
+### One-off scripts
 
-Not part of the deploy — run it once, by hand, when you want it:
+Each of these is run once, by hand, and is not part of any deploy. Every one shows
+its plan and writes nothing until you add `--apply`, backs the database up first,
+runs in a single transaction, and does nothing at all on a second run.
+
+#### Folding Teena's dinner pack into her lunch pack
 
 ```
-python fix_gowtham_split.py            # shows the plan, writes nothing
+python fix_teena_merge.py
+python fix_teena_merge.py --apply
+```
+
+She took two Signature packs (S081 lunch ₹4,999 incl. ₹1,000 delivery, S085 dinner
+₹3,999) with both boxes going out on the lunch run. Night shifts mean the second
+meal is no longer eaten on time, so she moves to one meal a day for twice as long.
+S085 folds into S081: 40 meals at ₹10,000, ₹8,998 already received, ₹1,002 left to
+collect. The two days she really did get two boxes stay in the record as extra
+meals; from 21 Aug it generates one a day.
+
+#### Splitting Gowtham's pack across two months
+
+```
+python fix_gowtham_split.py
 python fix_gowtham_split.py --apply
 ```
 
