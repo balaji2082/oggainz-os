@@ -22,7 +22,9 @@ What it does
   * re-points S085's delivery rows onto S081, marked as extra meals -- so the two
     days she really did get two boxes (19 Aug, and 20 Aug still to go out) stay
     true in the record, and both still draw from her 40
-  * makes S081 a 40-meal pack at Rs 10,000, keeping the Rs 1,000 delivery fee
+  * makes S081 a 40-meal pack at Rs 10,000 -- Rs 8,000 of food (40 at Rs 200) plus
+    Rs 2,000 of delivery, because one meal a day is forty drops at her existing
+    Rs 50 a drop, where two boxes on one visit was twenty
   * carries her money across: Rs 4,999 + Rs 3,999 = Rs 8,998 received
   * deletes S085 and its component rows -- nothing else in the database points at
     it, and its delivery history has already been moved, so nothing is lost
@@ -66,8 +68,11 @@ APPLY = "--apply" in sys.argv
 KEEP = "S081"            # the lunch pack she keeps
 DROP = "S085"            # the dinner pack folded into it
 MEALS = 40               # 20 + 20, now taken one a day
-PRICE = 9000.0           # food, before delivery
-DELIVERY = 1000.0        # the delivery fee already on S081
+PRICE = 8000.0           # food: 40 meals at Rs 200
+# One meal a day means forty separate drops, where two boxes on one visit was
+# twenty. S081 was already Rs 1,000 for 20, so Rs 50 a drop is her existing rate;
+# forty drops is Rs 2,000. Food plus delivery is the Rs 10,000 exactly.
+DELIVERY = 2000.0
 
 
 def money(v):
