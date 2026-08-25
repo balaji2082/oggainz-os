@@ -1,118 +1,217 @@
 {% extends "base.html" %}
 {% block title %}CRM · OG Gainz{% endblock %}
 {% block content %}
-{% set st_class = {'New':'st-new','Contacted':'st-contacted','Trial':'st-trial',
-                   'Negotiating':'st-negotiating','Won':'st-won','Lost':'st-lost'} %}
+{% set st_class = {'New':'st-new','Contacted':'st-contacted','Price sent':'st-quoted',
+                   'Trial':'st-trial','Won':'st-won','Lost':'st-lost',
+                   'Waitlist':'st-wait','Not now':'st-later'} %}
 
 <div class="page-head"><h1>CRM</h1>
-  <span class="small muted">leads → conversion</span><span class="spacer"></span>
-  <a class="btn btn-primary btn-sm" href="{{ url_for('crm_new') }}">+ New lead</a></div>
+  <span class="small muted">every inquiry, chased</span><span class="spacer"></span>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('crm_reports') }}">Reports</a>
+  <a class="btn btn-primary btn-sm" href="{{ url_for('crm_new') }}">+ Lead</a></div>
 
-<!-- Pipeline headline -->
+<!-- Ten-second capture. This sits above everything because an inquiry that is
+     never typed in cannot be followed up, and the old form was long enough that
+     it never got typed in. -->
+<form class="qcap" method="post" action="{{ url_for('crm_quick') }}">
+  <h3>New inquiry just came in?</h3>
+  <div class="sub">Name and number is enough — fill the rest later</div>
+  <div class="qcap-row">
+    <input name="name" placeholder="Name" required>
+    <input name="phone" placeholder="Phone" inputmode="numeric">
+    <select name="source">
+      {% for s in sources %}<option {{ 'selected' if s=='WhatsApp' }}>{{ s }}</option>{% endfor %}
+    </select>
+    <button class="qcap-go" type="submit">Add</button>
+  </div>
+  <a class="qcap-alt" href="{{ url_for('crm_paste') }}">or paste their WhatsApp message &rsaquo;</a>
+</form>
+
+<!-- Headline numbers -->
 <div class="tiles tiles-4" style="margin-bottom:14px">
-  <div class="tile dark"><div class="k">Open leads</div><div class="v">{{ stats.open }}</div>
-    <div class="tap">in the pipeline</div></div>
-  <div class="tile tile-book"><div class="k">Pipeline value</div><div class="v">{{ stats.pipeline_value|inr }}</div>
-    <div class="tap">potential</div></div>
-  <div class="tile accent"><div class="k">Won this month</div><div class="v">{{ stats.won_month }}</div>
-    <div class="tap">{{ stats.this_month }}</div></div>
+  <div class="tile dark"><div class="k">To chase today</div><div class="v">{{ stats.due }}</div>
+    <div class="tap">{{ stats.open }} open leads</div></div>
+  <div class="tile accent"><div class="k">Won in {{ stats.this_month }}</div><div class="v">{{ stats.won_month }}</div>
+    <div class="tap">{{ stats.new_month }} new leads</div></div>
   <div class="tile"><div class="k">Conversion</div><div class="v">{{ stats.conv_rate|round(0,'floor')|int }}%</div>
     <div class="tap" style="color:var(--orange)">{{ stats.won }} won · {{ stats.lost }} lost</div></div>
+  <div class="tile tile-book"><div class="k">Going cold</div><div class="v">{{ stats.leaking }}</div>
+    <div class="tap">no next step, or quiet 7+ days</div></div>
 </div>
 
-<!-- Follow-ups due now -->
+<!-- ===================== CHASE LIST ===================== -->
 {% if due %}
 <div class="card" style="border-color:#f6d9bf">
-  <div class="card-title"><h3>⏰ Follow up now</h3><span class="spacer"></span>
-    <span class="chip chip-ending">{{ due|length }} due</span></div>
-  <div class="list">
-    {% for l in due %}
-    <div class="litem">
-      <span class="avatar">{{ l.name[:1]|upper }}</span>
-      <a class="grow" href="{{ url_for('crm_detail', lid=l.id) }}">
-        <div class="t">{{ l.name }}</div>
-        <div class="s">due {{ l.next_follow_up|fdate('%d %b') }} · <span class="{{ st_class[l.stage] }} chip chip-xs">{{ l.stage }}</span>
-          {% if l.interest %}· {{ l.interest }}{% endif %}</div>
-      </a>
-      {% if l.phone %}<a class="iconbtn" href="{{ l.phone|wa }}" target="_blank" title="WhatsApp">💬</a>{% endif %}
+  <div class="duehead"><h3>Chase these now</h3><span class="spacer"></span>
+    <span class="chip chip-ending">{{ due|length }}</span></div>
+  {% for l in due %}
+  <div class="due-item">
+    <span class="avatar">{{ l.name[:1]|upper }}</span>
+    <a class="grow" href="{{ url_for('crm_detail', lid=l.id) }}">
+      <div class="t">{{ l.name }}</div>
+      <div class="s">
+        <span class="chip chip-xs {{ st_class[l.stage] }}">{{ l.stage }}</span>
+        {% if l.overdue_days > 0 %}<span class="od">{{ l.overdue_days }}d overdue</span>
+        {% else %}due today{% endif %}
+        {% if l.interest %}· {{ l.interest }}{% endif %}
+      </div>
+    </a>
+    <div class="due-acts">
+      {% if l.phone %}<a class="qbtn" href="{{ l.phone|wa }}" target="_blank" title="WhatsApp">Chat</a>{% endif %}
+      <form method="post" action="{{ url_for('crm_snooze', lid=l.id) }}">
+        <input type="hidden" name="days" value="3">
+        <button class="qbtn" type="submit" title="Come back in 3 days">+3d</button>
+      </form>
     </div>
-    {% endfor %}
   </div>
+  {% endfor %}
+</div>
+{% elif stats.open %}
+<div class="card" style="background:#f2fbf5; border-color:#d5efdf">
+  <b style="color:var(--lime)">Nothing to chase today.</b>
+  <span class="small muted">{{ stats.open }} leads are open with their next follow-up still ahead.</span>
 </div>
 {% endif %}
 
-<!-- Stage filter -->
+<!-- ===================== LEAKING ===================== -->
+{% if leaking %}
+<details class="card" style="border-color:#f3dcc4">
+  <summary style="cursor:pointer; font-weight:800; color:var(--forest)">
+    {{ leaking|length }} lead{{ 's' if leaking|length != 1 }} going cold
+    <span class="small muted" style="font-weight:500">— no next step set, or nobody has messaged them in a week</span>
+  </summary>
+  <div style="margin-top:12px">
+    {% for l in leaking %}
+    <div class="due-item">
+      <a class="grow" href="{{ url_for('crm_detail', lid=l.id) }}">
+        <div class="t">{{ l.name }}</div>
+        <div class="s"><span class="chip chip-xs {{ st_class[l.stage] }}">{{ l.stage }}</span>
+          {% if l.no_action %}<span class="od">no next step</span>
+          {% else %}quiet {{ l.quiet_days }} days{% endif %}</div>
+      </a>
+      <div class="due-acts">
+        <form method="post" action="{{ url_for('crm_snooze', lid=l.id) }}">
+          <input type="hidden" name="days" value="0">
+          <button class="qbtn" type="submit" title="Put it on today's chase list">Chase today</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+
+<!-- ===================== WAITLIST CLUSTERS ===================== -->
+{% if waitlist %}
+<div class="card">
+  <div class="card-title"><h3>Waiting for us to reach them</h3><span class="spacer"></span>
+    <span class="small muted">an area with 3+ waiting is a route worth opening</span></div>
+  {% for g in waitlist %}
+  <div class="due-item">
+    <div class="grow">
+      <div class="t">{{ g.area }}
+        {% if g.corridor %}<span class="chip chip-xs chip-line">{{ g.corridor }}</span>{% endif %}</div>
+      <div class="s">{{ g.leads|map(attribute='name')|join(', ') }}</div>
+    </div>
+    <span class="chip {{ 'chip-ending' if g.n >= 3 else 'chip-line' }}">{{ g.n }} waiting</span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- ===================== FILTERS ===================== -->
 <div class="chiprow">
-  <a class="fchip {{ 'on' if stage=='Open' }}" href="{{ url_for('crm_home', stage='Open') }}">Open ({{ stats.open }})</a>
-  {% for s in stages %}
-  <a class="fchip {{ st_class[s] }} {{ 'on' if stage==s }}" href="{{ url_for('crm_home', stage=s) }}">{{ s }} ({{ stats.counts[s] }})</a>
+  {% for v in views %}
+  <a class="fchip {{ st_class.get(v,'') }} {{ 'on' if view==v }}"
+     href="{{ url_for('crm_home', view=v, q=q or None) }}">{{ v }}{% if v=='Due' %} ({{ stats.due }}){% elif v=='Open' %} ({{ stats.open }}){% elif v in stats.counts %} ({{ stats.counts[v] }}){% endif %}</a>
   {% endfor %}
 </div>
 
 <form method="get" class="search" style="margin-bottom:14px">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-  <input name="q" value="{{ q }}" placeholder="Search name, phone, locality…">
-  {% if stage and stage!='Open' %}<input type="hidden" name="stage" value="{{ stage }}">{% endif %}
+  <input name="q" value="{{ q }}" placeholder="Search name, phone, area, notes…">
+  {% if view %}<input type="hidden" name="view" value="{{ view }}">{% endif %}
 </form>
 
-<!-- Lead list -->
+<!-- ===================== LEAD LIST ===================== -->
 <div class="tlist">
   {% for l in leads %}
-  {% set order = ['New','Contacted','Trial','Negotiating'] %}
+  {% set order = ['New','Contacted','Price sent','Trial'] %}
   {% set idx = order.index(l.stage) if l.stage in order else -1 %}
   {% set nxt = order[idx+1] if idx>=0 and idx+1 < order|length else None %}
   <div class="tcard">
     <div class="tcard-head">
       <b class="tname">{{ l.name }}</b>
       <span class="chip chip-xs {{ st_class[l.stage] }}">{{ l.stage }}</span>
-      {% if l.due %}<span class="chip chip-xs chip-unpaid">⏰ due</span>
-      {% elif l.upcoming %}<span class="chip chip-xs chip-line">↗ {{ l.next_follow_up|fdate('%d %b') }}</span>{% endif %}
+      {% if l.due %}<span class="chip chip-xs chip-unpaid">{% if l.overdue_days %}{{ l.overdue_days }}d overdue{% else %}due today{% endif %}</span>
+      {% elif l.upcoming %}<span class="chip chip-xs chip-line">{{ l.next_follow_up|fdate('%d %b') }}</span>
+      {% elif l.no_action %}<span class="chip chip-xs chip-unpaid">no next step</span>{% endif %}
       <span class="spacer"></span>
-      {% if l.source %}<span class="small muted">{{ l.source }}</span>{% endif %}
+      {% if l.kind and l.kind != 'new' %}<span class="small muted">{{ l.kind_label }}</span>{% endif %}
     </div>
 
     <div class="tcard-meta">
-      {% if l.interest %}<span class="chip chip-line">🍱 {{ l.interest }}</span>{% endif %}
-      {% if l.goal %}<span class="chip chip-line">🎯 {{ l.goal }}</span>{% endif %}
-      {% if l.locality %}<span class="chip chip-line">📍 {{ l.locality }}</span>{% endif %}
+      {% if l.interest %}<span class="chip chip-line">{{ l.interest }}</span>{% endif %}
+      {% if l.goal %}<span class="chip chip-line">{{ l.goal }}</span>{% endif %}
+      {% if l.locality %}<span class="chip chip-line">{{ l.locality }}</span>{% endif %}
+      {% if l.source %}<span class="chip chip-line">via {{ l.source }}</span>{% endif %}
       {% if l.est_value %}<span class="chip chip-line">{{ l.est_value|inr }}</span>{% endif %}
     </div>
 
     <div class="tcard-actions">
-      {% if l.phone %}<a class="qbtn" href="{{ l.phone|wa }}" target="_blank">💬 WhatsApp</a>{% endif %}
+      {% if l.phone %}<a class="qbtn" href="{{ l.phone|wa }}" target="_blank">WhatsApp</a>{% endif %}
       {% if nxt %}
       <form method="post" action="{{ url_for('crm_stage', lid=l.id) }}">
         <input type="hidden" name="stage" value="{{ nxt }}">
-        <button class="qbtn" type="submit">→ {{ nxt }}</button>
+        <button class="qbtn" type="submit">&rarr; {{ nxt }}</button>
       </form>
-      {% elif l.stage in ['Trial','Negotiating'] %}
+      {% endif %}
+      {% if l.stage in ['Trial','Price sent','Contacted'] %}
       <form method="post" action="{{ url_for('crm_convert', lid=l.id) }}">
-        <button class="qbtn on-paid" type="submit">✓ Convert</button>
+        <button class="qbtn on-paid" type="submit">Won</button>
       </form>
       {% endif %}
       <span class="spacer"></span>
-      <a class="btn btn-ghost btn-sm" href="{{ url_for('crm_detail', lid=l.id) }}">Open ›</a>
+      <a class="btn btn-ghost btn-sm" href="{{ url_for('crm_detail', lid=l.id) }}">Open &rsaquo;</a>
     </div>
   </div>
   {% else %}
   <div class="empty">
-    <div class="big">🧲</div>
-    No leads{% if q %} match “{{ q }}”{% elif stage and stage!='Open' %} in {{ stage }}{% endif %} yet.
-    {% if not q %}
-    <div style="margin-top:16px">
-      <form method="post" action="{{ url_for('crm_import_trials') }}">
-        <button class="btn btn-success">↺ Import leads from trial orders</button>
-      </form>
-      <div class="small muted" style="margin-top:8px">Turns everyone who took a trial into a lead to follow up.</div>
-    </div>
-    {% endif %}
+    <div class="big">◎</div>
+    {% if q %}No leads match “{{ q }}”.
+    {% elif view=='Due' %}Nothing due. Add an inquiry above, or switch to <b>Open</b>.
+    {% else %}No leads in {{ view }} yet.{% endif %}
   </div>
   {% endfor %}
 </div>
 
-{% if leads %}
-<form method="post" action="{{ url_for('crm_import_trials') }}" style="margin-top:6px">
-  <button class="btn btn-ghost btn-sm btn-block">↺ Import any new trial orders as leads</button>
-</form>
+<!-- ===================== SEED THE PIPELINE ===================== -->
+{% if seedable.trials or seedable.winbacks %}
+<div class="card" style="margin-top:16px; background:#f2fbf5; border-color:#d5efdf">
+  <div class="card-title"><h3>Leads you already have</h3></div>
+  <p class="small muted" style="margin:0 0 13px; line-height:1.6">
+    These people are already in the Command Center. Nothing is added until you tap.</p>
+
+  {% if seedable.trials %}
+  <form method="post" action="{{ url_for('crm_import_trials') }}" style="margin-bottom:10px">
+    <button class="btn btn-success btn-block">Add {{ seedable.trials }} trial order{{ 's' if seedable.trials != 1 }} as leads</button>
+    <div class="small muted" style="margin-top:6px">
+      Everyone who took a trial box and was never closed. Trials older than a month land in
+      <b>Not now</b> rather than on today's chase list.</div>
+  </form>
+  {% endif %}
+
+  {% if seedable.winbacks %}
+  <form method="post" action="{{ url_for('crm_import_winbacks') }}">
+    <button class="btn btn-ghost btn-block">Add {{ seedable.winbacks }} past customer{{ 's' if seedable.winbacks != 1 }} as win-backs</button>
+    <div class="small muted" style="margin-top:6px">
+      People whose pack ended and never renewed. They have paid before — the cheapest sale there is.</div>
+  </form>
+  {% endif %}
+</div>
 {% endif %}
+
+<a class="linkrow" style="margin-top:14px" href="{{ url_for('crm_messages') }}">
+  <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+  Message templates — edit what we send<span class="spacer"></span>&rsaquo;</a>
 {% endblock %}

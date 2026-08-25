@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Message templates · CRM · OG Gainz{% endblock %}
+{% block content %}
+{% set st_class = {'New':'st-new','Contacted':'st-contacted','Price sent':'st-quoted',
+                   'Trial':'st-trial','Won':'st-won','Lost':'st-lost',
+                   'Waitlist':'st-wait','Not now':'st-later'} %}
+
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('crm_home') }}">&lsaquo; CRM</a>
+  <h1 style="margin:0 0 0 6px">Message templates</h1>
+</div>
+
+<div class="card" style="padding:13px 15px">
+  <p class="small muted" style="margin:0; line-height:1.7">
+    These are the WhatsApp messages that appear on every lead, already filled in with that
+    person's name. Edit them freely — this is your voice, not ours. A template can also
+    <b>move the lead's stage</b> and <b>book the next follow-up</b> the moment you send it,
+    so the record never falls behind what you actually did.</p>
+  <div class="tokens">
+    Type these anywhere in a message and they fill themselves in:
+    <code>{first}</code> first name · <code>{name}</code> full name ·
+    <code>{interest}</code> what they want · <code>{locality}</code> their area ·
+    <code>{goal}</code> their goal · <code>{brochure}</code> link to our brochure
+  </div>
+</div>
+
+{% for t in rows %}
+<details class="tpl">
+  <summary>
+    {{ t.name }}
+    {% if not t.active %}<span class="chip chip-xs chip-line">off</span>{% endif %}
+    <span class="spacer"></span>
+    {% if t.stage %}<span class="chip chip-xs {{ st_class.get(t.stage,'chip-line') }}">{{ t.stage }}</span>{% endif %}
+    {% if t.advance_to %}<span class="chip chip-xs chip-line">&rarr; {{ t.advance_to }}</span>{% endif %}
+  </summary>
+  <div class="tpl-body">
+    <form method="post" action="{{ url_for('crm_messages_save') }}">
+      <input type="hidden" name="id" value="{{ t.id }}">
+      <div class="form-grid">
+        <div><label>Name of this message</label><input name="name" value="{{ t.name }}" required></div>
+        <div><label>Show first on stage</label>
+          <select name="stage"><option value="">Any stage</option>
+            {% for s in stages %}<option {{ 'selected' if t.stage==s }}>{{ s }}</option>{% endfor %}
+          </select></div>
+        <div><label>After sending, move to</label>
+          <select name="advance_to"><option value="">Leave the stage alone</option>
+            {% for s in stages %}<option {{ 'selected' if t.advance_to==s }}>{{ s }}</option>{% endfor %}
+          </select></div>
+        <div><label>Then chase again in (days)</label>
+          <input name="followup_days" type="number" step="1" min="0"
+                 value="{{ t.followup_days if t.followup_days is not none else '' }}"
+                 placeholder="blank = don't change"></div>
+        <div><label>Order in the list</label>
+          <input name="sort" type="number" step="10" value="{{ t.sort or 100 }}"></div>
+        <div><label>Use this message</label>
+          <select name="active">
+            <option value="1" {{ 'selected' if t.active }}>Yes</option>
+            <option value="0" {{ 'selected' if not t.active }}>No — hide it</option>
+          </select></div>
+        <div class="full"><label>The message</label>
+          <textarea name="body" required>{{ t.body }}</textarea></div>
+      </div>
+      <div class="form-actions" style="gap:8px">
+        <button class="btn btn-primary btn-sm">Save</button>
+      </div>
+    </form>
+    <form method="post" action="{{ url_for('crm_messages_delete', tid=t.id) }}"
+          onsubmit="return confirm('Delete “{{ t.name }}”?')" style="margin-top:6px">
+      <button class="btn btn-ghost btn-sm">Delete this message</button>
+    </form>
+  </div>
+</details>
+{% endfor %}
+
+<details class="tpl" style="border-color:#cfe6d8">
+  <summary><b style="color:var(--lime)">+ Write a new message</b></summary>
+  <div class="tpl-body">
+    <form method="post" action="{{ url_for('crm_messages_save') }}">
+      <div class="form-grid">
+        <div><label>Name of this message</label><input name="name" required placeholder="Festival offer"></div>
+        <div><label>Show first on stage</label>
+          <select name="stage"><option value="">Any stage</option>
+            {% for s in stages %}<option>{{ s }}</option>{% endfor %}</select></div>
+        <div><label>After sending, move to</label>
+          <select name="advance_to"><option value="">Leave the stage alone</option>
+            {% for s in stages %}<option>{{ s }}</option>{% endfor %}</select></div>
+        <div><label>Then chase again in (days)</label>
+          <input name="followup_days" type="number" step="1" min="0" placeholder="blank = don't change"></div>
+        <div class="full"><label>The message</label>
+          <textarea name="body" required placeholder="Hi {first}, …"></textarea></div>
+      </div>
+      <input type="hidden" name="active" value="1">
+      <input type="hidden" name="sort" value="500">
+      <div class="form-actions"><button class="btn btn-primary btn-sm">Add message</button></div>
+    </form>
+  </div>
+</details>
+{% endblock %}

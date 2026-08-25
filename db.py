@@ -526,6 +526,34 @@ CREATE TABLE IF NOT EXISTS subscription_variants (
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
 );
 
+-- CRM: the WhatsApp replies Balaji sends over and over. Editable, because the
+-- wording is his and it changes; kept in the database rather than in the code so
+-- he can fix a sentence from his phone without a deploy.
+CREATE TABLE IF NOT EXISTS lead_templates (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,      -- 'First reply', 'Price list', 'Still interested?'
+    stage      TEXT,               -- shown first on this stage; NULL = always shown
+    body       TEXT NOT NULL,      -- supports {name} {first} {interest} {locality} {brochure}
+    advance_to TEXT,               -- stage to move the lead to after sending, if any
+    followup_days INTEGER,         -- auto-set the next follow-up this many days out
+    sort       INTEGER DEFAULT 100,
+    active     INTEGER DEFAULT 1,
+    created_at TEXT
+);
+
+-- CRM: what was spent to get leads, by month and channel. Without this, cost per
+-- lead and cost per customer are unanswerable, which is the whole point of
+-- running ads with a CRM attached.
+CREATE TABLE IF NOT EXISTS marketing_spend (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    month      TEXT NOT NULL,      -- YYYY-MM
+    channel    TEXT NOT NULL,      -- Meta ads / Google / Pamphlet / Influencer ...
+    campaign   TEXT,               -- optional: the specific campaign
+    amount     REAL NOT NULL DEFAULT 0,
+    note       TEXT,
+    created_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_dayplan_sub  ON subscription_day_plan(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_variants_sub ON subscription_variants(subscription_id);
 
@@ -541,6 +569,8 @@ CREATE INDEX IF NOT EXISTS idx_subs_customer   ON subscriptions(customer_id);
 CREATE INDEX IF NOT EXISTS idx_leads_stage     ON leads(stage);
 CREATE INDEX IF NOT EXISTS idx_leads_follow    ON leads(next_follow_up);
 CREATE INDEX IF NOT EXISTS idx_lead_updates    ON lead_updates(lead_id);
+CREATE INDEX IF NOT EXISTS idx_leads_phone     ON leads(phone);
+CREATE INDEX IF NOT EXISTS idx_spend_month     ON marketing_spend(month);
 CREATE INDEX IF NOT EXISTS idx_pauses_sub      ON subscription_pauses(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_slot_moves_sub  ON subscription_slot_moves(subscription_id);
 """
@@ -611,6 +641,42 @@ MIGRATIONS = {
     # Kept separate from the generated data so regenerating never loses them, and
     # so the underlying orders are never silently rewritten by a print-time tweak.
     "shifts":        [("overrides", "TEXT")],
+    # --- CRM, Aug 2026: lead management for real, not just a list of names ---
+    # Every column here is additive and nullable, so the leads table behaves
+    # exactly as before until something actually writes to them.
+    #
+    # kind separates the three very different things now living in one pipeline:
+    #   new      — a fresh inquiry, the ordinary case and the default
+    #   trial    — someone who already ate a trial box and was never closed
+    #   winback  — a past customer whose pack ended and never renewed
+    # They convert at wildly different rates, so a report that mixes them tells
+    # Balaji nothing about whether his marketing works.
+    #
+    # campaign is what makes ad spend answerable: 'Meta — Aug fat-loss' on the
+    # lead, the same string on a marketing_spend row, and cost per lead falls out.
+    # source_detail holds the human bit — WHICH friend referred them, which post.
+    #
+    # stage_at / won_at / lost_at exist because updated_at moves on every edit,
+    # so it could never answer "how long has this been stuck?" or "how many did
+    # we win in July?" once a lead was touched again in August.
+    "leads":         [("kind", "TEXT DEFAULT 'new'"),
+                      ("campaign", "TEXT"),
+                      ("source_detail", "TEXT"),
+                      ("temp", "TEXT"),              # Hot / Warm / Cold
+                      ("zone", "TEXT"),              # guessed from the locality
+                      ("corridor", "TEXT"),          # Local / West / OMR-N / OMR-S
+                      ("stage_at", "TEXT"),          # when the CURRENT stage began
+                      ("won_at", "TEXT"),
+                      ("lost_at", "TEXT"),
+                      ("first_reply_at", "TEXT"),    # when he first answered them
+                      ("touches", "INTEGER DEFAULT 0"),
+                      # The furthest step this lead ever REACHED, which is not the
+                      # same as where it sits now. Someone who got to Trial and then
+                      # said no is stored as 'Lost', so the current stage alone can
+                      # never say how far they got — and a drop-off report built on
+                      # it silently undercounts every step of the funnel.
+                      ("peak_stage", "TEXT")],
+
     # Per-leg distances alongside the total, so the sheet can show both the
     # distance to each stop and the distance of each hop without a second call.
     "route_km_cache": [("legs", "TEXT")],

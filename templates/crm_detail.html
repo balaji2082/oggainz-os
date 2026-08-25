@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ lead.name }} · CRM · OG Gainz{% endblock %}
 {% block content %}
-{% set st_class = {'New':'st-new','Contacted':'st-contacted','Trial':'st-trial',
-                   'Negotiating':'st-negotiating','Won':'st-won','Lost':'st-lost'} %}
+{% set st_class = {'New':'st-new','Contacted':'st-contacted','Price sent':'st-quoted',
+                   'Trial':'st-trial','Won':'st-won','Lost':'st-lost',
+                   'Waitlist':'st-wait','Not now':'st-later'} %}
 
 <div class="page-head">
-  <a class="btn btn-ghost btn-sm" href="{{ url_for('crm_home') }}">‹ Back</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('crm_home') }}">&lsaquo; Back</a>
   <h1 style="margin:0 0 0 6px">{{ lead.name }}</h1>
   <span class="chip {{ st_class[lead.stage] }}">{{ lead.stage }}</span>
   <span class="spacer"></span>
@@ -15,24 +16,56 @@
 <!-- Contact + quick facts -->
 <div class="card">
   <div class="tcard-meta" style="margin-bottom:0">
-    {% if lead.phone %}<a class="chip chip-line" href="{{ lead.phone|wa }}" target="_blank">💬 {{ lead.phone }}</a>{% endif %}
-    {% if lead.source %}<span class="chip chip-line">via {{ lead.source }}</span>{% endif %}
-    {% if lead.locality %}<span class="chip chip-line">📍 {{ lead.locality }}</span>{% endif %}
-    {% if lead.goal %}<span class="chip chip-line">🎯 {{ lead.goal }}</span>{% endif %}
-    {% if lead.interest %}<span class="chip chip-line">🍱 {{ lead.interest }}</span>{% endif %}
-    {% if lead.est_value %}<span class="chip chip-line">💰 {{ lead.est_value|inr }}</span>{% endif %}
-    {% if wa_brochure %}<a class="chip chip-line" href="{{ wa_brochure }}" target="_blank"
-        style="background:#e7f6ec; border-color:#bfe5cc">📘 Send brochure</a>{% endif %}
+    {% if lead.phone %}<a class="chip chip-line" href="{{ lead.phone|wa }}" target="_blank">{{ lead.phone }}</a>{% endif %}
+    {% if lead.source %}<span class="chip chip-line">via {{ lead.source }}{% if lead.source_detail %} · {{ lead.source_detail }}{% endif %}</span>{% endif %}
+    {% if lead.campaign %}<span class="chip chip-line">{{ lead.campaign }}</span>{% endif %}
+    {% if lead.locality %}<span class="chip chip-line">{{ lead.locality }}{% if lead.corridor %} · {{ lead.corridor }}{% endif %}</span>{% endif %}
+    {% if lead.goal %}<span class="chip chip-line">{{ lead.goal }}</span>{% endif %}
+    {% if lead.interest %}<span class="chip chip-line">{{ lead.interest }}</span>{% endif %}
+    {% if lead.temp %}<span class="chip chip-line">{{ lead.temp }}</span>{% endif %}
+    {% if lead.est_value %}<span class="chip chip-line">{{ lead.est_value|inr }}</span>{% endif %}
+    {% if lead.kind and lead.kind != 'new' %}<span class="chip chip-line">{{ lead.kind_label }}</span>{% endif %}
   </div>
   {% if lead.notes %}<div class="tcard-order" style="margin-bottom:0; margin-top:12px">{{ lead.notes }}</div>{% endif %}
-  {% if lead.stage=='Lost' and lead.lost_reason %}
+
+  <div class="small muted" style="margin-top:12px; line-height:1.7">
+    {{ lead.touches or 0 }} contact{{ 's' if (lead.touches or 0) != 1 }}
+    {%- if lead.last_contact %} · last spoke {{ lead.last_contact|fdate('%d %b') }}
+      ({{ lead.quiet_days }} day{{ 's' if lead.quiet_days != 1 }} ago){% endif %}
+    {%- if lead.is_open %} · {{ lead.stuck_days }} day{{ 's' if lead.stuck_days != 1 }} in {{ lead.stage }}{% endif %}
+  </div>
+
+  {% if lead.stage == 'Lost' and lead.lost_reason %}
   <div class="alert alert-warn" style="margin:12px 0 0">Lost: {{ lead.lost_reason }}</div>{% endif %}
+
+  {% if lead.locality and not area.known %}
+  <div class="alert alert-warn" style="margin:12px 0 0">
+    We don't already deliver to {{ lead.locality }} — check the road distance before you promise a slot.
+  </div>{% endif %}
 </div>
+
+<!-- Someone with this number has been here before. Worth saying loudly: the
+     earlier conversation is usually what closes the second inquiry. -->
+{% if dupes.leads or dupes.customers %}
+<div class="alert alert-warn">
+  <div>
+    <b>This number has reached us before.</b>
+    {% for d in dupes.leads %}
+    <div class="small"><a href="{{ url_for('crm_detail', lid=d.id) }}" style="color:inherit; text-decoration:underline">
+      Lead {{ d.id }} — {{ d.name }} ({{ d.stage }})</a></div>
+    {% endfor %}
+    {% for cu in dupes.customers %}
+    <div class="small"><a href="{{ url_for('customer_detail', cid=cu.id) }}" style="color:inherit; text-decoration:underline">
+      Customer {{ cu.id }} — {{ cu.name }}</a></div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 
 <!-- Conversion / linked records -->
 {% if cust or sub %}
 <div class="card" style="background:#f2fbf5; border-color:#d5efdf">
-  <div class="card-title"><h3>✓ Converted</h3></div>
+  <div class="card-title"><h3>Converted</h3></div>
   <div class="kvs">
     {% if cust %}<div class="k">Customer</div><div><a href="{{ url_for('customer_detail', cid=cust.id) }}" style="color:var(--lime);font-weight:700">{{ cust.name }} ({{ cust.id }})</a></div>{% endif %}
     {% if sub %}<div class="k">Subscription</div><div><a href="{{ url_for('subscription_detail', sid=sub.id) }}" style="color:var(--lime);font-weight:700">{{ sub.plan_name }} ({{ sub.id }}) · {{ sub.total_amount|inr }}</a></div>{% endif %}
@@ -42,38 +75,110 @@
 </div>
 {% endif %}
 
-<!-- Pipeline stage control -->
+<!-- ===================== READY-WRITTEN MESSAGES ===================== -->
+<!-- The heart of the page. Tapping Send opens WhatsApp with the message already
+     written AND records the send, moves the stage and books the next chase in
+     one action — so the record can never drift from what actually happened. -->
 <div class="card">
-  <div class="card-title"><h3>Pipeline stage</h3></div>
+  <div class="card-title"><h3>Send a message</h3><span class="spacer"></span>
+    <a class="small muted" href="{{ url_for('crm_messages') }}">edit these</a></div>
+  {% if not lead.phone %}
+  <div class="alert alert-warn" style="margin-bottom:12px">
+    No phone number on this lead — <a href="{{ url_for('crm_edit', lid=lead.id) }}" style="color:inherit; text-decoration:underline">add one</a> to send from here.
+  </div>
+  {% endif %}
+  <div class="msglist">
+    {% for m in msgs %}
+    <details class="msgcard {{ 'pref' if m.preferred }}" {{ 'open' if loop.first and m.preferred }}>
+      <summary>
+        {{ m.name }}
+        <span class="spacer"></span>
+        {% if m.advance_to %}<span class="chip chip-xs {{ st_class.get(m.advance_to,'chip-line') }}">&rarr; {{ m.advance_to }}</span>{% endif %}
+        {% if m.followup_days is not none %}<span class="chip chip-xs chip-line">chase +{{ m.followup_days }}d</span>{% endif %}
+      </summary>
+      <div class="msg-body">
+        <div class="msg-text">{{ m.text }}</div>
+        <div class="msg-acts">
+          <form method="post" action="{{ url_for('crm_sent', lid=lead.id) }}"
+                class="{{ 'sendwa' if m.wa }}" {% if m.wa %}data-wa="{{ m.wa }}"{% endif %}>
+            <input type="hidden" name="template_id" value="{{ m.id }}">
+            <button class="btn btn-success btn-sm" type="submit">
+              {% if m.wa %}Send on WhatsApp &amp; log{% else %}Log as sent{% endif %}</button>
+          </form>
+          {% if m.wa %}
+          <a class="btn btn-ghost btn-sm" href="{{ m.wa }}" target="_blank" rel="noopener"
+             title="Opens WhatsApp without recording anything">Open only</a>
+          {% endif %}
+        </div>
+        {% if m.wa %}
+        <div class="small muted" style="margin-top:8px">
+          “Send &amp; log” opens WhatsApp and records the message here at the same time.
+        </div>
+        {% endif %}
+      </div>
+    </details>
+    {% else %}
+    <div class="empty small">No message templates yet.
+      <a href="{{ url_for('crm_messages') }}">Write one</a>.</div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- ===================== PIPELINE ===================== -->
+<div class="card">
+  <div class="card-title"><h3>Where they are</h3></div>
   <div class="stage-track">
-    {% for s in ['New','Contacted','Trial','Negotiating','Won'] %}
-    {% set done = (s == lead.stage) or (lead.stage=='Won' and s!='Won') %}
+    {% for s in funnel %}
     <form method="post" action="{{ url_for('crm_stage', lid=lead.id) }}" class="stage-step {{ 'cur' if s==lead.stage }} {{ st_class[s] }}">
       <input type="hidden" name="stage" value="{{ s }}">
       <button type="submit">{{ s }}</button>
     </form>
     {% endfor %}
   </div>
-  <div class="row" style="gap:8px; margin-top:12px">
-    {% if lead.stage in ['Trial','Negotiating','Contacted','New'] %}
+  <div class="small muted" style="margin-top:10px">{{ lead.meta.hint }}</div>
+
+  <div class="row" style="gap:8px; margin-top:14px; flex-wrap:wrap">
+    {% if lead.stage in open_stages %}
     <form method="post" action="{{ url_for('crm_convert', lid=lead.id) }}">
-      <button class="btn btn-success btn-sm" type="submit">✓ Convert to customer</button></form>
+      <button class="btn btn-success btn-sm" type="submit">Won — make them a customer</button></form>
     {% endif %}
+    {% for s in parked %}
+    <form method="post" action="{{ url_for('crm_stage', lid=lead.id) }}">
+      <input type="hidden" name="stage" value="{{ s }}">
+      <button class="btn btn-ghost btn-sm" type="submit">{{ s }}</button></form>
+    {% endfor %}
     <details class="inline-lost">
       <summary class="btn btn-danger btn-sm">Mark lost</summary>
       <form method="post" action="{{ url_for('crm_stage', lid=lead.id) }}" class="lost-form">
         <input type="hidden" name="stage" value="Lost">
-        <input name="lost_reason" placeholder="Reason (price, location, went cold…)">
+        <select name="lost_reason">
+          {% for r in lost_reasons %}<option>{{ r }}</option>{% endfor %}
+        </select>
         <button class="btn btn-danger btn-sm" type="submit">Confirm lost</button>
       </form>
     </details>
   </div>
+  <div class="small muted" style="margin-top:10px">
+    <b>Waitlist</b> = they want it, we can't reach them yet. <b>Not now</b> = right person, wrong month.
+    Both come back on their own. Only use <b>Lost</b> when it is genuinely over — the reason is what teaches us something.
+  </div>
 </div>
 
-<!-- Follow-up -->
+<!-- ===================== NEXT ACTION ===================== -->
 <div class="card">
   <div class="card-title"><h3>Next follow-up</h3><span class="spacer"></span>
-    {% if lead.next_follow_up %}<span class="chip {{ 'chip-unpaid' if lead.next_follow_up<=today else 'chip-line' }}">{{ lead.next_follow_up|fdate('%d %b %Y') }}</span>{% endif %}</div>
+    {% if lead.next_follow_up %}<span class="chip {{ 'chip-unpaid' if lead.next_follow_up<=today else 'chip-line' }}">{{ lead.next_follow_up|fdate('%d %b %Y') }}</span>
+    {% else %}<span class="chip chip-unpaid">none set</span>{% endif %}</div>
+
+  <div class="row" style="gap:8px; flex-wrap:wrap; margin-bottom:12px">
+    {% for d, lbl in [(0,'Today'),(1,'Tomorrow'),(3,'+3 days'),(7,'Next week'),(30,'Next month')] %}
+    <form method="post" action="{{ url_for('crm_snooze', lid=lead.id) }}">
+      <input type="hidden" name="days" value="{{ d }}">
+      <button class="qbtn" type="submit">{{ lbl }}</button>
+    </form>
+    {% endfor %}
+  </div>
+
   <form method="post" action="{{ url_for('crm_followup', lid=lead.id) }}" class="row" style="gap:8px; align-items:flex-end">
     <div style="flex:1; min-width:160px"><input name="next_follow_up" type="date" value="{{ lead.next_follow_up or '' }}"></div>
     <button class="btn btn-forest btn-sm" type="submit">Set</button>
@@ -82,15 +187,15 @@
 
 <!-- Add an update -->
 <div class="card">
-  <div class="card-title"><h3>Log an update</h3></div>
+  <div class="card-title"><h3>Log what happened</h3></div>
   <form method="post" action="{{ url_for('crm_update', lid=lead.id) }}">
     <div class="form-grid">
       <div><label>Type</label>
-        <select name="kind">{% for k in ['Note','Call','WhatsApp','Follow-up'] %}<option>{{ k }}</option>{% endfor %}</select></div>
+        <select name="kind">{% for k in kinds %}<option>{{ k }}</option>{% endfor %}</select></div>
       <div><label>Set next follow-up <span class="muted small">(optional)</span></label>
         <input name="next_follow_up" type="date"></div>
       <div class="full"><label>What happened?</label>
-        <textarea name="text" placeholder="Sent menu, asked about price, will decide next week…"></textarea></div>
+        <textarea name="text" placeholder="Called, asked about price, will decide after salary…"></textarea></div>
     </div>
     <div class="form-actions"><button class="btn btn-primary">Add update</button></div>
   </form>
@@ -106,10 +211,35 @@
       <span class="tl-dot tl-{{ u.kind|lower|replace(' ','') }}"></span>
       <div class="tl-body">
         <div class="tl-head"><b>{{ u.kind }}</b><span class="tl-when">{{ u.at|fdate('%d %b') }} · {{ u.at[11:16] }}</span></div>
-        <div class="tl-text">{{ u.text }}</div>
+        <div class="tl-text" style="white-space:pre-wrap">{{ u.text }}</div>
       </div>
     </div>
     {% else %}<div class="empty small">No updates logged yet.</div>{% endfor %}
   </div>
 </div>
+
+{% if trial %}
+<div class="card">
+  <div class="card-title"><h3>Their trial order</h3></div>
+  <div class="kvs">
+    <div class="k">Trial</div><div><a href="{{ url_for('trials') }}" style="color:var(--lime);font-weight:700">{{ trial.id }}</a> · {{ trial.date|fdate('%d %b %Y') }}</div>
+    {% if trial.order_text %}<div class="k">Ordered</div><div>{{ trial.order_text }}</div>{% endif %}
+    {% if trial.amount %}<div class="k">Paid</div><div>{{ trial.amount|inr }} · {{ trial.payment_status or '—' }}</div>{% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Deleting is for mistakes only; a real lead that went nowhere belongs in Lost. -->
+<details style="margin-top:6px">
+  <summary class="small muted" style="cursor:pointer">Delete this lead</summary>
+  <div class="card" style="margin-top:8px; border-color:#f0d2cd">
+    <p class="small muted" style="margin:0 0 10px">
+      Only for a duplicate or a typo. If they said no, mark them <b>Lost</b> with a reason instead —
+      that is the record that tells us what to fix.</p>
+    <form method="post" action="{{ url_for('crm_delete', lid=lead.id) }}"
+          onsubmit="return confirm('Delete {{ lead.id }} and its whole timeline?')">
+      <button class="btn btn-danger btn-sm">Delete {{ lead.id }}</button>
+    </form>
+  </div>
+</details>
 {% endblock %}

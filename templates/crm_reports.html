@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block title %}Lead reports · OG Gainz{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('crm_home') }}">&lsaquo; CRM</a>
+  <h1 style="margin:0 0 0 6px">Reports</h1>
+  <span class="spacer"></span>
+  <a class="btn btn-ghost btn-sm {{ 'on' if months==3 }}" href="{{ url_for('crm_reports', months=3) }}">3m</a>
+  <a class="btn btn-ghost btn-sm {{ 'on' if months==6 }}" href="{{ url_for('crm_reports', months=6) }}">6m</a>
+  <a class="btn btn-ghost btn-sm {{ 'on' if months==12 }}" href="{{ url_for('crm_reports', months=12) }}">12m</a>
+</div>
+
+<div class="tiles tiles-4" style="margin-bottom:6px">
+  <div class="tile dark"><div class="k">Leads, all time</div><div class="v">{{ rep.total_leads }}</div>
+    <div class="tap">{{ rep.total_won }} became customers</div></div>
+  <div class="tile accent"><div class="k">Revenue from leads</div><div class="v">{{ rep.total_revenue|inr }}</div>
+    <div class="tap">packs actually booked</div></div>
+  <div class="tile"><div class="k">Marketing spend</div><div class="v">{{ rep.total_spend|inr }}</div>
+    <div class="tap">{% if rep.has_spend %}{{ (rep.overall_roas)|round(1) }}x return{% else %}nothing recorded yet{% endif %}</div></div>
+  <div class="tile tile-book"><div class="k">Time to win</div>
+    {% if rep.speed_n %}
+    <div class="v">{{ rep.avg_days_to_win|round(0,'floor')|int }}<span style="font-size:.5em"> days</span></div>
+    <div class="tap">{{ rep.avg_touches_to_win|round(1) }} messages · from {{ rep.speed_n }} win{{ 's' if rep.speed_n != 1 }}</div>
+    {% else %}
+    <div class="v" style="font-size:1.1rem">not yet</div>
+    <div class="tap">needs wins that ran through here</div>
+    {% endif %}</div>
+</div>
+<p class="repnote">
+  “Revenue from leads” is real money — the value of packs booked by people who came through the
+  pipeline. It is not the same as total business revenue, which includes everyone who signed up
+  before the CRM existed.</p>
+
+<!-- ===================== FUNNEL ===================== -->
+<div class="card">
+  <div class="card-title"><h3>Where people drop off</h3><span class="spacer"></span>
+    <span class="small muted">everyone who reached each step</span></div>
+  <div class="funnel">
+    {% for f in rep.funnel %}
+    <div class="fn-row">
+      <div class="fn-lbl">{{ f.stage }}</div>
+      <div class="fn-track">
+        <div class="fn-fill" style="width:{{ f.pct|round(0,'floor')|int }}%">{{ f.n }}</div>
+      </div>
+      <div class="fn-pct">{{ f.pct|round(0,'floor')|int }}%</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% if rep.total_leads %}
+  <div class="small muted" style="margin-top:12px; line-height:1.6">
+    The biggest gap between two bars is the step costing you the most customers. That is the one
+    worth fixing before spending more on ads.</div>
+  {% endif %}
+</div>
+
+<!-- ===================== MONTH BY MONTH ===================== -->
+<div class="card">
+  <div class="card-title"><h3>Month by month</h3></div>
+  <div class="table-wrap"><table class="rev-table">
+    <thead><tr>
+      <th>Month</th><th style="text-align:right">Leads</th><th style="text-align:right">Won</th>
+      <th style="text-align:right">Rate</th><th style="text-align:right">Revenue</th>
+      <th style="text-align:right">Spend</th><th style="text-align:right">Per lead</th>
+      <th style="text-align:right">Per customer</th>
+    </tr></thead>
+    <tbody>
+    {% for m in rep.months %}
+    <tr>
+      <td><b>{{ m.label }}</b></td>
+      <td style="text-align:right">{{ m.leads }}</td>
+      <td style="text-align:right">{{ m.won }}</td>
+      <td style="text-align:right">{{ m.conv_rate|round(0,'floor')|int }}%</td>
+      <td style="text-align:right">{{ m.revenue|inr if m.revenue else '—' }}</td>
+      <td style="text-align:right">{{ m.spend|inr if m.spend else '—' }}</td>
+      <td style="text-align:right">{{ m.cpl|inr if m.cpl else '—' }}</td>
+      <td style="text-align:right">{{ m.cac|inr if m.cac else '—' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <div class="small muted" style="margin-top:10px; line-height:1.6">
+    A lead counts in the month it <b>arrived</b>; a win counts in the month it was <b>won</b>. So a
+    lead from last month that signs up this month keeps its own month — otherwise the conversion
+    rate would flatter whichever month happened to close it.</div>
+</div>
+
+<!-- ===================== SOURCES ===================== -->
+<div class="card">
+  <div class="card-title"><h3>Where leads come from</h3><span class="spacer"></span>
+    <span class="small muted">green = became customers</span></div>
+  {% set top = (rep.sources|map(attribute='leads')|max) if rep.sources else 0 %}
+  <div class="srcbar">
+    {% for s in rep.sources %}
+    <div class="srcrow">
+      <div class="sname">{{ s.source }}</div>
+      <div class="srctrack">
+        <div class="srcfill" style="width:{{ ((s.leads / top * 100) if top else 0)|round(0,'floor')|int }}%"></div>
+        <div class="srcwon" style="width:{{ ((s.won / top * 100) if top else 0)|round(0,'floor')|int }}%"></div>
+      </div>
+      <div class="srcnum">{{ s.leads }} lead{{ 's' if s.leads != 1 }} · {{ s.won }} won
+        {%- if s.revenue %} · {{ s.revenue|inr }}{% endif %}
+        {%- if s.cac %} · {{ s.cac|inr }}/customer{% endif %}</div>
+    </div>
+    {% else %}
+    <div class="empty small">No leads recorded yet. Once you have a few, this shows which
+      channel is actually worth your money.</div>
+    {% endfor %}
+  </div>
+</div>
+
+{% if rep.by_kind|length > 1 %}
+<div class="card">
+  <div class="card-title"><h3>New business vs. people we already knew</h3></div>
+  <div class="table-wrap"><table class="rev-table">
+    <thead><tr><th>Type</th><th style="text-align:right">Leads</th><th style="text-align:right">Won</th>
+      <th style="text-align:right">Rate</th><th style="text-align:right">Revenue</th></tr></thead>
+    <tbody>
+    {% for k in rep.by_kind %}
+    <tr><td><b>{{ k.label }}</b></td>
+      <td style="text-align:right">{{ k.leads }}</td>
+      <td style="text-align:right">{{ k.won }}</td>
+      <td style="text-align:right">{{ k.conv_rate|round(0,'floor')|int }}%</td>
+      <td style="text-align:right">{{ k.revenue|inr if k.revenue else '—' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <div class="small muted" style="margin-top:10px">
+    Trials and win-backs convert far better than cold inquiries. If they don't, the problem is the
+    food or the follow-up, not the marketing.</div>
+</div>
+{% endif %}
+
+<!-- ===================== WHY WE LOSE ===================== -->
+{% if rep.lost_reasons %}
+<div class="card">
+  <div class="card-title"><h3>Why we lose people</h3></div>
+  {% set lmax = rep.lost_reasons|map(attribute='n')|max %}
+  {% for r in rep.lost_reasons %}
+  <div class="lossbar">
+    <div style="flex:0 0 150px; font-size:.84rem; font-weight:600">{{ r.reason }}</div>
+    <div class="losstrack"><div class="lossfill" style="width:{{ ((r.n / lmax * 100) if lmax else 0)|round(0,'floor')|int }}%"></div></div>
+    <div class="srcnum">{{ r.n }} · {{ r.pct|round(0,'floor')|int }}%</div>
+  </div>
+  {% endfor %}
+  <div class="small muted" style="margin-top:10px; line-height:1.6">
+    “Too far” piling up means a route decision, not a sales problem. “Too expensive” piling up
+    means the value isn't landing in the first message.</div>
+</div>
+{% endif %}
+
+<!-- ===================== SPEND ===================== -->
+<div class="card">
+  <div class="card-title"><h3>What we spent on marketing</h3></div>
+  <p class="small muted" style="margin:0 0 13px; line-height:1.6">
+    Enter what you spend each month. Without it, cost per lead and cost per customer above stay
+    blank — and “are the ads working?” has no answer. The channel name has to match the lead's
+    source for the two to line up.</p>
+
+  <form method="post" action="{{ url_for('crm_spend_add') }}">
+    <div class="form-grid">
+      <div><label>Month</label><input name="month" type="month" value="{{ this_month }}" required></div>
+      <div><label>Channel</label>
+        <select name="channel">{% for c in channels %}<option>{{ c }}</option>{% endfor %}</select></div>
+      <div><label>Amount (₹)</label><input name="amount" type="number" step="1" required placeholder="3000"></div>
+      <div><label>Campaign <span class="muted small">(optional)</span></label>
+        <input name="campaign" placeholder="Sept fat loss"></div>
+      <div class="full"><label>Note <span class="muted small">(optional)</span></label>
+        <input name="note" placeholder="Boosted the transformation reel"></div>
+    </div>
+    <div class="form-actions"><button class="btn btn-primary">Record spend</button></div>
+  </form>
+
+  {% if rep.spend_rows %}
+  <div style="margin-top:16px">
+    {% for s in rep.spend_rows %}
+    <div class="spendrow">
+      <div class="grow">
+        <b>{{ s.channel }}</b> <span class="small muted">{{ s.month }}</span>
+        {% if s.campaign %}<span class="chip chip-xs chip-line">{{ s.campaign }}</span>{% endif %}
+        {% if s.note %}<div class="small muted">{{ s.note }}</div>{% endif %}
+      </div>
+      <b>{{ s.amount|inr }}</b>
+      <form method="post" action="{{ url_for('crm_spend_delete', sid=s.id) }}">
+        <button class="qbtn" type="submit" title="Remove">&times;</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

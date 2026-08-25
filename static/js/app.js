@@ -346,3 +346,20 @@ document.addEventListener('submit', async (ev) => {
     btn.insertAdjacentElement('afterend', note);
   });
 })();
+
+// --- CRM: send a written message and record it in the same tap ---------------
+// The form posts normally (so the lead page reloads showing the new timeline
+// entry, the moved stage and the next follow-up date), while WhatsApp opens
+// alongside it in a new tab. Two separate things had to happen for a chase to be
+// both sent and recorded, and asking a busy person to do the second one by hand
+// is how a CRM ends up full of stale stages.
+//
+// The URL lives in a data attribute rather than inline JS: the message body is
+// his own text and will eventually contain quotes, and a broken onsubmit would
+// fail silently at exactly the wrong moment.
+document.addEventListener('submit', (ev) => {
+  const form = ev.target.closest('form.sendwa');
+  if (!form) return;
+  const url = form.dataset.wa;
+  if (url) window.open(url, '_blank', 'noopener');
+});

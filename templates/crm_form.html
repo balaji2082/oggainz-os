@@ -1,44 +1,75 @@
 {% extends "base.html" %}
 {% block title %}{{ 'Edit' if lead else 'New' }} lead · OG Gainz{% endblock %}
 {% block content %}
+{% macro val(field) %}{{ lead[field] if lead and lead[field] else (prefill.get(field, '') if prefill else '') }}{% endmacro %}
+
 <div class="page-head">
-  <a class="btn btn-ghost btn-sm" href="{{ url_for('crm_detail', lid=lead.id) if lead else url_for('crm_home') }}">‹ Cancel</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('crm_detail', lid=lead.id) if lead else url_for('crm_home') }}">&lsaquo; Cancel</a>
   <h1 style="margin:0 0 0 6px">{{ 'Edit lead' if lead else 'New lead' }}</h1>
 </div>
 
+{% if not lead %}
+<div class="card" style="padding:12px 14px; margin-bottom:12px">
+  <span class="small muted">Only the name is required. Everything else can wait —
+    <a href="{{ url_for('crm_paste') }}">paste their message</a> to fill it in automatically.</span>
+</div>
+{% endif %}
+
 <form method="post" class="card">
   <div class="form-grid">
-    <div><label>Name</label><input name="name" value="{{ lead.name if lead }}" required {{ '' if lead else 'autofocus' }}></div>
-    <div><label>Contact number</label><input name="phone" value="{{ lead.phone if lead }}" placeholder="10-digit number"></div>
+    <div><label>Name</label><input name="name" value="{{ val('name') }}" required {{ '' if lead else 'autofocus' }}></div>
+    <div><label>Contact number</label><input name="phone" value="{{ val('phone') }}" inputmode="numeric" placeholder="10-digit number"></div>
 
     <div><label>Source</label>
       <select name="source">
         <option value="">—</option>
-        {% for s in sources %}<option {{ 'selected' if lead and lead.source==s }}>{{ s }}</option>{% endfor %}
+        {% for s in sources %}<option {{ 'selected' if (lead and lead.source==s) or (not lead and prefill.get('source')==s) }}>{{ s }}</option>{% endfor %}
       </select></div>
-    <div><label>Locality</label><input name="locality" value="{{ lead.locality if lead }}" placeholder="Perumbakkam…"></div>
+    <div><label>Which one? <span class="muted small">(who referred, which post)</span></label>
+      <input name="source_detail" value="{{ lead.source_detail if lead and lead.source_detail else '' }}" placeholder="Nakul referred, IG reel 12 Aug…"></div>
+
+    <!-- The field that makes ad money answerable. It has to match the campaign
+         name recorded against the spend on the Reports page, or cost per lead
+         has nothing to join on. -->
+    <div><label>Campaign <span class="muted small">(for ads)</span></label>
+      <input name="campaign" value="{{ lead.campaign if lead and lead.campaign else '' }}" placeholder="Meta — Sept fat loss"></div>
+    <div><label>Area</label><input name="locality" value="{{ val('locality') }}" placeholder="Perumbakkam, Velachery…"></div>
 
     <div><label>Goal</label>
       <select name="goal">
         <option value="">—</option>
         {% for g in goals %}<option {{ 'selected' if lead and lead.goal==g }}>{{ g }}</option>{% endfor %}
       </select></div>
-    <div><label>Interested in</label><input name="interest" value="{{ lead.interest if lead }}" placeholder="Elite Meal Pack, Fat-loss plan…"></div>
+    <div><label>Interested in</label><input name="interest" value="{{ val('interest') }}" placeholder="Elite pack, fat-loss plan…"></div>
 
     <div><label>Stage</label>
       <select name="stage">
         {% for s in stages %}<option {{ 'selected' if lead and lead.stage==s else ('selected' if not lead and s=='New') }}>{{ s }}</option>{% endfor %}
       </select></div>
-    <div><label>Estimated value (₹)</label><input name="est_value" type="number" step="1" value="{{ lead.est_value|int if lead and lead.est_value else '' }}" placeholder="e.g. 3000"></div>
+    <div><label>How keen</label>
+      <select name="temp">
+        <option value="">—</option>
+        {% for t in temps %}<option {{ 'selected' if lead and lead.temp==t }}>{{ t }}</option>{% endfor %}
+      </select></div>
 
-    <div><label>Next follow-up</label><input name="next_follow_up" type="date" value="{{ lead.next_follow_up if lead and lead.next_follow_up else '' }}"></div>
+    <div><label>What it's worth (₹) <span class="muted small">(optional)</span></label>
+      <input name="est_value" type="number" step="1" value="{{ lead.est_value|int if lead and lead.est_value else '' }}" placeholder="e.g. 4999"></div>
+    <div><label>Next follow-up <span class="muted small">(blank = we set it)</span></label>
+      <input name="next_follow_up" type="date" value="{{ lead.next_follow_up if lead and lead.next_follow_up else '' }}"></div>
+
     {% if lead and lead.stage=='Lost' %}
-    <div><label>Lost reason</label><input name="lost_reason" value="{{ lead.lost_reason if lead }}"></div>
+    <div class="full"><label>Why we lost them</label>
+      <select name="lost_reason">
+        <option value="">—</option>
+        {% for r in lost_reasons %}<option {{ 'selected' if lead.lost_reason==r }}>{{ r }}</option>{% endfor %}
+      </select></div>
     {% endif %}
 
     <div class="full"><label>Notes</label>
-      <textarea name="notes" placeholder="Preferences, budget, objections, anything useful…">{{ lead.notes if lead }}</textarea></div>
+      <textarea name="notes" rows="4" placeholder="Preferences, budget, objections, anything useful…">{{ val('notes') }}</textarea></div>
   </div>
+  {% if lead %}<input type="hidden" name="kind" value="{{ lead.kind or 'new' }}">{% endif %}
+  {% if lead and lead.trial_id %}<input type="hidden" name="trial_id" value="{{ lead.trial_id }}">{% endif %}
   <div class="form-actions"><button class="btn btn-primary">{{ 'Save changes' if lead else 'Add lead' }}</button></div>
 </form>
 {% endblock %}

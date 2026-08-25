@@ -1107,3 +1107,117 @@ tr.rowlink:hover{background:var(--cream)}
 .ex-acts{display:flex; gap:8px; align-items:center; margin-top:14px}
 .ex-acts .btn{flex:1 1 auto}
 #extrasheet .sheet-card{padding-bottom:18px}
+
+/* ===========================================================================
+   v6 — CRM rebuilt: capture in seconds, chase today, prove it next month
+   =========================================================================== */
+
+/* Stage tokens for the stages added in the rebuild. Price sent borrows the old
+   Negotiating orange; the two parking bays get their own colours so a parked
+   lead never reads as a dead one. */
+.st-quoted{background:#fdeede; color:#bc5a12}
+.st-wait{background:#fff3d4; color:#8a6100}
+.st-later{background:#e9eef5; color:#46586e}
+.stage-step.st-wait.cur button{background:#c9962a; border-color:#c9962a; color:#fff}
+.stage-step.st-later.cur button{background:#46586e; border-color:#46586e; color:#fff}
+
+/* ---------- Quick capture: the ten-second box at the top of /crm ---------- */
+.qcap{background:linear-gradient(135deg,var(--forest) 0%,var(--forest-2) 100%);
+  border-radius:var(--r); padding:15px; margin-bottom:14px; box-shadow:var(--shadow)}
+.qcap h3{color:#fff; margin:0 0 3px; font-size:1rem}
+.qcap .sub{color:var(--lime-e); font-size:.76rem; font-weight:700; letter-spacing:.03em;
+  text-transform:uppercase; margin-bottom:11px}
+.qcap-row{display:flex; gap:8px; flex-wrap:wrap}
+.qcap input,.qcap select{flex:1 1 130px; min-width:0; border:none; border-radius:var(--r-sm);
+  padding:11px 12px; font-family:inherit; font-size:.94rem; background:rgba(255,255,255,.96)}
+.qcap input:focus,.qcap select:focus{outline:2px solid var(--lime-e)}
+.qcap-go{flex:0 0 auto; background:var(--lime-e); color:#04231a; border:none; border-radius:var(--r-sm);
+  padding:11px 20px; font-weight:800; font-family:inherit; font-size:.94rem; cursor:pointer}
+.qcap-go:active{transform:scale(.97)}
+.qcap-alt{display:block; margin-top:10px; color:var(--lime-e); font-size:.82rem; font-weight:700}
+
+/* ---------- The chase list ---------- */
+.duehead{display:flex; align-items:center; gap:8px; margin:0 0 10px}
+.duehead h3{margin:0; font-size:1.02rem}
+.due-item{display:flex; align-items:center; gap:11px; padding:11px 0;
+  border-bottom:1px solid var(--line)}
+.due-item:last-child{border-bottom:none}
+.due-item .grow{flex:1; min-width:0}
+.due-item .t{font-weight:700; color:var(--forest); font-size:.96rem}
+.due-item .s{font-size:.78rem; color:var(--muted); margin-top:2px}
+.due-acts{display:flex; gap:6px; flex:0 0 auto}
+.due-acts .qbtn{padding:7px 11px; font-size:.76rem}
+.od{color:var(--orange); font-weight:800}
+
+/* ---------- Funnel bars (detail + reports) ---------- */
+.funnel{display:flex; flex-direction:column; gap:9px}
+.fn-row{display:flex; align-items:center; gap:10px}
+.fn-lbl{flex:0 0 92px; font-size:.8rem; font-weight:700; color:var(--forest)}
+.fn-track{flex:1; height:26px; background:#eef4f0; border-radius:var(--r-sm); overflow:hidden;
+  position:relative}
+.fn-fill{height:100%; border-radius:var(--r-sm); background:var(--forest);
+  display:flex; align-items:center; justify-content:flex-end; padding-right:8px;
+  color:#fff; font-weight:800; font-size:.78rem; min-width:34px; transition:width .3s}
+.fn-pct{flex:0 0 46px; text-align:right; font-size:.78rem; color:var(--muted); font-weight:700}
+
+/* ---------- Ready-written messages on the lead page ---------- */
+.msglist{display:flex; flex-direction:column; gap:10px}
+.msgcard{border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden; background:#fff}
+.msgcard.pref{border-color:var(--lime); box-shadow:0 0 0 2px rgba(31,168,74,.10)}
+.msgcard summary{list-style:none; cursor:pointer; padding:12px 13px; display:flex;
+  align-items:center; gap:9px; font-weight:700; color:var(--forest); font-size:.92rem}
+.msgcard summary::-webkit-details-marker{display:none}
+.msgcard summary .spacer{flex:1}
+.msg-body{padding:0 13px 13px}
+.msg-text{white-space:pre-wrap; font-size:.86rem; color:var(--ink); background:var(--cream);
+  border-radius:var(--r-sm); padding:11px 12px; margin-bottom:11px; line-height:1.5;
+  max-height:220px; overflow:auto}
+.msg-acts{display:flex; gap:8px; flex-wrap:wrap}
+.msg-acts form{margin:0; flex:1 1 auto}
+.msg-acts .btn{width:100%}
+
+/* ---------- Reports ---------- */
+.repnote{font-size:.8rem; color:var(--muted); margin:-4px 0 12px; line-height:1.5}
+.srcbar{display:flex; flex-direction:column; gap:12px}
+.srcrow{display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+.srcrow .sname{flex:0 0 118px; font-weight:700; color:var(--forest); font-size:.88rem}
+.srctrack{flex:1 1 160px; height:15px; background:#eef4f0; border-radius:999px; position:relative;
+  overflow:hidden; min-width:110px}
+.srcfill{position:absolute; left:0; top:0; height:100%; background:#c3dfd0; border-radius:999px}
+.srcwon{position:absolute; left:0; top:0; height:100%; background:var(--lime); border-radius:999px}
+.srcnum{flex:0 0 auto; font-size:.78rem; color:var(--muted); font-weight:700; white-space:nowrap}
+.spendrow{display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--line)}
+.spendrow:last-child{border-bottom:none}
+.spendrow .grow{flex:1; min-width:0}
+.lossbar{display:flex; align-items:center; gap:10px; padding:7px 0}
+.losstrack{flex:1; height:11px; background:#eef4f0; border-radius:999px; overflow:hidden}
+.lossfill{height:100%; background:var(--orange); border-radius:999px}
+
+/* ---------- Message template editor ---------- */
+.tpl{border:1px solid var(--line); border-radius:var(--r-sm); background:#fff; margin-bottom:11px}
+.tpl summary{list-style:none; cursor:pointer; padding:13px; font-weight:700; color:var(--forest);
+  display:flex; align-items:center; gap:9px}
+.tpl summary::-webkit-details-marker{display:none}
+.tpl summary .spacer{flex:1}
+.tpl-body{padding:0 13px 13px}
+.tpl-body textarea{min-height:170px; font-size:.88rem; line-height:1.55}
+.tokens{font-size:.76rem; color:var(--muted); margin-top:7px; line-height:1.7}
+.tokens code{background:var(--cream); border-radius:4px; padding:1px 6px; font-size:.74rem;
+  color:var(--forest); font-weight:700}
+
+/* The lost-reason picker replaced a free-text box, so it needs the same room. */
+.lost-form select{flex:1; min-width:180px}
+
+@media(max-width:560px){
+  .fn-lbl{flex-basis:74px; font-size:.74rem}
+  .srcrow .sname{flex-basis:100%; margin-bottom:-4px}
+  .due-acts{width:100%; margin-top:4px}
+  /* Quick capture is the one thing used one-handed, mid-shift, on a phone: give
+     the name its own line and make every target thumb-sized rather than letting
+     four controls fight over one row. */
+  .qcap input[name="name"]{flex:1 1 100%}
+  .qcap-go{flex:1 1 100%; padding:13px 20px}
+  .msg-acts .btn{padding:12px 14px}
+  .lossbar > div:first-child{flex-basis:110px; font-size:.78rem}
+  .spendrow{flex-wrap:wrap}
+}

@@ -352,11 +352,16 @@ def today():
         if cid and cid not in addr_map:
             addr_map[cid] = ops.customer_addresses(c, cid)
     variant_map = _variant_map(c, summary["rows"])
+    # Leads owed a message today. This belongs on the day's own screen rather
+    # than only behind the CRM tab: chasing is a daily job like cooking is, and
+    # a job nobody is reminded of on the page they open every morning is a job
+    # that quietly stops happening. Only shown when looking at today.
+    chase = crm.followups_due(c) if d == date.today().strftime("%Y-%m-%d") else []
     c.close()
     return render_template("today.html", d=d, s=summary, ending=ending, unpaid=unpaid,
                            prev_d=prev_d, next_d=next_d, view=view, override=override,
                            prep=prep, backlog=backlog, ticks=ticks, addr_map=addr_map,
-                           variant_map=variant_map,
+                           variant_map=variant_map, chase=chase,
                            day_label=fmt_date(d, "%A, %d %b %Y"))
 
 
@@ -2311,20 +2316,86 @@ def revenue():
 
 
 # ---------------------------------------------------------------------------
-# CRM — leads → conversion
+# CRM — lead management
 # ---------------------------------------------------------------------------
+# Every screen here answers one question. /crm says who to chase today. The lead
+# page is where a chase actually happens (message, stage, next date, all in one
+# tap). /crm/reports is the only place that can tell him whether marketing worked.
+def _brochure_url():
+    """Absolute link to the public brochure, for pasting into a WhatsApp message."""
+    return request.url_root.rstrip("/") + url_for("brochure_public")
+
+
+def _wa(phone, text):
+    """A wa.me link with the message already written. None when there is no number."""
+    if not phone:
+        return None
+    return wa_link(phone) + "?text=" + urllib_quote(text)
+
+
 @app.route("/crm")
 def crm_home():
     c = conn()
-    stage = request.args.get("stage", "Open")
+    view = request.args.get("view", "Due")
     q = request.args.get("q", "").strip()
-    leads = crm.list_leads(c, stage=stage, q=q)
-    due = crm.followups_due(c)
+    source = request.args.get("source", "").strip() or None
+    kind = request.args.get("kind", "").strip() or None
+    crm.seed_templates(c)                       # once, on first visit; never overwrites
+    leads = crm.list_leads(c, view=view, q=q, source=source, kind=kind)
     stats = crm.pipeline_stats(c)
+    due = crm.followups_due(c)
+    leaking = crm.leaking(c)
+    waitlist = crm.waitlist_by_area(c) if stats["waitlist"] else []
+    # Only offered while there is something to import, so the buttons disappear
+    # once the pipeline is his rather than nagging forever.
+    seedable = {
+        "trials": c.execute(
+            "SELECT COUNT(*) FROM trial_orders WHERE id NOT IN "
+            "(SELECT COALESCE(trial_id,'') FROM leads)").fetchone()[0],
+        "winbacks": len([w for w in crm.winback_candidates(c) if w["ever_ate"]]),
+    }
     c.close()
-    return render_template("crm.html", leads=leads, due=due, stats=stats,
-                           stage=stage, q=q, stages=crm.STAGES,
-                           open_stages=crm.OPEN_STAGES)
+    return render_template("crm.html", leads=leads, stats=stats, due=due,
+                           leaking=leaking, waitlist=waitlist, seedable=seedable,
+                           view=view, q=q, source=source, kind=kind,
+                           views=crm.VIEWS, stages=crm.STAGES, sources=crm.SOURCES,
+                           kinds=crm.KINDS, funnel=crm.FUNNEL)
+
+
+@app.route("/crm/quick", methods=["POST"])
+def crm_quick():
+    """Ten-second capture from the top of the CRM page. Name, number, what they said."""
+    c = conn()
+    f = request.form
+    lid = crm.quick_add(c, f.get("name"), f.get("phone"), f.get("text") or "",
+                        source=f.get("source") or "WhatsApp")
+    dupes = crm.find_duplicates(c, f.get("phone"), exclude_lead=lid)
+    c.close()
+    if dupes["leads"] or dupes["customers"]:
+        flash(f"Lead {lid} added — but that number has reached us before. Check below.",
+              "warn")
+    else:
+        flash(f"Lead {lid} added.", "ok")
+    return redirect(url_for("crm_detail", lid=lid))
+
+
+@app.route("/crm/paste", methods=["GET", "POST"])
+def crm_paste():
+    """Paste a WhatsApp message and let the form fill itself in.
+
+    Two steps on purpose: parse, then confirm. Guessing a name wrong is fine when
+    he can see the guess; it is not fine when it silently becomes a record.
+    """
+    c = conn()
+    parsed, dupes = None, None
+    text = (request.form.get("text") or "").strip()
+    if request.method == "POST" and text:
+        parsed = crm.parse_inquiry(text)
+        dupes = crm.find_duplicates(c, parsed.get("phone"))
+    c.close()
+    return render_template("crm_paste.html", parsed=parsed, text=text, dupes=dupes,
+                           sources=crm.SOURCES, goals=crm.GOALS, stages=crm.STAGES,
+                           temps=crm.TEMPS, today=date.today().strftime("%Y-%m-%d"))
 
 
 @app.route("/crm/new", methods=["GET", "POST"])
@@ -2335,9 +2406,13 @@ def crm_new():
         c.close()
         flash(f"Lead {lid} added.", "ok")
         return redirect(url_for("crm_detail", lid=lid))
+    prefill = {k: request.args.get(k, "") for k in
+               ("name", "phone", "locality", "interest", "notes", "source")}
     c.close()
-    return render_template("crm_form.html", lead=None, sources=crm.SOURCES,
-                           goals=crm.GOALS, stages=crm.STAGES,
+    return render_template("crm_form.html", lead=None, prefill=prefill,
+                           sources=crm.SOURCES, goals=crm.GOALS, stages=crm.STAGES,
+                           temps=crm.TEMPS, kinds=crm.KINDS,
+                           lost_reasons=crm.LOST_REASONS,
                            today=date.today().strftime("%Y-%m-%d"))
 
 
@@ -2348,7 +2423,18 @@ def crm_import_trials():
     c.close()
     flash(f"Imported {n} lead{'s' if n != 1 else ''} from trial orders." if n
           else "No new trials to import — all caught up.", "ok")
-    return redirect(url_for("crm_home"))
+    return redirect(url_for("crm_home", view="Open"))
+
+
+@app.route("/crm/import-winbacks", methods=["POST"])
+def crm_import_winbacks():
+    """Past customers with nothing live become win-back leads."""
+    c = conn()
+    n = crm.import_winbacks(c)
+    c.close()
+    flash(f"Added {n} win-back lead{'s' if n != 1 else ''} from past customers." if n
+          else "No lapsed customers to add — everyone has a live pack.", "ok")
+    return redirect(url_for("crm_home", view="Not now"))
 
 
 @app.route("/crm/<lid>")
@@ -2357,7 +2443,7 @@ def crm_detail(lid):
     lead = crm.get_lead(c, lid)
     if not lead:
         c.close(); abort(404)
-    lead = dict(lead)
+    lead = crm._decorate(c, [lead])[0]
     updates = crm.updates_for(c, lid)
     cust = c.execute("SELECT * FROM customers WHERE id=?", (lead["customer_id"],)).fetchone() \
         if lead["customer_id"] else None
@@ -2365,17 +2451,24 @@ def crm_detail(lid):
         if lead["subscription_id"] else None
     trial = c.execute("SELECT * FROM trial_orders WHERE id=?", (lead["trial_id"],)).fetchone() \
         if lead["trial_id"] else None
+    dupes = crm.find_duplicates(c, lead["phone"], exclude_lead=lid)
+
+    # Every template, already written out for THIS person and ready to send, so
+    # sending is one tap and the record updates itself when he taps it.
+    bro = _brochure_url()
+    msgs = []
+    for t in crm.list_templates(c, stage=lead["stage"]):
+        body = crm.render_body(t["body"], lead, bro)
+        msgs.append({**t, "text": body, "wa": _wa(lead["phone"], body)})
+    area = crm.area_read(lead["locality"])
     c.close()
-    # One-tap "send the brochure" on WhatsApp, personalised to this lead.
-    wa_brochure = None
-    if lead["phone"]:
-        bro_url = request.url_root.rstrip("/") + url_for("brochure_public")
-        txt = (f"Hi {(lead['name'] or '').split(' ')[0]}! 🌱 Here's the OG Gainz brochure — "
-               f"plans, menus & pricing:\n{bro_url}\n\nStart with a trial, no commitment! 💚")
-        wa_brochure = wa_link(lead["phone"]) + "?text=" + urllib_quote(txt)
     return render_template("crm_detail.html", lead=lead, updates=updates, cust=cust,
-                           sub=sub, trial=trial, stages=crm.STAGES,
-                           open_stages=crm.OPEN_STAGES, wa_brochure=wa_brochure)
+                           sub=sub, trial=trial, dupes=dupes, msgs=msgs, area=area,
+                           stages=crm.STAGES, funnel=crm.FUNNEL,
+                           open_stages=crm.OPEN_STAGES, parked=crm.PARKED,
+                           lost_reasons=crm.LOST_REASONS, kinds=crm.UPDATE_KINDS,
+                           stage_meta=crm.STAGE_META,
+                           today=date.today().strftime("%Y-%m-%d"))
 
 
 @app.route("/crm/<lid>/edit", methods=["GET", "POST"])
@@ -2390,8 +2483,10 @@ def crm_edit(lid):
         flash(f"Lead {lid} updated.", "ok")
         return redirect(url_for("crm_detail", lid=lid))
     c.close()
-    return render_template("crm_form.html", lead=lead, sources=crm.SOURCES,
-                           goals=crm.GOALS, stages=crm.STAGES,
+    return render_template("crm_form.html", lead=lead, prefill={},
+                           sources=crm.SOURCES, goals=crm.GOALS, stages=crm.STAGES,
+                           temps=crm.TEMPS, kinds=crm.KINDS,
+                           lost_reasons=crm.LOST_REASONS,
                            today=date.today().strftime("%Y-%m-%d"))
 
 
@@ -2432,6 +2527,37 @@ def crm_followup(lid):
     return redirect(request.referrer or url_for("crm_detail", lid=lid))
 
 
+@app.route("/crm/<lid>/snooze", methods=["POST"])
+def crm_snooze(lid):
+    """One tap for 'not today'. The whole point is that it beats doing nothing."""
+    c = conn()
+    when = crm.snooze(c, lid, request.form.get("days", 3))
+    c.close()
+    if _wants_json():
+        return jsonify({"ok": bool(when), "next_follow_up": when})
+    flash(f"Snoozed until {when}." if when else "Could not snooze.", "ok")
+    return redirect(request.referrer or url_for("crm_home"))
+
+
+@app.route("/crm/<lid>/sent", methods=["POST"])
+def crm_sent(lid):
+    """Log that a template was sent, advance the stage and set the next chase.
+
+    The WhatsApp link opens from the same tap in the browser, so the record is
+    written whether or not he actually finishes sending — which is the right
+    trade: a logged message he didn't send is a two-second fix, a sent message
+    nobody logged is a lead that silently rots.
+    """
+    c = conn()
+    tid = request.form.get("template_id")
+    tpl = crm.apply_template(c, lid, tid, request.form.get("text") or "")
+    c.close()
+    if _wants_json():
+        return jsonify({"ok": bool(tpl), "template": (tpl or {}).get("name")})
+    flash(f"Logged: {tpl['name']}." if tpl else "Message not found.", "ok")
+    return redirect(url_for("crm_detail", lid=lid))
+
+
 @app.route("/crm/<lid>/convert", methods=["POST"])
 def crm_convert(lid):
     c = conn()
@@ -2440,9 +2566,84 @@ def crm_convert(lid):
         c.close(); abort(404)
     cid = crm.convert_lead(c, lid)
     c.close()
-    flash(f"Converted to customer {cid}. Now book their pack 👇", "ok")
+    flash(f"Converted to customer {cid}. Now book their pack below.", "ok")
     return redirect(url_for("subscription_new", customer=cid, lead=lid))
 
+
+@app.route("/crm/<lid>/delete", methods=["POST"])
+def crm_delete(lid):
+    """Only for a genuine mistake — a duplicate or a test row.
+
+    A real lead that went nowhere belongs in Lost with a reason, because that is
+    the record that teaches us something. Deleting it just hides the lesson.
+    """
+    c = conn()
+    c.execute("DELETE FROM lead_updates WHERE lead_id=?", (lid,))
+    c.execute("DELETE FROM leads WHERE id=?", (lid,))
+    c.commit()
+    c.close()
+    flash(f"Lead {lid} deleted.", "ok")
+    return redirect(url_for("crm_home"))
+
+
+# --- Reporting -------------------------------------------------------------
+@app.route("/crm/reports")
+def crm_reports():
+    c = conn()
+    months = request.args.get("months", 6, type=int)
+    rep = crm.report(c, months=max(1, min(24, months)))
+    stats = crm.pipeline_stats(c)
+    c.close()
+    return render_template("crm_reports.html", rep=rep, stats=stats, months=months,
+                           channels=crm.CHANNELS,
+                           this_month=date.today().strftime("%Y-%m"))
+
+
+@app.route("/crm/spend", methods=["POST"])
+def crm_spend_add():
+    c = conn()
+    crm.add_spend(c, request.form)
+    c.close()
+    flash("Spend recorded.", "ok")
+    return redirect(url_for("crm_reports"))
+
+
+@app.route("/crm/spend/<int:sid>/delete", methods=["POST"])
+def crm_spend_delete(sid):
+    c = conn()
+    crm.delete_spend(c, sid)
+    c.close()
+    flash("Spend row removed.", "ok")
+    return redirect(url_for("crm_reports"))
+
+
+# --- Message templates -----------------------------------------------------
+@app.route("/crm/messages")
+def crm_messages():
+    c = conn()
+    crm.seed_templates(c)
+    rows = crm.list_templates(c, active_only=False)
+    c.close()
+    return render_template("crm_messages.html", rows=rows, stages=crm.STAGES)
+
+
+@app.route("/crm/messages/save", methods=["POST"])
+def crm_messages_save():
+    c = conn()
+    tid = request.form.get("id") or None
+    crm.save_template(c, request.form, tid=int(tid) if tid else None)
+    c.close()
+    flash("Message saved.", "ok")
+    return redirect(url_for("crm_messages"))
+
+
+@app.route("/crm/messages/<int:tid>/delete", methods=["POST"])
+def crm_messages_delete(tid):
+    c = conn()
+    crm.delete_template(c, tid)
+    c.close()
+    flash("Message deleted.", "ok")
+    return redirect(url_for("crm_messages"))
 
 # ---------------------------------------------------------------------------
 # Settings / plans / data tools

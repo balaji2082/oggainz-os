@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Paste an inquiry · CRM · OG Gainz{% endblock %}
+{% block content %}
+<div class="page-head">
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('crm_home') }}">&lsaquo; Back</a>
+  <h1 style="margin:0 0 0 6px">Paste an inquiry</h1>
+</div>
+
+<div class="card">
+  <p class="small muted" style="margin:0 0 12px; line-height:1.6">
+    Copy the whole WhatsApp message — or a forwarded contact card — and paste it here.
+    We'll pull out the name, number, area and what they're asking about. Check the guesses
+    on the next step before saving; nothing is stored until you do.</p>
+  <form method="post">
+    <textarea name="text" rows="7" autofocus
+      placeholder="Hi, I saw your page. I'm looking for a monthly meal plan for fat loss. I stay in Sholinganallur. My number is 98765 43210">{{ text }}</textarea>
+    <div class="form-actions"><button class="btn btn-primary">Read it</button></div>
+  </form>
+</div>
+
+{% if parsed %}
+<div class="card" style="background:#f2fbf5; border-color:#d5efdf">
+  <div class="card-title"><h3>Here's what we got</h3><span class="spacer"></span>
+    <span class="small muted">correct anything that's wrong</span></div>
+
+  {% if dupes and (dupes.leads or dupes.customers) %}
+  <div class="alert alert-warn">
+    <div><b>That number has reached us before.</b>
+      {% for d in dupes.leads %}
+      <div class="small"><a href="{{ url_for('crm_detail', lid=d.id) }}" style="color:inherit; text-decoration:underline">
+        Lead {{ d.id }} — {{ d.name }} ({{ d.stage }})</a> — open that one instead of making a second.</div>
+      {% endfor %}
+      {% for cu in dupes.customers %}
+      <div class="small"><a href="{{ url_for('customer_detail', cid=cu.id) }}" style="color:inherit; text-decoration:underline">
+        Customer {{ cu.id }} — {{ cu.name }}</a> — they are already a customer.</div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('crm_new') }}">
+    <div class="form-grid">
+      <div><label>Name</label><input name="name" value="{{ parsed.name }}" required></div>
+      <div><label>Contact number</label><input name="phone" value="{{ parsed.phone }}" inputmode="numeric"></div>
+      <div><label>Source</label>
+        <select name="source">
+          {% for s in sources %}<option {{ 'selected' if s=='WhatsApp' }}>{{ s }}</option>{% endfor %}
+        </select></div>
+      <div><label>Area</label><input name="locality" value="{{ parsed.locality }}"></div>
+      <div><label>Interested in</label><input name="interest" value="{{ parsed.interest }}"></div>
+      <div><label>Goal</label>
+        <select name="goal"><option value="">—</option>
+          {% for g in goals %}<option>{{ g }}</option>{% endfor %}</select></div>
+      <div><label>Stage</label>
+        <select name="stage">
+          {% for s in stages %}<option {{ 'selected' if s=='New' }}>{{ s }}</option>{% endfor %}
+        </select></div>
+      <div><label>How keen</label>
+        <select name="temp"><option value="">—</option>
+          {% for t in temps %}<option>{{ t }}</option>{% endfor %}</select></div>
+      <div class="full"><label>What they said</label>
+        <textarea name="notes" rows="5">{{ parsed.notes }}</textarea></div>
+    </div>
+    <div class="form-actions"><button class="btn btn-primary">Save lead</button></div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

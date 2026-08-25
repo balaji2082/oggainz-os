@@ -13,8 +13,25 @@
   {% if d != today %}<a class="btn btn-forest btn-sm" href="{{ url_for('today', view=view) }}">⟲ Today</a>{% endif %}
 </div>
 
-{% if ending or unpaid %}
+{% if ending or unpaid or chase %}
 <div class="alertbar">
+  {% if chase %}
+  <details class="disc disc-warn">
+    <summary><span class="ico">📞</span><span class="lbl">{{ chase|length }} lead{{ 's' if chase|length != 1 }} to chase</span>
+      <span class="chev">›</span></summary>
+    <div class="disc-body">
+      <ul class="disc-list">
+        {% for l in chase %}
+        <li><a href="{{ url_for('crm_detail', lid=l.id) }}">{{ l.name }}</a>
+          <span class="spacer"></span>
+          <b>{% if l.overdue_days %}{{ l.overdue_days }}d late{% else %}today{% endif %}</b>
+        </li>
+        {% endfor %}
+      </ul>
+      <a class="btn btn-sm btn-ghost btn-block" href="{{ url_for('crm_home') }}">Open the CRM</a>
+    </div>
+  </details>
+  {% endif %}
   {% if unpaid %}
   <details class="disc disc-danger">
     <summary><span class="ico">💳</span><span class="lbl">{{ unpaid|length }} to collect</span>
