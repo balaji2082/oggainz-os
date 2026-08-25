@@ -166,10 +166,17 @@ def pause_max_days(conn):
 
 
 def freeze_eligible(conn, plan_name):
-    """Whether this plan may be paused at all (docs/01 §7.1).
+    """RETIRED, 25 Aug 2026. Superseded by flexibility.effective_enabled().
 
-    An empty setting means every plan is eligible — an unset value must not
-    silently switch the feature off for everyone.
+    Kept only so an old call site fails loudly rather than quietly allowing
+    something, and so `freeze_eligible_plans` still reads correctly for anyone
+    inspecting the database. NOTHING in the request path calls this any more:
+    whether a pack may skip or pause is a decision about a PACK, and this
+    function could only ever answer about a PLAN.
+
+    Do not reintroduce it as a gate. If a plan-level default is ever wanted
+    again, it belongs inside flexibility.py where the per-pack override can
+    still win over it.
     """
     raw = (_setting(conn, "freeze_eligible_plans") or "").strip()
     if not raw:

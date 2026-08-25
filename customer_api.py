@@ -59,7 +59,7 @@ API_TOKEN = os.environ.get("OG_API_TOKEN")
 # private — the settings table also holds API keys.
 PUBLIC_SETTINGS = [
     "skip_cutoff_time", "skip_cutoff_applies_to", "late_requests_allowed",
-    "pause_max_days", "freeze_eligible_plans",
+    "pause_max_days",
     "delivery_promise_lunch", "delivery_promise_dinner",
     "fee_band_free_km", "fee_band_mid_km", "fee_band_far_km",
 ]

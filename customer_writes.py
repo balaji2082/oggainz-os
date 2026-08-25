@@ -75,7 +75,10 @@ WRITABLE_SETTINGS = {
     "skip_cutoff_applies_to",
     "late_requests_allowed",
     "pause_max_days",
-    "freeze_eligible_plans",
+    # `freeze_eligible_plans` was here. Removed 25 Aug 2026 with the switch to
+    # per-pack control: a setting that still appears editable but no longer
+    # changes anything is worse than one that is gone, because it invites
+    # Balaji to "fix" a customer's pausing by editing a value nothing reads.
 }
 
 # The words the interface uses. Kept here so the API and the app cannot drift
