@@ -46,6 +46,7 @@ from flask import jsonify, request
 
 import core
 import db
+import flexibility
 import menu
 import validity
 
@@ -237,6 +238,9 @@ def register(app):
                 "kind": ("skip" if p["start_date"] == p["end_date"] else "pause"),
             } for p in core.pauses_for(c, s["id"])]
             enforced = bool(s["enforce_validity"]) if "enforce_validity" in keys else False
+            # Resolved once, here, by the module that owns the rule — an explicit
+            # per-pack decision over the master switch (flexibility.py).
+            flexible = flexibility.effective_enabled(c, s)
             packs.append({
                 "id": s["id"],
                 "plan": s["plan_name"],
@@ -258,6 +262,13 @@ def register(app):
                 "expires_on": (_iso(s["expires_on"]) if enforced else None),
                 "validity_enforced": enforced,
                 "validity_days_left": (validity.days_left(c, s) if enforced else None),
+                # [LAW] docs/03 §1.4 — the app renders, it does not decide.
+                # The app used to re-derive "can this pack be paused?" from a
+                # comma-separated list of plan names it was handed, which is
+                # the app deciding a business rule with a copy of the data.
+                # The server answers the question instead, once, per pack.
+                "can_skip": flexible,
+                "can_pause": flexible,
                 "paused": pause is not None,
                 "paused_until": _iso(pause["end_date"]) if pause else None,
                 "pauses": windows,

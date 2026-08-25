@@ -63,6 +63,7 @@ from flask import jsonify, request
 
 import core
 import cutoff
+import flexibility
 import db
 import validity
 
@@ -378,6 +379,13 @@ def register(app):
                 return _fail(err, 409)
             if not core.is_operating_day(conn, day):
                 return _fail("the kitchen is closed that day — there is nothing to skip", 409)
+            # Skipping was never gated at all. It is now, by the same switch as
+            # pausing: they are one promise to a customer ("I can take a day
+            # off") and being able to turn one off but not the other is a state
+            # nobody could explain. Default is ON, so this refuses nobody who
+            # was not deliberately switched off.
+            if not flexibility.effective_enabled(conn, sub):
+                return _fail("skipping is switched off for this pack", 409)
 
             # Already skipped? Say so and succeed. A tap that arrived twice
             # because the connection dropped must not be treated as an error
@@ -498,8 +506,14 @@ def register(app):
             sub, err = _resolve_sub(conn, cid, start, data.get("subscription_id"))
             if err:
                 return _fail(err, 409)
-            if not cutoff.freeze_eligible(conn, sub["plan_name"]):
-                return _fail("this pack cannot be paused", 409)
+            # [LAW] Balaji, 25 Aug 2026 — decided per PACK, not per plan.
+            # `freeze_eligible_plans` could only ever say "Elite packs may
+            # pause"; it could never say "this customer may pause", which is
+            # the thing that actually varies. flexibility.py resolves one
+            # explicit per-pack decision over one master switch, the same shape
+            # as validity so there is only one model to learn.
+            if not flexibility.effective_enabled(conn, sub):
+                return _fail("pausing is switched off for this pack", 409)
 
             cap = cutoff.pause_max_days(conn)
             span = (datetime.strptime(end, "%Y-%m-%d")
@@ -770,6 +784,67 @@ def register(app):
             conn.close()
 
     # -- validity: the global switch and each pack's override ---------------
+    # -- skip / pause, per pack (flexibility.py) -----------------------------
+    #
+    # Deliberately the same three endpoints as validity below, in the same
+    # order, with the same field names. Balaji asked for this feature by
+    # pointing at that one — "likewise" — and two screens that do the same
+    # shape of thing should not need to be learned twice.
+    @app.route("/api/v1/admin/flex/settings", methods=["GET", "POST"])
+    def api_flex_global():
+        """The master skip/pause switch.
+
+        POST moves every pack that has never had an explicit decision made
+        about it (`flex_override IS NULL`); anything Balaji has already turned
+        on or off for one customer keeps that decision regardless.
+        """
+        conn = db.get_db()
+        try:
+            if request.method == "GET":
+                return jsonify({"ok": True, "enabled": flexibility.globally_enabled(conn)})
+            data = _body()
+            on = bool(data.get("enabled"))
+            affected = flexibility.set_globally_enabled(
+                conn, on, changed_by=data.get("by") or "Balaji")
+            return jsonify({"ok": True, "enabled": on, "packs_affected": affected})
+        finally:
+            conn.close()
+
+    @app.route("/api/v1/admin/flex")
+    def api_flex_summary():
+        """One row per live pack — the admin skip/pause screen's data source."""
+        conn = db.get_db()
+        try:
+            return jsonify({"ok": True, "subscriptions": flexibility.summary(conn)})
+        finally:
+            conn.close()
+
+    @app.route("/api/v1/admin/subscription/<sid>/flex", methods=["POST"])
+    def api_flex_override(sid):
+        """One pack's decision: on, off, or back to following the switch.
+
+        `override` is sent as the string "on"/"off", or null to clear it. An
+        absent key is NOT the same as null — clearing has to be deliberate, or
+        a client that forgot the field would silently undo his decision.
+        """
+        data = _body()
+        if "override" not in data:
+            return _fail("override must be 'on', 'off' or null", 400)
+        override = data.get("override")
+        if override not in ("on", "off", None):
+            return _fail("override must be 'on', 'off' or null", 400)
+        conn = db.get_db()
+        try:
+            row = conn.execute("SELECT id FROM subscriptions WHERE id=?", (sid,)).fetchone()
+            if not row:
+                return _fail("no such pack", 404)
+            enabled = flexibility.set_override(
+                conn, sid, override, changed_by=data.get("by") or "Balaji",
+                note=data.get("note"))
+            return jsonify({"ok": True, "enabled": enabled, "override": override})
+        finally:
+            conn.close()
+
     @app.route("/api/v1/admin/validity/settings", methods=["GET", "POST"])
     def api_validity_global():
         """The master switch (docs/05 §1.1 / validity.py).

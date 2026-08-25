@@ -672,7 +672,24 @@ MIGRATIONS = {
                       # until Balaji turns something on.
                       ("validity_override", "TEXT"),
                       ("validity_changed_at", "TEXT"),
-                      ("validity_changed_by", "TEXT")],
+                      ("validity_changed_by", "TEXT"),
+                      # --- added Aug 2026, Balaji's instruction (flexibility.py) ---
+                      # Whether THIS pack's customer may skip a day or pause a
+                      # stretch, built to the same shape as validity_override
+                      # above because he asked for it in those words: NULL =
+                      # follow the global switch, 'on' / 'off' = an explicit
+                      # decision for one customer that wins regardless of it.
+                      #
+                      # It replaces `freeze_eligible_plans`, which could only
+                      # ever say "Elite and Athlete may pause" — a rule about
+                      # PLANS when the thing he actually needed to control was
+                      # a PERSON. Default NULL resolves to the global switch,
+                      # which defaults ON, so every pack can skip and pause
+                      # until he decides otherwise.
+                      ("flex_override", "TEXT"),
+                      ("flex_note", "TEXT"),
+                      ("flex_changed_at", "TEXT"),
+                      ("flex_changed_by", "TEXT")],
     # The negotiated add-on rate. The catalog price is a starting suggestion, not
     # a constraint — Ashok pays ~₹49 per 50g of chicken where the catalog says
     # ₹60. Today that difference gets absorbed into the typed total and the
@@ -716,6 +733,11 @@ APP_SETTINGS_DEFAULTS = {
     # made in one WhatsApp conversation is never silently broken by a flag
     # flipped for everyone else).
     "validity_enforced_globally": "0",
+    # The master skip/pause switch (flexibility.py). ON, because skipping and
+    # pausing are the reason the customer app exists — a customer who cannot
+    # take a day off has no use for it. A pack whose flex_override is set keeps
+    # that explicit decision regardless of this switch.
+    "flex_enabled_globally": "1",
 }
 
 

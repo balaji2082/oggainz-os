@@ -682,15 +682,17 @@ function toast(msg, bad){
 }
 
 function optionsFor(field, db, category){
+  // Stays null on a read-only page (no API, or the fetch failed), so never index it raw.
+  const schema = EDIT.schema || {};
   if (field === 'subcategory'){
     const map = (D.pairs || {})[db] || {};
     if (category && map[category]) return map[category];
     if (category) return [];                       // category has no subcategories
-    return (EDIT.schema[db] || {})['Subcategory'] || [];
+    return (schema[db] || {})['Subcategory'] || [];
   }
   if (field === 'to_business') return ['Yes','No'];
   const prop = FIELD_PROP[field];
-  return prop ? ((EDIT.schema[db] || {})[prop] || []) : [];
+  return prop ? ((schema[db] || {})[prop] || []) : [];
 }
 
 /* ---- single-row drawer ---- */
@@ -877,6 +879,9 @@ function syncBulk(){
   const bar = $('#bulkbar');
   bar.classList.toggle('on', EDIT.on && sel.size > 0);
   $('#bulkn').textContent = sel.size + ' selected';
+  // Read-only: the bar is hidden and there is no schema to build its dropdowns from.
+  // Switching tabs calls this, so it must never be able to throw and skip the render.
+  if (!EDIT.on) return;
   syncBulkFields();
   syncBulkValues();
 }

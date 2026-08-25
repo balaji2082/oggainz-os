@@ -285,11 +285,17 @@ def _mobile_shell(html):
   <a href="/money?refresh=1" id="ogRefresh">&#8635; Refresh</a>
 </div>
 <script>
-  // The dashboard's own JS calls /api/... — on the server those live under /money.
+  // The dashboard's own JS calls its API with RELATIVE paths ('api/schema'), which
+  // the laptop server resolves correctly because it serves the page at /. Here the
+  // page is at /money, so the browser would resolve them to /api/... at the app root
+  // and 404 — which silently left the whole tab read-only. Rewrite both spellings.
   (function () {
     var f = window.fetch;
     window.fetch = function (u, o) {
-      if (typeof u === 'string' && u.indexOf('/api/') === 0) u = '/money' + u;
+      if (typeof u === 'string') {
+        if (u.indexOf('api/') === 0) u = '/money/' + u;
+        else if (u.indexOf('/api/') === 0) u = '/money' + u;
+      }
       return f(u, o);
     };
   })();

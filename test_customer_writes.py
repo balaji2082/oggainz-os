@@ -46,6 +46,7 @@ if os.path.abspath(db.DB_PATH) == os.path.abspath(LIVE_DB):
 import core                                                      # noqa: E402
 import cutoff                                                    # noqa: E402
 import app as A                                                  # noqa: E402
+import flexibility                                                # noqa: E402
 import customer_writes                                            # noqa: E402
 
 FAILS, N = [], 0
@@ -412,19 +413,33 @@ if len(days) >= 2:
 else:
     print("  .... skipped: not enough upcoming delivery days in this copy")
 
-# The gate itself: a plan that is not on the list cannot be paused, and is told
-# so plainly rather than appearing to work and quietly doing nothing.
-setting("freeze_eligible_plans", "Some Other Pack")
+# The gate itself: a pack that may not pause is refused, and is told so plainly
+# rather than appearing to work and quietly doing nothing.
+#
+# Balaji, 25 Aug 2026: this used to set `freeze_eligible_plans` to a plan name
+# that did not match, because eligibility was decided by PLAN. It is decided per
+# PACK now (flexibility.py) — he needed to switch it off for one customer, which
+# a list of plan names could never express. Same guarantee, asserted through the
+# control that actually exists.
+c = db.get_db()
+flexibility.set_override(c, SUB, "off", changed_by="test")
+c.close()
 r = post(f"/api/v1/customer/{CID}/pause",
          {"start": days[0], "end": days[-1], "subscription_id": SUB})
-check("[doc 01 §7.1] a plan that may not freeze is refused", r.status_code == 409, r.status_code)
+check("[doc 01 §7.1] a pack that may not pause is refused", r.status_code == 409, r.status_code)
 check("...with a legible reason",
-      "cannot be paused" in (r.get_json().get("error") or ""), r.get_json())
-# An empty setting must mean "everything is eligible", never "nothing is".
-setting("freeze_eligible_plans", "")
+      "switched off" in (r.get_json().get("error") or ""), r.get_json())
+# Skipping is gated by the same switch, because they are one promise.
+r = post(f"/api/v1/customer/{CID}/skip", {"date": days[0], "subscription_id": SUB})
+check("a pack that may not skip is refused too", r.status_code == 409, r.status_code)
+
+# Back to following the master switch, which defaults ON: the feature must not
+# be off for everyone just because nobody has decided anything yet.
 c = db.get_db()
-check("an empty eligibility list does not switch the feature off for everyone",
-      cutoff.freeze_eligible(c, PLAN))
+flexibility.set_override(c, SUB, None, changed_by="test")
+sub_row = c.execute("SELECT * FROM subscriptions WHERE id=?", (SUB,)).fetchone()
+check("an undecided pack may skip and pause by default",
+      flexibility.effective_enabled(c, sub_row))
 c.close()
 setting("freeze_eligible_plans", PLAN)
 
