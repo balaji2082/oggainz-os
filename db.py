@@ -507,7 +507,14 @@ CREATE TABLE IF NOT EXISTS subscription_day_plan (
     variant_id      INTEGER,                 -- NULL = the subscription's default box
     meals           INTEGER DEFAULT 1,       -- standing two-box days
     note            TEXT,
-    UNIQUE(subscription_id, weekday),
+    -- WHEN this generation of the plan started applying. NULL = since the pack
+    -- began. A schedule change files a new generation rather than overwriting,
+    -- so past days keep being read against the plan in force at the time.
+    effective_from  TEXT,
+    -- One row per weekday PER GENERATION. Without effective_from in this key a
+    -- pack could only ever hold one schedule, which is precisely how changing
+    -- Raziya's days invented orders three weeks into her history.
+    UNIQUE(subscription_id, weekday, effective_from),
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
 );
 
@@ -680,6 +687,18 @@ MIGRATIONS = {
     # Per-leg distances alongside the total, so the sheet can show both the
     # distance to each stop and the distance of each hop without a second call.
     "route_km_cache": [("legs", "TEXT")],
+    # WHEN a weekly schedule started applying. Without it the day plan was a single
+    # timeless list, so changing it rewrote history: Raziya moved from Mon/Wed/Fri
+    # to Mon/Tue/Thu and the backfill promptly invented Pending orders on Tuesdays
+    # and Thursdays three weeks back, on days she had never been due. Those phantom
+    # rows also ate her pack — planned + delivered count against the meals she
+    # bought — so a schedule edit could quietly shorten a pack.
+    #
+    # NULL means "since this pack began", which is exactly what every plan row
+    # written before this migration meant, so nothing existing changes. A schedule
+    # edit now files a NEW generation stamped with the date it takes effect, and
+    # past days keep being read against the plan that was actually in force then.
+    "subscription_day_plan": [("effective_from", "TEXT")],
     # slot: a schedule can apply to Lunch only, Dinner only, or both (NULL).
     # "lunch at home on Mon and Fri, office the rest, dinner always home" needs it.
     #
@@ -813,11 +832,68 @@ def migrate(conn):
         for name, decl in cols:
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+    _widen_day_plan_key(conn)
     # indexes that depend on migrated columns
     conn.execute("CREATE INDEX IF NOT EXISTS idx_deliveries_trial ON deliveries(trial_id)")
     conn.commit()
     backfill_addresses(conn)
     seed_app_settings(conn)
+
+
+def _widen_day_plan_key(conn):
+    """Let one subscription hold more than one generation of its weekly plan.
+
+    The original table said UNIQUE(subscription_id, weekday), which allowed a pack
+    exactly one schedule for its whole life. So changing Raziya's delivery days
+    from Mon/Wed/Fri to Mon/Tue/Thu did not record a change — it restated the past,
+    and the backfill duly created Pending orders on Tuesdays and Thursdays three
+    weeks earlier, on days she had never been due.
+
+    SQLite cannot drop a table-level constraint, so the table is rebuilt. Existing
+    rows carry effective_from NULL, which reads as "since this pack began" — the
+    same meaning they had before generations existed, so no schedule changes here.
+
+    Idempotent: does nothing once the key already includes effective_from.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' "
+        "AND name='subscription_day_plan'").fetchone()
+    if not row or not row["sql"]:
+        return                                   # fresh install: schema is correct
+    if "weekday, effective_from" in row["sql"].replace("  ", " "):
+        return                                   # already widened
+    if "UNIQUE(subscription_id, weekday)" not in row["sql"]:
+        return                                   # not the shape we know how to fix
+
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        conn.execute("""
+            CREATE TABLE subscription_day_plan__new (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                subscription_id TEXT NOT NULL,
+                weekday         INTEGER NOT NULL,
+                active          INTEGER DEFAULT 1,
+                slot            TEXT,
+                variant_id      INTEGER,
+                meals           INTEGER DEFAULT 1,
+                note            TEXT,
+                effective_from  TEXT,
+                UNIQUE(subscription_id, weekday, effective_from),
+                FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
+            )""")
+        conn.execute(
+            "INSERT INTO subscription_day_plan__new"
+            "(id,subscription_id,weekday,active,slot,variant_id,meals,note,effective_from) "
+            "SELECT id,subscription_id,weekday,active,slot,variant_id,meals,note,"
+            "       effective_from FROM subscription_day_plan")
+        conn.execute("DROP TABLE subscription_day_plan")
+        conn.execute("ALTER TABLE subscription_day_plan__new "
+                     "RENAME TO subscription_day_plan")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_dayplan_sub "
+                     "ON subscription_day_plan(subscription_id)")
+        conn.commit()
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
 
 
 def seed_app_settings(conn):

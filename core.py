@@ -296,21 +296,59 @@ def schedule_mode(sub):
     return mode if mode in ("daily", "weekly", "ondemand") else "daily"
 
 
-def day_plan_for(conn, sub_id):
-    """{weekday:int -> row} for a subscription. Empty when it has no plan."""
-    return {r["weekday"]: r for r in conn.execute(
-        "SELECT * FROM subscription_day_plan WHERE subscription_id=? ORDER BY weekday",
-        (sub_id,)).fetchall()}
+def day_plan_for(conn, sub_id, day_iso=None):
+    """{weekday:int -> row} for a subscription, as it stood ON day_iso.
 
+    A schedule is not timeless. Raziya delivered Mon/Wed/Fri through mid-August and
+    Mon/Tue/Thu after it, and both are true — of different weeks. So plan rows are
+    stored in generations stamped with the date they took effect, and reading one
+    means asking "which plan was in force that day", never "which plan is in force
+    now". Getting that wrong invents orders on days a customer was never due.
 
-def save_day_plan(conn, sub_id, rows):
-    """Replace a subscription's weekly plan.
-
-    rows = [{weekday, active, slot, variant_id, meals, note}]. Written as a whole
-    so the stored plan always matches the grid that was submitted — no orphan
-    weekday left behind from a previous save.
+    day_iso=None asks for the CURRENT plan, which is what the edit screen and the
+    one-line summary want.
     """
-    conn.execute("DELETE FROM subscription_day_plan WHERE subscription_id=?", (sub_id,))
+    rows = conn.execute(
+        "SELECT * FROM subscription_day_plan WHERE subscription_id=? ORDER BY weekday",
+        (sub_id,)).fetchall()
+    if not rows:
+        return {}
+    # NULL effective_from means "since this pack began" and so sorts before every
+    # real date — that is what every row written before generations existed meant.
+    gens = sorted({(r["effective_from"] or "") for r in rows})
+    if day_iso:
+        applicable = [g for g in gens if g <= day_iso]
+        # A date earlier than the first generation falls back to it: the pack's
+        # opening schedule is the best evidence of what those days looked like.
+        chosen = applicable[-1] if applicable else gens[0]
+    else:
+        chosen = gens[-1]
+    return {r["weekday"]: r for r in rows if (r["effective_from"] or "") == chosen}
+
+
+def save_day_plan(conn, sub_id, rows, effective_from=None):
+    """Store a subscription's weekly plan, taking effect on `effective_from`.
+
+    rows = [{weekday, active, slot, variant_id, meals, note}]. One generation is
+    written as a whole so the stored plan always matches the grid that was
+    submitted — no orphan weekday left behind from a previous save.
+
+    effective_from=None replaces the whole history, which is what a brand-new pack
+    or a renewal wants: there is no past to protect. A DATE files a new generation
+    from that day on and leaves earlier ones alone, so editing a schedule can never
+    reach back and change what a customer was due last week.
+    """
+    if effective_from:
+        # Re-saving the same day's edit corrects that generation rather than
+        # stacking a second one on the same date.
+        conn.execute("DELETE FROM subscription_day_plan WHERE subscription_id=? "
+                     "AND COALESCE(effective_from,'')=?", (sub_id, effective_from))
+        # A plan that starts today must not sit behind a generation dated later;
+        # that could only come from an edit that was itself post-dated.
+        conn.execute("DELETE FROM subscription_day_plan WHERE subscription_id=? "
+                     "AND COALESCE(effective_from,'')>?", (sub_id, effective_from))
+    else:
+        conn.execute("DELETE FROM subscription_day_plan WHERE subscription_id=?", (sub_id,))
     for r in rows:
         try:
             wd = int(r.get("weekday"))
@@ -319,11 +357,12 @@ def save_day_plan(conn, sub_id, rows):
         if not 0 <= wd <= 6:
             continue
         conn.execute(
-            "INSERT INTO subscription_day_plan(subscription_id,weekday,active,slot,variant_id,meals,note) "
-            "VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO subscription_day_plan(subscription_id,weekday,active,slot,"
+            "variant_id,meals,note,effective_from) VALUES(?,?,?,?,?,?,?,?)",
             (sub_id, wd, 1 if r.get("active") else 0, (r.get("slot") or None),
              (int(r["variant_id"]) if r.get("variant_id") else None),
-             max(1, int(r.get("meals") or 1)), (r.get("note") or "").strip() or None))
+             max(1, int(r.get("meals") or 1)), (r.get("note") or "").strip() or None,
+             effective_from or None))
     conn.commit()
 
 
@@ -345,7 +384,8 @@ def plan_for_day(conn, sub, day_iso):
         return {"deliver": True, "slot": base_slot, "variant_id": None, "meals": 1}
 
     weekday = datetime.strptime(day_iso, "%Y-%m-%d").date().weekday()
-    row = day_plan_for(conn, sub["id"]).get(weekday)
+    # The plan AS IT WAS on this date, never today's plan — see day_plan_for.
+    row = day_plan_for(conn, sub["id"], day_iso).get(weekday)
     if row is None:
         # 'weekly' with no row for this weekday = no delivery. A plan that only
         # ticks Mon/Wed/Fri stores only those three days, so a missing row is a

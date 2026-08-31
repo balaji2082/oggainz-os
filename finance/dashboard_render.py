@@ -308,6 +308,36 @@ tr:hover .editcue { opacity:1; }
 .note { background:var(--surface); border:1px dashed var(--axis); border-radius:12px;
   padding:14px 16px; color:var(--ink2); font-size:13px; margin-bottom:14px; }
 .note b { color:var(--ink); }
+/* ---------- the simple front page ---------- */
+.simple { background:var(--surface); border:1px solid var(--border); border-radius:16px;
+  padding:22px 22px 20px; box-shadow:var(--shadow); margin-bottom:14px; }
+.simple .head { font-size:13px; color:var(--muted); margin-bottom:2px; }
+.simple .hero { font-size:clamp(38px,9vw,60px); font-weight:700; letter-spacing:-.03em;
+  line-height:1.02; margin:2px 0 4px; }
+.simple .herosub { font-size:14.5px; color:var(--ink2); margin-bottom:20px; }
+.simple .rows { display:flex; flex-direction:column; gap:0; margin-bottom:6px; }
+.srow { display:flex; align-items:baseline; gap:12px; padding:13px 0;
+  border-bottom:1px solid var(--grid); }
+.srow:last-child { border-bottom:0; }
+.srow .k { font-size:14.5px; color:var(--ink2); }
+.srow .v { margin-left:auto; font-size:20px; font-weight:650; white-space:nowrap;
+  font-variant-numeric:tabular-nums; }
+.srow .k small { display:block; font-size:12px; color:var(--muted); font-weight:400;
+  margin-top:2px; }
+.srow.total { border-top:1.5px solid var(--axis); border-bottom:0; margin-top:2px; }
+.srow.total .k { font-weight:650; color:var(--ink); font-size:15.5px; }
+.srow.total .v { font-size:26px; }
+.aside { margin-top:16px; padding:14px 16px; border-radius:12px; background:var(--plane);
+  font-size:13.5px; color:var(--ink2); line-height:1.5; }
+.aside + .aside { margin-top:9px; }
+.aside b { color:var(--ink); }
+.aside.warn { border-left:3px solid var(--s3); }
+.more { margin-top:18px; width:100%; padding:13px 16px; border-radius:11px;
+  border:1px solid var(--border); background:var(--plane); color:var(--ink);
+  font:inherit; font-size:14.5px; font-weight:600; cursor:pointer; }
+.more:hover { background:var(--raise); }
+.backsimple { margin-bottom:14px; }
+
 /* ---------- money control: month bar ---------- */
 .monthbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
 .monthbar select { font:inherit; font-size:14px; font-weight:650; color:var(--ink);
@@ -410,7 +440,12 @@ const slotColor = ct => cssv(SLOT[ct] || '--s2');
 
 const state = { view:'business', range:'month', cat:'', sub:'', biz:'', q:'',
                 payer:'', bucket:'', sort:'date', dir:-1,
-                month: D.currentMonth, basis:'earned' };
+                month: D.currentMonth, basis:'earned',
+                // Opens plain. The full breakdown is one tap away and the choice
+                // is remembered, so the page never greets him with a wall of
+                // numbers he did not ask for.
+                detail:(function(){ try { return localStorage.getItem('ogfin-detail') === '1'; }
+                                    catch (e) { return false; } })() };
 
 /* Filters that belong to the row list, not to the month P&L. Cleared together
    whenever the tab changes so a filter can never survive into a tab where its
@@ -1821,11 +1856,121 @@ function renderHealth(s){
   }
 }
 
+/* ---------- the simple front page ----------
+   One question, answered in words he would use himself: did this month make
+   money, and what should he do about it. Everything that needs a second look
+   lives behind the button at the bottom. */
+function renderSimple(){
+  const box = $('#simple');
+  box.textContent = '';
+  const add = (el, cls, txt) => { const d = document.createElement(cls === 'b' ? 'b' : 'div');
+    if (cls && cls !== 'b') d.className = cls; if (txt) d.textContent = txt;
+    el.appendChild(d); return d; };
+
+  if (state.view !== 'business'){
+    const rows = rowsFor(state.view).filter(r => inRange(r.date));
+    const total = rows.reduce((a, r) => a + r.amount, 0);
+    add(box, 'head', labelFor() + ' · ' + rangeLabel());
+    add(box, 'hero', money(total));
+    add(box, 'herosub', rows.length + ' entries');
+    const list = add(box, 'rows');
+    for (const [name, amt] of sumBy(rows, 'category').slice(0, 5)){
+      const r = add(list, 'srow');
+      add(r, 'k', name);
+      add(r, 'v', money(amt));
+    }
+    moreButton(box, 'Show every entry and the charts');
+    return;
+  }
+
+  const s = sumNow();
+  if (!s){ add(box, 'herosub', 'No data for this month yet.'); return; }
+  const inc = incomeFor(s);
+  const profit = inc.v - s.cogs - s.opex;
+
+  add(box, 'head', 'OG Gainz · ' + s.month);
+  const hero = add(box, 'hero', (profit >= 0 ? '' : '−') + money(Math.abs(profit)));
+  hero.classList.add(profit >= 0 ? 'pos' : 'neg');
+  add(box, 'herosub', profit >= 0
+      ? 'is what the business made this month, after everything it costs to run.'
+      : 'is what the business lost this month.');
+
+  const list = add(box, 'rows');
+  const line = (k, sub, v) => {
+    const r = add(list, 'srow');
+    const kk = add(r, 'k', k);
+    if (sub){ const sm = document.createElement('small'); sm.textContent = sub;
+      kk.appendChild(sm); }
+    add(r, 'v', v);
+    return r;
+  };
+  line('Money in', s.meals + ' meals delivered, plus fees and trials', money(inc.v));
+  line('Cost to run the kitchen', 'ingredients, delivery, staff, subscriptions',
+       '− ' + money(s.cogs + s.opex));
+  const t = line('Made this month', '', (profit >= 0 ? '' : '−') + money(Math.abs(profit)));
+  t.classList.add('total');
+
+  if (s.capex_cash){
+    const a = add(box, 'aside');
+    a.appendChild(document.createTextNode('You also spent '));
+    add(a, 'b', money(s.capex_cash));
+    a.appendChild(document.createTextNode(
+      ' on equipment this month — the oven, the drum, the work table. That is not '
+      + 'a running cost, it is yours now, so it is left out of the number above.'));
+  }
+  if (s.outstanding){
+    const a = add(box, 'aside');
+    add(a, 'b', money(s.outstanding));
+    a.appendChild(document.createTextNode(
+      ' is still to be collected from customers. That is the money worth chasing.'));
+  }
+  if (s.out_of_pocket){
+    const a = add(box, 'aside');
+    add(a, 'b', money(s.out_of_pocket));
+    a.appendChild(document.createTextNode(' of this month\u2019s spending came out of your own pocket'
+      + (s.fronted_by_family ? ', and ' + money(s.fronted_by_family)
+         + ' was fronted by Appa and Abishek.' : '.')));
+  }
+  const cc = s.cost_check;
+  if (cc && cc.material && cc.direction === 'under'){
+    const a = add(box, 'aside warn');
+    a.appendChild(document.createTextNode('Careful: the food cost looks too low for '
+      + cc.meals + ' meals. Around '));
+    add(a, 'b', money(Math.abs(cc.gap)));
+    a.appendChild(document.createTextNode(
+      ' of buying probably never got logged, so the figure above is likely '
+      + 'better than the truth.'));
+  }
+  moreButton(box, 'Show me the full breakdown');
+}
+
+function moreButton(box, label){
+  const b = document.createElement('button');
+  b.className = 'more'; b.type = 'button'; b.textContent = label;
+  b.addEventListener('click', () => setDetail(true));
+  box.appendChild(b);
+}
+
+function setDetail(on){
+  state.detail = on;
+  try { localStorage.setItem('ogfin-detail', on ? '1' : '0'); } catch (e) {}
+  render();
+  // Guarded for the same reason scrollToTable is: a scroll that fails must never
+  // take the rest of the handler down with it.
+  if (!on){
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }); }
+    catch (e) { try { window.scrollTo(0, 0); } catch (e2) {} }
+  }
+}
+
 function renderMoney(){
   const on = state.view === 'business';
-  for (const id of ['#monthbar','#three','#cardPnl','#cardRecon','#cardPayer',
+  for (const id of ['#three','#cardPnl','#cardRecon','#cardPayer',
                     '#cardDelivery','#cardMeal','#cardHealth'])
     $(id).style.display = on ? '' : 'none';
+  $('#monthbar').style.display = '';
+  $('#basis').style.display = on ? '' : 'none';
+  $('#fmonth').style.display = on ? '' : 'none';
   if (!on) return;
   const s = sumNow();
   if (!s){ for (const id of ['#three','#cardPnl','#cardRecon','#cardPayer',
@@ -1841,6 +1986,11 @@ function renderMoney(){
 /* ---------------- render ---------------- */
 function render(){
   refreshOptions();
+  renderSimple();
+  $('#detail').hidden = !state.detail;
+  $('#simple').hidden = state.detail;
+  $('#tosimple').style.display = state.detail ? '' : 'none';
+  if (!state.detail) return;      // nothing below is on screen; don't draw it
   renderMoney();
   let rows = filtered();
   if (HFOCUS) rows = rows.filter(r => HFOCUS.has(r.id));
@@ -1923,6 +2073,7 @@ $('#fmonth').addEventListener('change', e => { state.month = e.target.value; ren
 document.querySelectorAll('#basis button').forEach(b => {
   b.addEventListener('click', () => { state.basis = b.dataset.basis; render(); });
 });
+$('#tosimple').addEventListener('click', () => setDetail(false));
 $('#theme').addEventListener('click', () => {
   const cur = document.documentElement.getAttribute('data-theme');
   const next = cur === 'dark' ? 'light' : cur === 'light' ? 'dark'
@@ -2125,12 +2276,18 @@ def render_dashboard(monthly, expenses, personal, dad, cur, dad_status=None,
 
   <div class="monthbar" id="monthbar">
     <select id="fmonth" aria-label="Which month">{month_opts}</select>
+    <button class="iconbtn backsimple" id="tosimple" type="button"
+            style="display:none">&larr; Simple view</button>
     <div class="seg" id="basis" role="group" aria-label="How income is counted">
       <button type="button" data-basis="earned" aria-pressed="true">Earned</button>
       <button type="button" data-basis="billed" aria-pressed="false">Billed</button>
       <button type="button" data-basis="cash" aria-pressed="false">Cash in</button>
     </div>
   </div>
+
+  <div class="simple" id="simple"></div>
+
+  <div id="detail">
 
   <div class="three" id="three"></div>
 
@@ -2252,6 +2409,8 @@ def render_dashboard(monthly, expenses, personal, dad, cur, dad_status=None,
     <p class="hint" id="tblhint">Sortable. Everything the charts show is readable here too.</p>
     <div class="tblwrap scroll" id="tbl"></div>
   </div>
+
+  </div><!-- /detail -->
 
 </div>
 

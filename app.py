@@ -530,7 +530,16 @@ def _save_schedule_from_form(c, sid, f, vmap=None):
                          "variant_id": vid,
                          "meals": f.get(f"day_meals_{wd}") or 1,
                          "note": f.get(f"day_note_{wd}") or None})
-        core.save_day_plan(c, sid, rows)
+        # A schedule change takes effect TODAY and never reaches backwards. A pack
+        # that has already delivered or skipped something has a history to protect;
+        # one that hasn't has nothing behind it, so its plan simply applies from the
+        # start. Without this the new days were treated as always having been true,
+        # and the backfill generated orders on days the customer was never due.
+        settled = c.execute(
+            "SELECT 1 FROM deliveries WHERE subscription_id=? "
+            "AND status IN ('Delivered','Skipped') LIMIT 1", (sid,)).fetchone()
+        core.save_day_plan(c, sid, rows,
+                           effective_from=core._today_iso() if settled else None)
     else:
         # daily and ondemand don't read the weekday grid; clear it so a later
         # switch back to weekly starts from a clean, visible state.
@@ -583,11 +592,14 @@ def _copy_pack_setup(c, from_sid, to_sid, skip_composition=False):
         c.execute("UPDATE subscriptions SET schedule_mode=? WHERE id=?",
                   (old["schedule_mode"], to_sid))
     c.execute("DELETE FROM subscription_day_plan WHERE subscription_id=?", (to_sid,))
-    for d in c.execute("SELECT * FROM subscription_day_plan WHERE subscription_id=?",
-                       (from_sid,)).fetchall():
+    # Only the CURRENT generation travels, and it lands with no effective_from: the
+    # renewal is a fresh pack, so its schedule applies to the whole of its own life.
+    # Copying the old pack's generation dates would date its plan to days before it
+    # existed.
+    for d in core.day_plan_for(c, from_sid).values():
         c.execute(
-            "INSERT INTO subscription_day_plan(subscription_id,weekday,active,slot,variant_id,meals,note) "
-            "VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO subscription_day_plan(subscription_id,weekday,active,slot,"
+            "variant_id,meals,note,effective_from) VALUES(?,?,?,?,?,?,?,NULL)",
             (to_sid, d["weekday"], d["active"], d["slot"], vmap.get(d["variant_id"]),
              d["meals"], d["note"]))
 
