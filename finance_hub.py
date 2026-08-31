@@ -244,12 +244,28 @@ def _build():
     if not monthly:
         raise ValueError("No finance data to build from yet.")
 
+    # Same money model the laptop build runs. Without it the page renders with
+    # empty summaries: no P&L, no payer split, no health panel — and rows with no
+    # payer or cost type, so those filters would be dead. See model.py.
+    import model
+    model.enrich(expenses)
+    appa_extra, appa_mirrored = model.merge_appa(expenses, dad)
+    all_rows = expenses + appa_extra
+
     # Feature the latest month with REAL activity — same rule as the laptop build,
     # so both front doors open on the same month.
     real = [m for m in monthly if m["total_revenue"] or m["cash_out"] or m["delivered"]]
     cur = real[-1]["month"] if real else monthly[-1]["month"]
 
-    html = dr.render_dashboard(monthly, expenses, personal, dad, cur, dad_status)
+    rev_by_month = {m["month"]: m for m in monthly}
+    months = model.all_months(all_rows) or [m["month"] for m in monthly]
+    if cur not in months:
+        months = months + [cur]
+    summaries = {m: model.month_summary(all_rows, m, rev_by_month.get(m)) for m in months}
+    health = {m: model.health(expenses, dad, appa_extra, appa_mirrored, m) for m in months}
+
+    html = dr.render_dashboard(monthly, all_rows, personal, dad, cur, dad_status,
+                               summaries=summaries, health=health, months=months)
     return _mobile_shell(html)
 
 

@@ -36,6 +36,7 @@ from datetime import datetime
 
 # Works whether this file is run as a script or imported from the app root.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import model  # noqa: E402
 from dashboard_render import render_dashboard  # noqa: E402
 
 # ---------------------------------------------------------------- paths / config
@@ -985,6 +986,30 @@ def main():
     dad = shape_shared(dad_rows)
     monthly = build_monthly(rev, cash, true_cost, delivery, personal_m)
 
+    # ---- money model -------------------------------------------------------
+    # Decides what each rupee MEANS: cash out vs what the month cost vs what was
+    # invested. Appa's kitchen buys that never got mirrored into the business
+    # book are folded in here, and the ones that WERE mirrored are matched and
+    # counted once. See model.py.
+    model.enrich(expenses)
+    appa_extra, appa_mirrored = model.merge_appa(expenses, dad)
+    all_rows = expenses + appa_extra
+    if appa_extra:
+        # "Rs" not the rupee glyph: this console is cp1252 and would crash on it.
+        print(f"    + {len(appa_extra)} of appa's kitchen rows folded in "
+              f"(Rs {round(sum(r['amount'] for r in appa_extra)):,})")
+    if appa_mirrored:
+        print(f"    · {len(appa_mirrored)} rows on both sheets — counted once")
+
+    rev_by_month = {m["month"]: m for m in monthly}
+    model_months = model.all_months(all_rows) or [m["month"] for m in monthly]
+    summaries, health = {}, {}
+    for m in model_months:
+        summaries[m] = model.month_summary(all_rows, m, rev_by_month.get(m))
+        health[m] = model.health(expenses, dad, appa_extra, appa_mirrored, m)
+        if not summaries[m]["reconcile"]["balances"]:
+            print(f"    ! {m}: cash-to-cost reconciliation does not balance")
+
     if not monthly:
         raise SystemExit("  No data to build from.")
 
@@ -997,16 +1022,24 @@ def main():
     real = [m for m in monthly
             if m["total_revenue"] or m["cash_out"] or m["delivered"]]
     cur = real[-1]["month"] if real else today
+    if cur not in model_months:
+        model_months = model_months + [cur]
+        summaries[cur] = model.month_summary(all_rows, cur, rev_by_month.get(cur))
+        health[cur] = model.health(expenses, dad, appa_extra, appa_mirrored, cur)
 
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(os.path.join(DATA_DIR, "finance.json"), "w", encoding="utf-8") as f:
         json.dump({"generated": datetime.now().isoformat(), "monthly": monthly,
-                   "expenses": expenses, "personal": personal, "dad": dad},
+                   "expenses": expenses, "personal": personal, "dad": dad,
+                   "appa_extra": appa_extra, "summaries": summaries,
+                   "health": health},
                   f, indent=1, default=str)
 
     print("  Building dashboard ...")
     with open(OUT_HTML, "w", encoding="utf-8") as f:
-        f.write(render_dashboard(monthly, expenses, personal, dad, cur, dad_status))
+        f.write(render_dashboard(monthly, all_rows, personal, dad, cur, dad_status,
+                                 summaries=summaries, health=health,
+                                 months=model_months))
 
     print("  Building Excel ...")
     ok = write_excel(monthly, expenses, personal, OUT_XLSX)

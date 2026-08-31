@@ -24,6 +24,9 @@ import os
 from datetime import datetime
 
 
+import model
+
+
 def load_pairs():
     """Category -> subcategory map, from data/pairs.json when it exists.
 
@@ -305,12 +308,92 @@ tr:hover .editcue { opacity:1; }
 .note { background:var(--surface); border:1px dashed var(--axis); border-radius:12px;
   padding:14px 16px; color:var(--ink2); font-size:13px; margin-bottom:14px; }
 .note b { color:var(--ink); }
+/* ---------- money control: month bar ---------- */
+.monthbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+.monthbar select { font:inherit; font-size:14px; font-weight:650; color:var(--ink);
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  padding:9px 12px; }
+.seg { display:inline-flex; background:var(--surface); border:1px solid var(--border);
+  border-radius:10px; padding:3px; gap:2px; }
+.seg button { border:0; background:transparent; color:var(--ink2); font:inherit;
+  font-size:12.5px; font-weight:600; padding:6px 12px; border-radius:8px; cursor:pointer; }
+.seg button[aria-pressed="true"] { background:var(--brand); color:var(--surface); }
+
+/* ---------- the three-number strip ---------- */
+.three { display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:12px;
+  margin-bottom:14px; }
+.three .box { background:var(--surface); border:1px solid var(--border); border-radius:14px;
+  padding:15px 16px; box-shadow:var(--shadow); border-top:3px solid var(--axis); }
+.three .box.a { border-top-color:var(--s3); }
+.three .box.b { border-top-color:var(--s1); }
+.three .box.c { border-top-color:var(--s2); }
+.three .q { font-size:12px; color:var(--muted); margin-bottom:6px; }
+.three .n { font-size:30px; font-weight:650; letter-spacing:-.02em; line-height:1.1; }
+.three .d { font-size:12px; color:var(--ink2); margin-top:6px; }
+
+/* ---------- P&L ladder ---------- */
+.pnl { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+.pnl td { padding:9px 4px; border-bottom:1px solid var(--grid); vertical-align:baseline; }
+.pnl td.v { text-align:right; font-weight:600; white-space:nowrap; }
+.pnl td.n { font-size:12px; color:var(--muted); text-align:right; white-space:nowrap;
+  width:1%; padding-left:14px; }
+.pnl tr.sum td { border-top:1.5px solid var(--axis); border-bottom:0; font-weight:700; }
+.pnl tr.sum td.v { font-size:19px; }
+.pnl tr.big td { border-bottom:0; padding-top:14px; }
+.pnl tr.big td.v { font-size:26px; letter-spacing:-.02em; }
+.pnl tr.minor td { color:var(--ink2); }
+.pnl .lbl b { font-weight:650; }
+.pnl .sub { display:block; font-size:11.5px; color:var(--muted); font-weight:400; }
+.pos { color:var(--good); } .neg { color:var(--bad); }
+
+/* ---------- payer split ---------- */
+.payers { display:flex; flex-direction:column; gap:9px; }
+.payer { display:grid; grid-template-columns:minmax(96px,132px) 1fr auto; gap:10px;
+  align-items:center; font-size:13px; }
+.payer .nm { color:var(--ink2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.payer .track { background:var(--grid); border-radius:5px; height:15px; overflow:hidden; }
+.payer .fillbar { height:100%; border-radius:5px; }
+.payer .amt { font-variant-numeric:tabular-nums; font-weight:650; white-space:nowrap; }
+.payer.click { cursor:pointer; }
+.payer.click:hover .nm { color:var(--ink); }
+.payer.on .nm { color:var(--ink); font-weight:650; }
+.owed { margin-top:14px; padding-top:13px; border-top:1px solid var(--grid);
+  font-size:13px; color:var(--ink2); }
+.owed b { color:var(--ink); font-size:17px; font-weight:700; }
+
+/* ---------- fact rows ---------- */
+.facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); gap:2px 18px; }
+.fact { padding:9px 0; border-bottom:1px solid var(--grid); }
+.fact .k { font-size:11.5px; color:var(--muted); }
+.fact .v { font-size:19px; font-weight:650; letter-spacing:-.01em; }
+.fact .h { font-size:11.5px; color:var(--ink2); margin-top:1px; }
+
+/* ---------- data health ---------- */
+.hbar { height:9px; border-radius:5px; background:var(--grid); overflow:hidden;
+  display:flex; margin:4px 0 14px; }
+.hbar i { display:block; height:100%; }
+.issue { display:grid; grid-template-columns:auto 1fr auto; gap:11px; align-items:start;
+  padding:11px 0; border-bottom:1px solid var(--grid); font-size:13px; }
+.issue:last-child { border-bottom:0; }
+.issue .dot { width:9px; height:9px; border-radius:50%; margin-top:5px; flex:0 0 auto; }
+.issue .dot.warn { background:var(--s3); }
+.issue .dot.info { background:var(--s2); }
+.issue .t { font-weight:650; }
+.issue .w { color:var(--muted); font-size:12px; margin-top:2px; }
+.issue .f { color:var(--ink2); font-size:12px; margin-top:3px; }
+.issue .amt { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.issue .amt b { display:block; font-weight:650; }
+.issue .amt span { font-size:11.5px; color:var(--muted); }
+
 @media (max-width:640px) {
   .wrap { padding:14px 12px 56px; }
   .kpi.hero .val { font-size:34px; }
   .card { padding:14px 13px 16px; }
+  .three .n { font-size:25px; }
+  .pnl tr.big td.v { font-size:22px; }
+  .payer { grid-template-columns:minmax(78px,102px) 1fr auto; font-size:12.5px; }
 }
-@media print { .filters, .views, .iconbtn { display:none; } .card { break-inside:avoid; } }
+@media print { .filters, .views, .iconbtn, .seg { display:none; } .card { break-inside:avoid; } }
 """
 
 
@@ -326,7 +409,23 @@ const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n)
 const slotColor = ct => cssv(SLOT[ct] || '--s2');
 
 const state = { view:'business', range:'month', cat:'', sub:'', biz:'', q:'',
-                sort:'date', dir:-1 };
+                payer:'', bucket:'', sort:'date', dir:-1,
+                month: D.currentMonth, basis:'earned' };
+
+/* Filters that belong to the row list, not to the month P&L. Cleared together
+   whenever the tab changes so a filter can never survive into a tab where its
+   control is invisible - that was the "switch tabs, see nothing, hit reset" bug. */
+const ROW_FILTERS = ['cat','sub','biz','q','payer','bucket'];
+/* Rows pulled up by a "show these entries" button in the health panel. Kept
+   apart from the dropdown filters but cleared with them, so it can never
+   silently narrow the table either. */
+let HFOCUS = null;
+function clearRowFilters(){
+  for (const k of ROW_FILTERS) state[k] = '';
+  HFOCUS = null;
+  const q = $('#fq'); if (q) q.value = '';
+  const b = $('#fbiz'); if (b) b.value = '';
+}
 
 /* ---------------- data helpers ---------------- */
 function rowsFor(v){ return (D.data[v] || []).filter(r => r.date); }
@@ -348,6 +447,8 @@ function filtered(){
     if (state.sub && (r.subcategory || '') !== state.sub) return false;
     if (state.biz === 'yes' && r.to_business !== true) return false;
     if (state.biz === 'no' && r.to_business === true) return false;
+    if (state.payer && (r.payer || '') !== state.payer) return false;
+    if (state.bucket && (r.bucket || '') !== state.bucket) return false;
     if (q) {
       const hay = [r.what, r.category, r.subcategory, r.vendor, r.notes, r.payment]
         .filter(Boolean).join(' ').toLowerCase();
@@ -832,6 +933,29 @@ async function saveEditor(){
   }
 }
 
+/* The model's derived fields, recomputed in the browser.
+
+   model.py owns the real logic; this mirrors just enough of it that an edit shows
+   up immediately instead of waiting for the next rebuild. The maps come from the
+   server in the payload so the two can't drift apart. */
+function deriveRow(row){
+  if (row.db !== 'business') return row;
+  const cat = row.category || '';
+  let bucket = row.cost_type || cat.split(' · ')[0] || 'OPEX';
+  const hay = ((row.what || '') + ' ' + (row.notes || '')).toLowerCase();
+  if ((bucket === 'OPEX' || bucket === 'COGS')
+      && ((D.financingCategories || []).includes(cat)
+          || (D.financingWords || []).some(w => hay.includes(w)))) bucket = 'FINANCING';
+  if (!['COGS','OPEX','CAPEX','DRAW','FINANCING'].includes(bucket)) bucket = 'OPEX';
+  row.bucket = bucket;
+  const p = (row.paid_from || '').trim();
+  row.payer = p ? ((D.payerMap || {})[p.toLowerCase()] || p) : 'Not set';
+  const sp = Number(row.spread) > 1 ? Number(row.spread) : 1;
+  row.spread_months = sp;
+  row.monthly_cost = Math.round(((row.amount || 0) / sp) * 100) / 100;
+  return row;
+}
+
 /* Mirror the write locally so the page reflects reality without a full rebuild. */
 function applyLocal(row, changes){
   Object.assign(row, changes);
@@ -839,6 +963,7 @@ function applyLocal(row, changes){
     row.cost_type = (row.category || '').split(' · ')[0] || row.cost_type;
   }
   if ('amount' in changes) row.amount = Number(row.amount) || 0;
+  deriveRow(row);
 }
 
 async function archiveRows(ids){
@@ -1133,7 +1258,13 @@ async function refreshAfterListChange(){
   await loadLists();
   try {
     const fresh = await api('api/rows');
-    if (fresh && fresh.data) { D.data = fresh.data; render(); }
+    if (fresh && fresh.data) {
+      // This endpoint returns rows straight from Notion, without the model's
+      // derived fields. Re-derive or the payer column and filter go blank.
+      (fresh.data.business || []).forEach(deriveRow);
+      D.data = fresh.data;
+      render();
+    }
   } catch (e) { /* rows endpoint optional — charts refresh on next rebuild */ }
 }
 
@@ -1151,9 +1282,14 @@ function renderTable(rows){
       f:r => r.to_business === true ? 'Yes' : r.to_business === false ? 'No' : '—' });
   } else {
     cols.push({ k:'subcategory', t:'Sub', f:r => r.subcategory || '—' });
-    cols.push(state.view === 'business'
-      ? { k:'vendor', t:'Vendor', f:r => r.vendor || '—' }
-      : { k:'payment', t:'Paid by', f:r => r.payment || '—' });
+    if (state.view === 'business'){
+      cols.push({ k:'payer', t:'Paid by', f:r => r.payer || '—' });
+      cols.push({ k:'vendor', t:'Vendor', f:r => r.vendor || '—' });
+      cols.push({ k:'monthly_cost', t:'Cost / mo', num:true,
+        f:r => (r.spread_months > 1 ? money(r.monthly_cost) : '—') });
+    } else {
+      cols.push({ k:'payment', t:'Paid by', f:r => r.payment || '—' });
+    }
   }
   cols.push({ k:'amount', t:'Amount', f:r => money(r.amount), num:true });
   const t = document.createElement('table');
@@ -1164,9 +1300,14 @@ function renderTable(rows){
     const all = document.createElement('input');
     all.type = 'checkbox';
     all.setAttribute('aria-label', 'Select every visible row');
-    all.checked = rows.length > 0 && rows.every(r => sel.has(r.id));
+    // Bulk edits post one db for the whole selection, so only rows that really
+    // live in this tab's database may be selected. Appa's rows folded into the
+    // OG Gainz view are his - a bulk write would aim them at the wrong database.
+    const bulkable = rows.filter(r => r.db === state.view);
+    all.checked = bulkable.length > 0 && bulkable.every(r => sel.has(r.id));
+    all.disabled = bulkable.length === 0;
     all.addEventListener('change', () => {
-      rows.forEach(r => all.checked ? sel.add(r.id) : sel.delete(r.id));
+      bulkable.forEach(r => all.checked ? sel.add(r.id) : sel.delete(r.id));
       syncBulk(); renderTable(rows);
     });
     th.appendChild(all); hr.appendChild(th);
@@ -1203,6 +1344,10 @@ function renderTable(rows){
       const cb = document.createElement('input');
       cb.type = 'checkbox'; cb.checked = sel.has(r.id);
       cb.setAttribute('aria-label', 'Select ' + (r.what || 'row'));
+      if (r.db !== state.view){
+        cb.disabled = true;
+        cb.title = 'On Appa’s sheet — open it to edit, or use the Appa tab';
+      }
       cb.addEventListener('click', ev => ev.stopPropagation());
       cb.addEventListener('change', () => {
         cb.checked ? sel.add(r.id) : sel.delete(r.id);
@@ -1308,12 +1453,17 @@ function rangeLabel(){
 function refreshOptions(){
   const base = rowsFor(state.view).filter(r => inRange(r.date));
   fill($('#fcat'), [...new Set(base.map(r => r.category).filter(Boolean))].sort(),
-       state.cat, 'All categories');
+       state.cat, 'All categories', 'cat');
   const subBase = state.cat ? base.filter(r => r.category === state.cat) : base;
   fill($('#fsub'), [...new Set(subBase.map(r => r.subcategory).filter(Boolean))].sort(),
-       state.sub, 'All subcategories');
+       state.sub, 'All subcategories', 'sub');
+  const payers = [...new Set(base.map(r => r.payer).filter(Boolean))]
+    .sort((a,b) => (D.payerOrder.indexOf(a) + 99) % 99 - (D.payerOrder.indexOf(b) + 99) % 99);
+  fill($('#fpayer'), payers, state.payer, 'Anyone paid', 'payer');
+  fill($('#fbucket'), D.bucketOrder.filter(b => base.some(r => r.bucket === b)),
+       state.bucket, 'All cost types', 'bucket');
 }
-function fill(sel, values, current, allLabel){
+function fill(sel, values, current, allLabel, key){
   sel.textContent = '';
   const o0 = document.createElement('option'); o0.value = ''; o0.textContent = allLabel;
   sel.appendChild(o0);
@@ -1323,13 +1473,377 @@ function fill(sel, values, current, allLabel){
     if (v === current){ o.selected = true; found = true; }
     sel.appendChild(o);
   }
-  if (!found && current){ sel.value = ''; }
+  // The chosen value no longer exists in this tab or date range. Blanking only the
+  // dropdown used to leave state.<key> still filtering - an invisible filter that
+  // emptied the table with no way to see why. Drop the state with it.
+  if (!found && current){ sel.value = ''; if (key) state[key] = ''; }
+}
+
+
+/* =================================================================
+   MONEY CONTROL
+   The panels above the filter row answer three different questions that
+   were previously mashed into one "total spend" number:
+     what left my pockets  /  what the month really cost  /  what I still own
+   They are scoped to ONE MONTH, deliberately. "Operating profit for the last
+   7 days" is not a thing, so these never listen to the row filters below.
+   ================================================================= */
+
+function scrollToTable(){
+  const t = $('#tbl');
+  // Guarded: not every mobile browser ships scrollIntoView options, and a
+  // failed scroll must never take the click handler down with it.
+  if (t && typeof t.scrollIntoView === 'function'){
+    try { t.scrollIntoView({ behavior:'smooth', block:'start' }); }
+    catch (e) { t.scrollIntoView(); }
+  }
+}
+
+function sumNow(){ return (D.summaries || {})[state.month] || null; }
+function pct(n){ return (n === null || n === undefined) ? '—' : Math.round(n) + '%'; }
+function signed(n){ return (n < 0 ? '−' : '') + money(Math.abs(n)); }
+
+function incomeFor(s){
+  if (state.basis === 'billed') return { v: s.billed_revenue,
+    note: 'what you invoiced in ' + s.month + ', whenever it gets delivered' };
+  if (state.basis === 'cash')   return { v: s.received,
+    note: 'money that actually reached you — ' + money(s.outstanding) + ' still owed' };
+  return { v: s.income,
+    note: s.meals + ' meals delivered, valued at their plan price, + fees + trials' };
+}
+
+/* ---------- the three numbers ---------- */
+function renderThree(s){
+  const box = $('#three'); box.textContent = '';
+  const invested = s.capex_cash;
+  const items = [
+    { cls:'a', q:'Left your pockets in ' + s.month, n: money(s.cash_out),
+      d: invested ? money(invested) + ' of that was equipment you still own — '
+                    + 'not a running cost'
+                  : 'every rupee logged as going out this month' },
+    { cls:'b', q:'What the month actually cost to run', n: money(s.operating_cost),
+      d: 'ingredients + running costs, with bulk stock spread over the months it lasts'
+         + (s.financing ? '. Scooter EMI (' + money(s.financing) + ') sits on its own line.' : '') },
+    { cls:'c', q:'Still yours — invested, not spent', n: money(invested),
+      d: invested ? 'equipment and setup. It leaves the P&L; only '
+                    + money(s.depreciation) + '/mo of wear is a real cost'
+                  : 'nothing bought this month' },
+  ];
+  for (const it of items){
+    const d = document.createElement('div'); d.className = 'box ' + it.cls;
+    const q = document.createElement('div'); q.className = 'q'; q.textContent = it.q;
+    const n = document.createElement('div'); n.className = 'n'; n.textContent = it.n;
+    const s2 = document.createElement('div'); s2.className = 'd'; s2.textContent = it.d;
+    d.append(q, n, s2); box.appendChild(d);
+  }
+}
+
+/* ---------- P&L ladder ---------- */
+function pnlRow(tb, label, sub, value, opts){
+  opts = opts || {};
+  const tr = document.createElement('tr');
+  if (opts.cls) tr.className = opts.cls;
+  const td = document.createElement('td'); td.className = 'lbl';
+  const b = document.createElement('b'); b.textContent = label; td.appendChild(b);
+  if (sub){ const sp = document.createElement('span'); sp.className = 'sub';
+    sp.textContent = sub; td.appendChild(sp); }
+  const tv = document.createElement('td'); tv.className = 'v';
+  if (value === null || value === undefined) tv.textContent = '—';
+  else {
+    tv.textContent = (opts.minus ? '− ' : '') + money(Math.abs(value));
+    if (opts.colour) tv.classList.add(value >= 0 ? 'pos' : 'neg');
+  }
+  const tn = document.createElement('td'); tn.className = 'n';
+  tn.textContent = opts.note || '';
+  tr.append(td, tv, tn); tb.appendChild(tr);
+}
+
+function renderPnl(s){
+  const inc = incomeFor(s);
+  const ingredients = s.cogs - s.delivery.outbound;
+  const gross = inc.v - s.cogs;
+  const oper = gross - s.opex;
+  const after = oper - s.financing;
+
+  const tb = $('#pnl'); tb.textContent = '';
+  pnlRow(tb, 'Money in', inc.note, inc.v);
+  pnlRow(tb, 'Ingredients, packaging & freight',
+         'everything that goes into a box', ingredients,
+         { minus:true, cls:'minor',
+           note: s.meals ? money(ingredients / s.meals) + '/meal' : '' });
+  pnlRow(tb, 'Getting meals to customers',
+         'Porter runs + your own fuel', s.delivery.outbound,
+         { minus:true, cls:'minor',
+           note: s.meals ? money(s.delivery.outbound / s.meals) + '/meal' : '' });
+  pnlRow(tb, 'Gross profit', 'what the food itself earns', gross,
+         { cls:'sum', colour:true, note: inc.v ? pct(gross / inc.v * 100) + ' margin' : '' });
+  pnlRow(tb, 'Running costs', 'staff, subscriptions, consumables, content', s.opex,
+         { minus:true, cls:'minor',
+           note: s.meals ? money(s.opex / s.meals) + '/meal' : '' });
+  pnlRow(tb, 'Operating profit', 'what the business made by operating', oper,
+         { cls:'big', colour:true, note: inc.v ? pct(oper / inc.v * 100) + ' margin' : '' });
+  if (s.financing){
+    pnlRow(tb, 'Scooter EMI', 'a loan repayment, not a cost of cooking', s.financing,
+           { minus:true, cls:'minor' });
+    pnlRow(tb, 'Left after the EMI', 'the number your bank balance feels', after,
+           { cls:'sum', colour:true });
+  }
+
+  const bl = $('#belowline'); bl.textContent = '';
+  pnlRow(bl, 'Invested in equipment & setup',
+         'yours afterwards — deliberately not an expense', s.capex_cash,
+         { note: money(s.depreciation) + '/mo of wear' });
+  if (s.draw_cash)
+    pnlRow(bl, 'Taken out of the business', 'owner draw, never a cost', s.draw_cash);
+  $('#belowwrap').style.display = (s.capex_cash || s.draw_cash) ? '' : 'none';
+}
+
+/* ---------- cash becomes cost ---------- */
+function renderReconcile(s){
+  const r = s.reconcile, tb = $('#recon'); tb.textContent = '';
+  pnlRow(tb, 'Cash that left your pockets', '', r.cash_out);
+  if (r.capex) pnlRow(tb, 'Equipment & setup bought',
+    'you still own it', r.capex, { minus:true, cls:'minor' });
+  if (r.financing) pnlRow(tb, 'Scooter EMI', 'loan repayment', r.financing,
+    { minus:true, cls:'minor' });
+  if (r.draw) pnlRow(tb, 'Owner draw', '', r.draw, { minus:true, cls:'minor' });
+  if (r.prepaid_out) pnlRow(tb, 'Bulk stock that lasts past this month',
+    'tape, packaging, oil — charged to the months it gets used', r.prepaid_out,
+    { minus:true, cls:'minor' });
+  if (r.carried_in) pnlRow(tb, 'Earlier bulk stock used up this month',
+    'bought before, consumed now', r.carried_in, { cls:'minor' });
+  pnlRow(tb, 'What running the kitchen cost', '', r.operating_cost, { cls:'sum' });
+}
+
+/* ---------- out of whose pocket ---------- */
+function renderPayers(s){
+  const wrap = $('#payers'); wrap.textContent = '';
+  const pairs = D.payerOrder
+    .filter(p => s.by_payer[p])
+    .map(p => [p, s.by_payer[p]]);
+  for (const k in s.by_payer) if (!D.payerOrder.includes(k)) pairs.push([k, s.by_payer[k]]);
+  const max = Math.max(...pairs.map(p => p[1]), 1);
+  const COL = { 'Me (personal)':'--s1', 'Business bank':'--s2',
+                'Appa':'--s3', 'Abishek':'--s4', 'Appa / Abishek':'--s3',
+                'Not set':'--axis' };
+  for (const [name, amt] of pairs){
+    const row = document.createElement('div');
+    row.className = 'payer click' + (state.payer === name ? ' on' : '');
+    row.tabIndex = 0; row.setAttribute('role', 'button');
+    row.setAttribute('aria-label', 'Filter entries paid by ' + name);
+    const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = name;
+    const tr = document.createElement('div'); tr.className = 'track';
+    const fb = document.createElement('div'); fb.className = 'fillbar';
+    fb.style.width = (amt / max * 100) + '%';
+    fb.style.background = cssv(COL[name] || '--s2');
+    tr.appendChild(fb);
+    const am = document.createElement('div'); am.className = 'amt'; am.textContent = money(amt);
+    row.append(nm, tr, am);
+    const pick = () => {
+      state.payer = (state.payer === name ? '' : name);
+      const sel = $('#fpayer'); if (sel) sel.value = state.payer;
+      render();
+      scrollToTable();
+    };
+    row.addEventListener('click', pick);
+    row.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); pick(); } });
+    wrap.appendChild(row);
+  }
+  const o = $('#owed'); o.textContent = '';
+  const mine = document.createElement('div');
+  mine.innerHTML = '';
+  const b1 = document.createElement('b'); b1.textContent = money(s.out_of_pocket);
+  mine.appendChild(b1);
+  mine.appendChild(document.createTextNode(
+    ' came out of your own pocket for the business in ' + s.month + '.'));
+  o.appendChild(mine);
+  if (s.fronted_by_family){
+    const fam = document.createElement('div'); fam.style.marginTop = '5px';
+    const b2 = document.createElement('b'); b2.textContent = money(s.fronted_by_family);
+    fam.appendChild(b2);
+    fam.appendChild(document.createTextNode(' was fronted by Appa / Abishek — money the business owes back.'));
+    o.appendChild(fam);
+  }
+  if (s.payer_unknown){
+    const u = document.createElement('div'); u.style.marginTop = '5px';
+    u.style.color = 'var(--muted)';
+    u.textContent = money(s.payer_unknown) + ' has nobody marked as the payer, so both '
+                  + 'numbers above are understated by up to that much.';
+    o.appendChild(u);
+  }
+}
+
+/* ---------- delivery economics ---------- */
+function factList(mount, facts){
+  mount.textContent = '';
+  for (const f of facts){
+    if (f.v === null || f.v === undefined) continue;
+    const d = document.createElement('div'); d.className = 'fact';
+    const k = document.createElement('div'); k.className = 'k'; k.textContent = f.k;
+    const v = document.createElement('div'); v.className = 'v'; v.textContent = f.v;
+    d.append(k, v);
+    if (f.h){ const h = document.createElement('div'); h.className = 'h'; h.textContent = f.h;
+      d.appendChild(h); }
+    mount.appendChild(d);
+  }
+}
+
+function renderDelivery(s){
+  const d = s.delivery;
+  factList($('#delfacts'), [
+    { k:'Charged to customers', v: money(d.recovered), h:'delivery fees billed' },
+    { k:'Cost to deliver', v: money(d.outbound), h:'Porter runs + your own fuel' },
+    { k:'Net on delivery', v: signed(d.net),
+      h: d.net >= 0 ? 'fees cover it' : 'you are subsidising delivery' },
+    { k:'Porter, per run', v: d.per_porter_run ? money(d.per_porter_run) : '—',
+      h: d.porter_runs + ' runs outsourced' },
+    { k:'Your own bike', v: d.own_spend ? money(d.own_spend) : '—',
+      h: d.own_per_meal ? money(d.own_per_meal) + '/meal across ~' + d.self_delivered + ' meals'
+                        : 'no fuel logged' },
+    { k:'Average per meal', v: d.per_meal ? money(d.per_meal) : '—',
+      h:'all outbound cost ÷ meals delivered' },
+  ]);
+  const n = $('#delnote'); n.textContent = '';
+  if (d.inbound){
+    n.textContent = money(d.inbound) + ' of Hyperpure / Instamart / Blinkit freight and '
+      + 'handling used to be counted here too. That is the cost of getting ingredients IN, '
+      + 'not meals out — it now sits with ingredients, which is why cost-per-delivery '
+      + 'finally looks sane.';
+  }
+}
+
+/* ---------- per meal ---------- */
+function renderPerMeal(s){
+  const inc = incomeFor(s);
+  const rev = s.meals ? inc.v / s.meals : null;
+  const profit = s.meals ? (inc.v - s.cogs - s.opex) / s.meals : null;
+  factList($('#mealfacts'), [
+    { k:'Meals delivered', v: s.meals ? String(s.meals) : '—' },
+    { k:'Revenue per meal', v: rev ? money(rev) : '—' },
+    { k:'Food + delivery cost', v: s.cost_per_meal ? money(s.cost_per_meal) : '—',
+      h:'the true cost of one box' },
+    { k:'Share of running costs', v: s.opex_per_meal ? money(s.opex_per_meal) : '—' },
+    { k:'Profit per meal', v: profit ? signed(profit) : '—',
+      h: (rev && profit) ? pct(profit / rev * 100) + ' of what you charge' : '' },
+  ]);
+}
+
+/* ---------- data health ---------- */
+function renderHealth(s){
+  const h = (D.health || {})[state.month];
+  const card = $('#cardHealth');
+  if (!h){ card.style.display = 'none'; return; }
+  card.style.display = '';
+  const bar = $('#hbar'); bar.textContent = '';
+  const clean = Math.max(0, h.tracked - h.at_risk);
+  for (const [v, c] of [[clean, '--s1'], [h.at_risk, '--s3']]){
+    if (v <= 0) continue;
+    const i = document.createElement('i');
+    i.style.width = (v / (h.tracked || 1) * 100) + '%';
+    i.style.background = cssv(c);
+    bar.appendChild(i);
+  }
+  $('#hsum').textContent =
+    money(h.tracked) + ' logged this month. ' + money(h.at_risk)
+    + ' of it is missing something that changes a number above'
+    + (h.mirrored_count ? ' · ' + h.mirrored_count + ' of Appa\u2019s rows appear on both '
+       + 'sheets and are counted once, not twice' : '') + '.';
+
+  const list = $('#hlist'); list.textContent = '';
+
+  /* The only check that can see money you never logged at all: meals went out,
+     and those meals had to be made of something. */
+  const cc = (sumNow() || {}).cost_check;
+  if (cc && cc.material){
+    const row = document.createElement('div'); row.className = 'issue';
+    const dot = document.createElement('span');
+    dot.className = 'dot ' + (cc.direction === 'under' ? 'warn' : 'info');
+    const mid = document.createElement('div');
+    const t = document.createElement('div'); t.className = 't';
+    t.textContent = cc.direction === 'under'
+      ? 'Food cost looks too low for the meals you delivered'
+      : 'Food cost is running above your costed menu';
+    const w = document.createElement('div'); w.className = 'w';
+    w.textContent = 'You logged ' + money(cc.logged_per_meal) + ' of ingredients and '
+      + 'packaging per meal across ' + cc.meals + ' meals. Your own costing says a meal '
+      + 'should cost about ' + money(cc.expected_per_meal) + '.';
+    const f = document.createElement('div'); f.className = 'f';
+    f.textContent = cc.direction === 'under'
+      ? 'Either roughly ' + money(Math.abs(cc.gap)) + ' of buying never got logged, or '
+        + 'you are sourcing cheaper than the costing assumes. Worth knowing which — it '
+        + 'is the difference between a real margin and a flattering one.'
+      : 'Ingredients are costing more than planned. Check chicken and produce prices '
+        + 'against the price book.';
+    mid.append(t, w, f);
+    const amt = document.createElement('div'); amt.className = 'amt';
+    const b = document.createElement('b'); b.textContent = signed(Math.abs(cc.gap));
+    const sp = document.createElement('span');
+    sp.textContent = cc.direction === 'under' ? 'possibly unlogged' : 'over budget';
+    amt.append(b, sp);
+    row.append(dot, mid, amt);
+    list.appendChild(row);
+  }
+
+  if (!h.issues.length && !(cc && cc.material)){
+    const ok = document.createElement('div'); ok.className = 'empty';
+    ok.textContent = 'Nothing to fix. Every entry has a payer, a category and a lifespan.';
+    list.appendChild(ok); return;
+  }
+  if (!h.issues.length) return;
+  for (const i of h.issues){
+    const row = document.createElement('div'); row.className = 'issue';
+    const dot = document.createElement('span'); dot.className = 'dot ' + i.level;
+    const mid = document.createElement('div');
+    const t = document.createElement('div'); t.className = 't'; t.textContent = i.title;
+    const w = document.createElement('div'); w.className = 'w'; w.textContent = i.why;
+    const f = document.createElement('div'); f.className = 'f'; f.textContent = 'Fix: ' + i.fix;
+    mid.append(t, w, f);
+    if (i.ids && i.ids.length){
+      const btn = document.createElement('button');
+      btn.className = 'iconbtn'; btn.type = 'button';
+      btn.textContent = 'Show these ' + i.n + ' entries';
+      btn.addEventListener('click', () => {
+        clearRowFilters();               // clears HFOCUS too, so set it after
+        HFOCUS = new Set(i.ids);
+        state.range = 'month'; $('#frange').value = 'month';
+        render();
+        scrollToTable();
+      });
+      mid.appendChild(btn);
+    }
+    const amt = document.createElement('div'); amt.className = 'amt';
+    const b = document.createElement('b'); b.textContent = money(i.amount);
+    const sp = document.createElement('span'); sp.textContent = i.n + (i.n === 1 ? ' entry' : ' entries');
+    amt.append(b, sp);
+    row.append(dot, mid, amt);
+    list.appendChild(row);
+  }
+}
+
+function renderMoney(){
+  const on = state.view === 'business';
+  for (const id of ['#monthbar','#three','#cardPnl','#cardRecon','#cardPayer',
+                    '#cardDelivery','#cardMeal','#cardHealth'])
+    $(id).style.display = on ? '' : 'none';
+  if (!on) return;
+  const s = sumNow();
+  if (!s){ for (const id of ['#three','#cardPnl','#cardRecon','#cardPayer',
+                             '#cardDelivery','#cardMeal']) $(id).style.display = 'none';
+           return; }
+  $('#fmonth').value = state.month;
+  document.querySelectorAll('#basis button').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.basis === state.basis)));
+  renderThree(s); renderPnl(s); renderReconcile(s);
+  renderPayers(s); renderDelivery(s); renderPerMeal(s); renderHealth(s);
 }
 
 /* ---------------- render ---------------- */
 function render(){
   refreshOptions();
-  const rows = filtered();
+  renderMoney();
+  let rows = filtered();
+  if (HFOCUS) rows = rows.filter(r => HFOCUS.has(r.id));
   renderKPIs(rows);
   $('#cardCost').style.display = state.view === 'business' ? '' : 'none';
   $('#cardVendor').style.display = state.view === 'business' ? '' : 'none';
@@ -1351,6 +1865,29 @@ function render(){
       onPick: s => { if (s === '—') return;
         state.sub = (state.sub === s ? '' : s); render(); } });
   renderTable(rows);
+  renderActiveFilters(rows.length);
+}
+
+/* Say out loud what is currently hiding rows, with one tap to undo it. */
+function renderActiveFilters(shown){
+  const bar = $('#activefilters'); bar.textContent = '';
+  const bits = [];
+  if (HFOCUS) bits.push('flagged entries only');
+  if (state.payer) bits.push('paid by ' + state.payer);
+  if (state.bucket) bits.push(state.bucket);
+  if (state.cat) bits.push(state.cat);
+  if (state.sub) bits.push(state.sub);
+  if (state.biz === 'yes') bits.push('kitchen only');
+  if (state.biz === 'no') bits.push('household only');
+  if (state.q) bits.push('matching \u201c' + state.q + '\u201d');
+  if (!bits.length){ bar.style.display = 'none'; return; }
+  bar.style.display = '';
+  bar.appendChild(document.createTextNode(
+    'Showing ' + shown + (shown === 1 ? ' entry' : ' entries') + ' — ' + bits.join(' · ')));
+  const b = document.createElement('button');
+  b.className = 'chipclear'; b.type = 'button'; b.textContent = 'Show everything';
+  b.addEventListener('click', () => { clearRowFilters(); render(); });
+  bar.appendChild(b);
 }
 
 /* ---------------- wiring ---------------- */
@@ -1359,30 +1896,37 @@ document.querySelectorAll('.views button').forEach(b => {
     if (b.disabled) return;
     document.querySelectorAll('.views button')
       .forEach(x => x.setAttribute('aria-selected', String(x === b)));
-    state.view = b.dataset.view; state.cat = ''; state.sub = ''; state.biz = '';
-    $('#fbiz').value = '';
+    state.view = b.dataset.view;
+    clearRowFilters();          // search box included - it used to survive the switch
     state.sort = 'date'; state.dir = -1;
     sel.clear(); syncBulk();     // ids from the old tab must never carry over
     render();
   });
 });
-$('#frange').addEventListener('change', e => { state.range = e.target.value; render(); });
-$('#fcat').addEventListener('change', e => { state.cat = e.target.value; state.sub = ''; render(); });
-$('#fsub').addEventListener('change', e => { state.sub = e.target.value; render(); });
-$('#fbiz').addEventListener('change', e => { state.biz = e.target.value; render(); });
+$('#frange').addEventListener('change', e => { HFOCUS = null; state.range = e.target.value; render(); });
+$('#fcat').addEventListener('change', e => { HFOCUS = null; state.cat = e.target.value; state.sub = ''; render(); });
+$('#fsub').addEventListener('change', e => { HFOCUS = null; state.sub = e.target.value; render(); });
+$('#fbiz').addEventListener('change', e => { HFOCUS = null; state.biz = e.target.value; render(); });
 let qt;
 $('#fq').addEventListener('input', e => {
-  clearTimeout(qt); qt = setTimeout(() => { state.q = e.target.value; render(); }, 140);
+  clearTimeout(qt);
+  qt = setTimeout(() => { HFOCUS = null; state.q = e.target.value; render(); }, 140);
 });
 $('#fclear').addEventListener('click', () => {
-  state.cat = ''; state.sub = ''; state.biz = ''; state.q = ''; state.range = 'month';
-  $('#fq').value = ''; $('#frange').value = 'month'; $('#fbiz').value = '';
+  clearRowFilters();
+  state.range = 'month'; $('#frange').value = 'month';
   render();
+});
+$('#fpayer').addEventListener('change', e => { HFOCUS = null; state.payer = e.target.value; render(); });
+$('#fbucket').addEventListener('change', e => { HFOCUS = null; state.bucket = e.target.value; render(); });
+$('#fmonth').addEventListener('change', e => { state.month = e.target.value; render(); });
+document.querySelectorAll('#basis button').forEach(b => {
+  b.addEventListener('click', () => { state.basis = b.dataset.basis; render(); });
 });
 $('#theme').addEventListener('click', () => {
   const cur = document.documentElement.getAttribute('data-theme');
   const next = cur === 'dark' ? 'light' : cur === 'light' ? 'dark'
-    : (matchMedia('(prefers-color-scheme: dark)').matches ? 'light' : 'dark');
+    : (prefersDark() ? 'light' : 'dark');
   document.documentElement.setAttribute('data-theme', next);
   try { localStorage.setItem('ogfin-theme', next); } catch (e) {}
   render();
@@ -1391,7 +1935,16 @@ try {
   const saved = localStorage.getItem('ogfin-theme');
   if (saved) document.documentElement.setAttribute('data-theme', saved);
 } catch (e) {}
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
+/* Every browser has matchMedia, but this runs at top level on his phone: if it
+   ever throws, the whole dashboard blanks. A theme listener is not worth that. */
+function prefersDark(){
+  try { return window.matchMedia('(prefers-color-scheme: dark)').matches; }
+  catch (e) { return false; }
+}
+try {
+  window.matchMedia('(prefers-color-scheme: dark)')
+        .addEventListener('change', render);
+} catch (e) {}
 let rzt;
 window.addEventListener('resize', () => {
   hideTip();
@@ -1474,14 +2027,18 @@ def _view_button(key, label, enabled, selected):
             f'{dis}{title}>{label}</button>')
 
 
-def render_dashboard(monthly, expenses, personal, dad, cur, dad_status=None):
+def render_dashboard(monthly, expenses, personal, dad, cur, dad_status=None,
+                     summaries=None, health=None, months=None):
     """Return the complete dashboard HTML as a string.
 
-    monthly   list of per-month dicts from build_monthly()
-    expenses  business rows (shape_expenses)
-    personal  personal rows (shape_personal)
-    dad       appa rows, or None when that database isn't shared yet
-    cur       the month being featured, e.g. "Aug-2026"
+    monthly    list of per-month dicts from build_monthly()
+    expenses   business rows (shape_expenses), enriched by model.enrich()
+    personal   personal rows (shape_personal)
+    dad        appa rows, or None when that database isn't shared yet
+    cur        the month being featured, e.g. "Aug-2026"
+    summaries  month -> model.month_summary(), drives the money-control panels
+    health     month -> model.health()
+    months     every month with data, oldest first
     """
     cur_row = next((m for m in monthly if m["month"] == cur), None) or {}
     revenue = {
@@ -1489,6 +2046,9 @@ def render_dashboard(monthly, expenses, personal, dad, cur, dad_status=None):
         "recognised": round(cur_row.get("recognised_revenue") or 0),
         "delivered": cur_row.get("delivered") or 0,
     }
+    months = months or [cur]
+    if cur not in months:
+        months = list(months) + [cur]
 
     payload = {
         "today": datetime.now().strftime("%Y-%m-%d"),
@@ -1496,12 +2056,27 @@ def render_dashboard(monthly, expenses, personal, dad, cur, dad_status=None):
         "revenue": revenue,
         "pairs": load_pairs(),
         "editFields": EDIT_FIELDS,
+        "currentMonth": cur,
+        "months": months,
+        "summaries": summaries or {},
+        "health": health or {},
+        "payerOrder": model.PAYER_ORDER,
+        "bucketOrder": model.BUCKET_ORDER,
+        # Sent rather than duplicated in JS, so an edit made on the phone derives
+        # payer and cost type exactly the way model.py would.
+        "payerMap": model._PAYER_MAP,
+        "financingCategories": sorted(model.FINANCING_CATEGORIES),
+        "financingWords": list(model.FINANCING_WORDS),
         "data": {
             "business": expenses or [],
             "personal": personal or [],
             "dad": dad or [],
         },
     }
+    month_opts = "".join(
+        '<option value="%s"%s>%s</option>' % (m, " selected" if m == cur else "",
+                                               m.replace("-", " "))
+        for m in reversed(months))
     # </script> can't appear inside the JSON island
     blob = json.dumps(payload, default=str, ensure_ascii=False).replace("<", "\\u003c")
 
@@ -1548,6 +2123,72 @@ def render_dashboard(monthly, expenses, personal, dad, cur, dad_status=None):
 
   {dad_note}
 
+  <div class="monthbar" id="monthbar">
+    <select id="fmonth" aria-label="Which month">{month_opts}</select>
+    <div class="seg" id="basis" role="group" aria-label="How income is counted">
+      <button type="button" data-basis="earned" aria-pressed="true">Earned</button>
+      <button type="button" data-basis="billed" aria-pressed="false">Billed</button>
+      <button type="button" data-basis="cash" aria-pressed="false">Cash in</button>
+    </div>
+  </div>
+
+  <div class="three" id="three"></div>
+
+  <div class="card" id="cardPnl">
+    <h2>Did the month actually make money?</h2>
+    <p class="hint">Equipment you bought is left out on purpose — it is an investment,
+       not a running cost. Bulk stock is charged to the months it actually gets used.
+       <b>Earned</b> counts meals delivered · <b>Billed</b> counts what you invoiced ·
+       <b>Cash in</b> counts what reached you.</p>
+    <table class="pnl"><tbody id="pnl"></tbody></table>
+    <div id="belowwrap">
+      <p class="hint" style="margin:18px 0 4px">Below the line — real money, but not
+         a cost of running this month</p>
+      <table class="pnl"><tbody id="belowline"></tbody></table>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card" id="cardRecon">
+      <h2>Where the difference went</h2>
+      <p class="hint">Why the cash that left your pockets is bigger than what the
+         month cost. This balances to the rupee.</p>
+      <table class="pnl"><tbody id="recon"></tbody></table>
+    </div>
+
+    <div class="card" id="cardPayer">
+      <h2>Out of whose pocket</h2>
+      <p class="hint">Tap anyone to filter every entry below to what they paid for.</p>
+      <div class="payers" id="payers"></div>
+      <div class="owed" id="owed"></div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card" id="cardDelivery">
+      <h2>Delivery, split properly</h2>
+      <p class="hint">Meals going out to customers only. Freight on ingredients
+         coming in is counted with the ingredients, where it belongs.</p>
+      <div class="facts" id="delfacts"></div>
+      <p class="hint" id="delnote" style="margin:14px 0 0"></p>
+    </div>
+
+    <div class="card" id="cardMeal">
+      <h2>One meal, end to end</h2>
+      <p class="hint">What a single box earns and what it really costs.</p>
+      <div class="facts" id="mealfacts"></div>
+    </div>
+  </div>
+
+  <div class="card" id="cardHealth">
+    <h2>How much can you trust these numbers?</h2>
+    <p class="hint">Only counts what you logged — spend that never got entered can't
+       be measured from here.</p>
+    <div class="hbar" id="hbar"></div>
+    <p class="hint" id="hsum"></p>
+    <div id="hlist"></div>
+  </div>
+
   <div class="filters">
     <select id="frange" aria-label="Date range">
       <option value="month" selected>This month</option>
@@ -1555,6 +2196,8 @@ def render_dashboard(monthly, expenses, personal, dad, cur, dad_status=None):
       <option value="30">Last 30 days</option>
       <option value="all">All time</option>
     </select>
+    <select id="fpayer" aria-label="Who paid"></select>
+    <select id="fbucket" aria-label="Cost type"></select>
     <select id="fcat" aria-label="Category"></select>
     <select id="fsub" aria-label="Subcategory"></select>
     <select id="fbiz" aria-label="Business or household" style="display:none">
@@ -1566,6 +2209,8 @@ def render_dashboard(monthly, expenses, personal, dad, cur, dad_status=None):
            aria-label="Search">
     <button class="chipclear" id="fclear" type="button">Reset</button>
   </div>
+
+  <div class="note" id="activefilters" style="display:none"></div>
 
   <div id="kpis" class="kpis"></div>
 

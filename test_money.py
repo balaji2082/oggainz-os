@@ -138,11 +138,29 @@ for fn_name, call in [("shape_expenses", "expenses, cash, _cash_cat, true_cost, 
     check(f"{fn_name} is actually called in _build", f"{fn_name}(" in hub)
 
 sig = inspect.signature(dr.render_dashboard)
-check("render_dashboard still takes 6 args", len(sig.parameters) == 6,
-      str(sig))
-check("_build passes all 6",
-      "render_dashboard(monthly, expenses, personal, dad, cur, dad_status)"
-      in inspect.getsource(finance_hub._build))
+check("render_dashboard takes the 6 positionals plus the 3 model kwargs",
+      len(sig.parameters) == 9, str(sig))
+check("the model kwargs all default, so an old caller still works",
+      all(sig.parameters[p].default is not inspect.Parameter.empty
+          for p in ("summaries", "health", "months")))
+
+hub_src = inspect.getsource(finance_hub._build)
+check("_build passes the model results, not bare rows",
+      "render_dashboard(monthly, all_rows, personal, dad, cur, dad_status," in hub_src
+      and "summaries=summaries" in hub_src and "health=health" in hub_src
+      and "months=months" in hub_src)
+
+# The Money tab on the server is only as good as the model behind it. Without
+# these three the page renders with empty panels and dead filters, which is worse
+# than the old dashboard because it looks like it works.
+for call in ("model.enrich(expenses)", "model.merge_appa(expenses, dad)",
+             "model.month_summary(", "model.health("):
+    check("_build runs " + call.rstrip("("), call in hub_src)
+
+main_src = inspect.getsource(bf.main)
+for call in ("model.enrich(expenses)", "model.merge_appa(expenses, dad)",
+             "model.month_summary(", "model.health("):
+    check("build_finance.main runs " + call.rstrip("("), call in main_src)
 
 print("\n== 6. the shared action layer is what both front doors use ==")
 import serve_dashboard as sd                                   # noqa: E402
