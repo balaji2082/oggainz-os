@@ -7,8 +7,11 @@
   <div class="drow-top">
     <div class="drow-id">
       <b class="drow-name">{{ r.name }}</b>
+      {# Two boxes to one door is ONE row. Without this the kitchen packs one. #}
+      {% if (r.qty or 1) > 1 %}<span class="chip chip-xs chip-addon"
+        title="This stop carries {{ r.qty }} boxes">×{{ r.qty }}</span>{% endif %}
       <span class="chip chip-xs chip-{{ slot|lower }}">{{ slot }}</span>
-      {% if r.trial_ref %}<span class="chip chip-xs chip-trial">TRIAL</span>{% endif %}
+      {% if r.trial_ref %}<span class="chip chip-xs chip-trial">ONE-MEAL</span>{% endif %}
       {% if r.is_extra %}<span class="chip chip-xs chip-addon"
         title="An additional meal taken from this pack">EXTRA</span>{% endif %}
     </div>
@@ -47,7 +50,7 @@
     </div>
   </div>
 
-  <div class="drow-meta">{{ r.plan_name or r.trial_order or 'Meal' }}</div>
+  <div class="drow-meta">{{ r.plan_name or r.trial_order or 'Meal' }}{% if (r.qty or 1) > 1 %} · <b>{{ r.qty }} boxes</b>{% endif %}</div>
   {% if r.skip_source == 'customer' and r.status == 'Skipped' %}
   <div class="drow-line"><span class="mi client-skip">🙋 Skipped by the customer in the app
     — don't cook this. Only they can put it back.</span></div>

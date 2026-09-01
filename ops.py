@@ -754,8 +754,11 @@ def payout_week(conn, start_iso, end_iso):
 
     riders, days = {}, []
     for r in rows:
+        # Boxes on the run, not stops: two meals to one door is still two boxes
+        # carried, and this is what decides whether a route was ridden at all.
         n = conn.execute(
-            "SELECT COUNT(*) n FROM deliveries WHERE date=? AND meal_type=? "
+            "SELECT COALESCE(SUM(COALESCE(qty,1)),0) n FROM deliveries "
+            "WHERE date=? AND meal_type=? "
             "AND batch_no=? AND status IN ('Pending','Delivered')",
             (r["date"], r["slot"], r["batch_no"])).fetchone()["n"]
         if not n:

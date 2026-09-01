@@ -310,7 +310,9 @@ def load_revenue():
         if r["month"]:
             rev[r["month"]]["trial"] = r["a"] or 0
 
-    for r in c.execute("""SELECT month, status, COUNT(*) n FROM deliveries
+    # SUM(qty), not COUNT(*): a stop can carry more than one box, and every
+    # per-meal figure on the money dashboard divides by this number.
+    for r in c.execute("""SELECT month, status, SUM(COALESCE(qty,1)) n FROM deliveries
                           GROUP BY month, status"""):
         if not r["month"]:
             continue
@@ -330,6 +332,7 @@ def load_revenue():
         SELECT d.month AS m,
                SUM(CASE WHEN s.total_meals_scheduled > 0
                         THEN s.subscription_price * 1.0 / s.total_meals_scheduled
+                             * COALESCE(d.qty, 1)
                         ELSE 0 END) AS val
         FROM deliveries d
         JOIN subscriptions s ON s.id = d.subscription_id

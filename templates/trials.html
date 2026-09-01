@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Trials · OG Gainz{% endblock %}
+{% block title %}One-Meal Orders · OG Gainz{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Trial Orders</h1><span class="spacer"></span>
+<div class="page-head"><h1>One-Meal Orders</h1><span class="spacer"></span>
   <a class="btn btn-primary btn-sm" href="{{ url_for('trial_new') }}">+ New</a></div>
 
 <div class="tiles tiles-3" style="margin-bottom:14px">
-  <div class="tile"><div class="k">Trials</div><div class="v">{{ total.n }}</div></div>
-  <div class="tile accent"><div class="k">Trial sales</div><div class="v">{{ total.s|inr }}</div></div>
+  <div class="tile"><div class="k">Orders</div><div class="v">{{ total.n }}</div></div>
+  <div class="tile accent"><div class="k">One-meal sales</div><div class="v">{{ total.s|inr }}</div></div>
   <div class="tile"><div class="k">Converted</div><div class="v">{{ converted }}</div></div>
 </div>
 
@@ -14,7 +14,7 @@
   <summary><span class="ico">📅</span><span class="lbl">By month</span><span class="chev">›</span></summary>
   <div class="disc-body">
     <div class="table-wrap"><table class="rev-table">
-      <tr><th>Month</th><th class="num">Trials</th><th class="num">Sales</th><th class="num">Converted</th><th></th></tr>
+      <tr><th>Month</th><th class="num">Orders</th><th class="num">Sales</th><th class="num">Converted</th><th></th></tr>
       {% for mm in by_month %}
       <tr>
         <td><b>{{ mm.month }}</b></td>
@@ -23,13 +23,13 @@
         <td class="num">{{ mm.conv }}</td>
         <td class="right"><a class="chip chip-line" href="{{ url_for('trials', month=mm.month) }}">filter</a></td>
       </tr>
-      {% else %}<tr><td colspan="5" class="muted">No trials yet.</td></tr>{% endfor %}
+      {% else %}<tr><td colspan="5" class="muted">No one-meal orders yet.</td></tr>{% endfor %}
     </table></div>
   </div>
 </details>
 
 <div class="card-title" style="margin-top:4px">
-  <h3>{% if month %}{{ month }} trials{% else %}All trials{% endif %}</h3>
+  <h3>{% if month %}{{ month }} orders{% else %}All one-meal orders{% endif %}</h3>
   <span class="spacer"></span>
   {% if month %}<a class="btn btn-ghost btn-sm" href="{{ url_for('trials') }}">Show all</a>{% endif %}
 </div>
@@ -53,6 +53,7 @@
 
     <div class="tcard-meta">
       {% if r.phone %}<a class="chip chip-line" href="{{ r.phone|wa }}" target="_blank">💬 {{ r.phone }}</a>{% endif %}
+      {% if (r.qty or 1) > 1 %}<span class="chip chip-active">{{ r.qty }} meals</span>{% endif %}
       <span class="chip chip-line">{{ r.amount|inr if r.amount else '₹0' }}</span>
       {% if r.delivery_date %}<span class="chip chip-{{ (r.meal_type or 'lunch')|lower }}">{{ r.delivery_date|fdate('%d %b') }} · {{ r.meal_type or 'Lunch' }}</span>{% endif %}
     </div>
@@ -71,7 +72,7 @@
     </div>
   </div>
   {% else %}
-  <div class="empty"><div class="big">🧪</div>No trials{% if month %} in {{ month }}{% endif %} yet.</div>
+  <div class="empty"><div class="big">🍱</div>No one-meal orders{% if month %} in {{ month }}{% endif %} yet.</div>
   {% endfor %}
 </div>
 {% endblock %}

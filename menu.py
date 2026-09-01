@@ -332,22 +332,28 @@ def _agg_bucket():
     return {"total": 0.0, "sizes": defaultdict(int), "notes": defaultdict(float)}
 
 
-def _aggregate(agg, items, meta):
-    """Fold one order's items into the per-component aggregate for its slot."""
+def _aggregate(agg, items, meta, boxes=1):
+    """Fold one order's items into the per-component aggregate for its slot.
+
+    `boxes` is how many identical boxes this one stop carries. Two Elite meals to
+    one door is one ride but two lots of chicken, so every weight and every count
+    multiplies -- and the size tally records two portions of that size, not one.
+    """
+    boxes = max(1, int(boxes or 1))
     for it in items:
         key = (it["name"], it["unit"], it["emoji"] or "")
         b = agg[key]
         qty = float(it["qty"] or 0)
         if it["unit"] == "g":
-            b["total"] += qty
-            b["sizes"][int(qty)] += 1
+            b["total"] += qty * boxes
+            b["sizes"][int(qty)] += boxes
         else:
-            b["total"] += qty
+            b["total"] += qty * boxes
             if qty != 1:
-                b["sizes"][qty] += 1
+                b["sizes"][qty] += boxes
         note = (it.get("note") or "").strip()
         if note:
-            b["notes"][note.lower()] += qty
+            b["notes"][note.lower()] += qty * boxes
 
 
 def _finish(agg):
@@ -492,7 +498,7 @@ def order_items(conn, r, day_iso, cache=None, plan_cache=None):
                 label = v["name"]
     elif r["trial_id"]:
         t = conn.execute("SELECT * FROM trial_orders WHERE id=?", (r["trial_id"],)).fetchone()
-        label = "TRIAL · " + ((t["order_text"] if t else None) or "Trial meal")
+        label = "ONE-MEAL · " + ((t["order_text"] if t else None) or "One-meal order")
         pid = t["plan_id"] if t else None
         if not pid and t:
             p = match_plan(conn, t["order_text"])
@@ -533,24 +539,32 @@ def prep_for_day(conn, day_iso, rows=None):
         if r["status"] not in ("Pending", "Delivered"):
             continue
         slot = "Dinner" if (r["meal_type"] or "Lunch") == "Dinner" else "Lunch"
+        # One row is one STOP; qty is how many boxes ride on it.
+        try:
+            boxes = max(1, int(r["qty"] or 1))
+        except (IndexError, KeyError, TypeError, ValueError):
+            boxes = 1
         items, label = order_items(conn, r, day_iso, cache, plan_cache)
         if items:
-            _aggregate(agg[slot], items, r)
-            _aggregate(agg["All"], items, r)
+            _aggregate(agg[slot], items, r, boxes)
+            _aggregate(agg["All"], items, r, boxes)
         else:
             unmapped.append({"name": r["name"], "label": label or r["notes"] or "Meal",
-                             "slot": slot,
+                             "slot": slot, "qty": boxes,
                              "sub_id": r["subscription_id"], "trial_id": r["trial_id"]})
-        meals[slot] += 1
+        meals[slot] += boxes
         detail = " + ".join(f"{i['name']} {fmt_qty(i['qty'], i['unit'])}" for i in items)
         packs[slot][label or "Meal"].append({"name": r["name"], "detail": detail,
-                                             "note": r["day_note"]})
+                                             "qty": boxes, "note": r["day_note"]})
 
     def pack_rows(slot):
         out = []
         for lbl, orders in packs[slot].items():
             details = {o["detail"] for o in orders}
-            out.append({"label": lbl, "n": len(orders), "orders": orders,
+            # n is BOXES to cook. The old len(orders) undercounted any stop
+            # carrying more than one.
+            out.append({"label": lbl, "n": sum(o.get("qty", 1) for o in orders),
+                        "stops": len(orders), "orders": orders,
                         "detail": details.pop() if len(details) == 1 else None})
         out.sort(key=lambda p: -p["n"])
         return out

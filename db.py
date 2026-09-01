@@ -609,7 +609,13 @@ MIGRATIONS = {
     # counts_against_pack = 1 (the normal case) consumes one of the pack's meals,
     # so 20 meals finish a day earlier. 0 is for a meal sold separately once the
     # pack is already used up — it shows in the day's cooking but not in the count.
-    "deliveries":    [("trial_id", "TEXT"), ("day_note", "TEXT"), ("day_note_at", "TEXT"),
+    # qty: how many boxes this ONE stop carries. A row is a DROP, not a meal --
+    # two Elite meals to one door in Arumbakkam is a single ride, a single porter
+    # fee and a single address, but two boxes to cook and two meals off the pack.
+    # Default 1 means every row written before this counts exactly as it did.
+    # Anything counting meals must SUM(qty), never COUNT(*).
+    "deliveries":    [("qty", "INTEGER DEFAULT 1"),
+                      ("trial_id", "TEXT"), ("day_note", "TEXT"), ("day_note_at", "TEXT"),
                       ("address_id", "INTEGER"), ("porter_point_id", "INTEGER"),
                       ("batch_no", "INTEGER"),
                       ("is_extra", "INTEGER DEFAULT 0"),
@@ -632,9 +638,20 @@ MIGRATIONS = {
                       # trace cannot be counted, queried, or discussed later.
                       ("skip_source", "TEXT"),
                       ("skipped_at", "TEXT")],
+    # NOTE: keep this the ONLY "trial_orders" key. A second one used to sit further
+    # down with lat/lng, and a duplicate key in a dict literal is not an error --
+    # the last one silently wins -- so these five never migrated onto any database
+    # that did not already happen to have them.
     "trial_orders":  [("notes", "TEXT"), ("delivery_date", "TEXT"),
                       ("meal_type", "TEXT"), ("delivery_status", "TEXT"),
-                      ("plan_id", "INTEGER")],   # which pack the trial is of → prep list
+                      ("plan_id", "INTEGER"),   # which pack it is → prep list
+                      # A trial is a real box at a real door, so it needs a pin
+                      # like any other stop, or it rides with no distance and no
+                      # share of the km allowance.
+                      ("lat", "REAL"), ("lng", "REAL"),
+                      # Boxes on one one-meal order -- his Arumbakkam client took
+                      # two Elite meals to one address in one slot.
+                      ("qty", "INTEGER DEFAULT 1")],
     # email: customers were only ever reached on WhatsApp, so this never existed.
     # The app signs people in with Google, so knowing a customer's email lets a
     # sign-up be matched to them automatically instead of by hand.
@@ -716,11 +733,6 @@ MIGRATIONS = {
                            # of the two set the one currently stored.
                            ("pin_source", "TEXT"),      # customer | admin
                            ("pin_set_at", "TEXT")],
-    # A trial is a real box that a real rider carries to a real door, so it needs
-    # a pin like any other stop. Without these it could never have one: the trial
-    # had nowhere to store a location, so every trial rode as "no pin", with no
-    # distance and no share of the km allowance, and never appeared on the pin page.
-    "trial_orders": [("lat", "REAL"), ("lng", "REAL")],
     # --- added Aug 2026 for the OG Gainz app (og-gainz-app/docs/03 §2.1) ---
     # ALL of these are defaults-only: every one of them leaves existing packs
     # behaving exactly as they do today. Nothing here switches anything on.

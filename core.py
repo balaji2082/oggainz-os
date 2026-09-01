@@ -460,10 +460,15 @@ def recompute_subscription(conn, sub_id, commit=True):
     # extra finishes a day early. Only a meal explicitly sold OUTSIDE the pack
     # (counts_against_pack=0) is left out of the count. COALESCE keeps every row
     # written before this column existed counting as it always did.
+    # SUM(qty), not COUNT(*): one row can carry two boxes, and a pack is drawn
+    # down in meals. COALESCE(qty,1) keeps every row written before qty existed
+    # counting as exactly one, which is what it was.
     row = conn.execute(
         "SELECT "
-        " SUM(status='Delivered' AND COALESCE(counts_against_pack,1)=1) AS d, "
-        " SUM(status='Skipped'   AND COALESCE(counts_against_pack,1)=1) AS s, "
+        " SUM(CASE WHEN status='Delivered' AND COALESCE(counts_against_pack,1)=1 "
+        "          THEN COALESCE(qty,1) ELSE 0 END) AS d, "
+        " SUM(CASE WHEN status='Skipped'   AND COALESCE(counts_against_pack,1)=1 "
+        "          THEN COALESCE(qty,1) ELSE 0 END) AS s, "
         " MAX(CASE WHEN status='Delivered' THEN date END) AS last "
         "FROM deliveries WHERE subscription_id=?",
         (sub_id,),
@@ -563,8 +568,9 @@ def backfill_sub_days(conn, sub_id):
             d += timedelta(days=1)
             # planned (Pending) + done (Delivered) rows must never exceed the pack
             used = conn.execute(
-                "SELECT COUNT(*) FROM deliveries WHERE subscription_id=? "
-                "AND status IN ('Pending','Delivered')", (sub_id,)).fetchone()[0]
+                "SELECT COALESCE(SUM(COALESCE(qty,1)),0) FROM deliveries "
+                "WHERE subscription_id=? AND status IN ('Pending','Delivered')",
+                (sub_id,)).fetchone()[0]
             if used >= scheduled:
                 break
             if not is_operating_day(conn, day_iso):
@@ -583,10 +589,12 @@ def backfill_sub_days(conn, sub_id):
                 continue
             conn.execute(
                 "INSERT INTO deliveries(date,subscription_id,customer_id,name,meal_type,"
-                "status,month,notes,created_at,variant_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                "status,month,notes,created_at,variant_id,qty) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (day_iso, sub_id, sub["customer_id"], sub["customer_name"], plan["slot"],
                  "Pending", datetime.strptime(day_iso, "%Y-%m-%d").strftime("%b-%Y"),
-                 sub["plan_name"], db.now_iso(), plan["variant_id"]))
+                 sub["plan_name"], db.now_iso(), plan["variant_id"],
+                 max(1, int(plan.get("meals") or 1))))
             created += 1
     conn.commit()
     return created
@@ -662,10 +670,11 @@ def ensure_day_rows(conn, day_iso):
         # books are full but a planned row sits later than the day being generated,
         # the furthest one is pulled back to here instead of skipping the day.
         planned = conn.execute(
-            "SELECT id, date, COALESCE(is_extra,0) AS is_x FROM deliveries "
-            "WHERE subscription_id=? AND status='Pending' ORDER BY date",
+            "SELECT id, date, COALESCE(is_extra,0) AS is_x, COALESCE(qty,1) AS q "
+            "FROM deliveries WHERE subscription_id=? AND status='Pending' ORDER BY date",
             (s["id"],)).fetchall()
-        if len(planned) >= (s["remaining_meals"] or 0):
+        # Meals on the books, not rows on the books: a two-box day uses two.
+        if sum(r["q"] for r in planned) >= (s["remaining_meals"] or 0):
             # An extra was added by hand for a chosen date and is not the
             # generator's to move; nor is a row someone has written on.
             movable = [r for r in planned if r["date"] > day_iso and not r["is_x"]]
@@ -684,11 +693,11 @@ def ensure_day_rows(conn, day_iso):
             created += 1
             continue
         conn.execute(
-            "INSERT INTO deliveries(date,subscription_id,customer_id,name,meal_type,status,month,notes,created_at,variant_id) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO deliveries(date,subscription_id,customer_id,name,meal_type,status,"
+            "month,notes,created_at,variant_id,qty) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (day_iso, s["id"], s["customer_id"], s["customer_name"],
              plan["slot"], "Pending", month_label, s["plan_name"], db.now_iso(),
-             plan["variant_id"]),
+             plan["variant_id"], max(1, int(plan.get("meals") or 1))),
         )
         created += 1
     conn.commit()
@@ -704,10 +713,11 @@ def ensure_trial_rows(conn, day_iso):
                         (t["id"], day_iso)).fetchone():
             continue
         conn.execute(
-            "INSERT INTO deliveries(date,trial_id,name,meal_type,status,month,notes,created_at) "
-            "VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO deliveries(date,trial_id,name,meal_type,status,month,notes,"
+            "created_at,qty) VALUES(?,?,?,?,?,?,?,?,?)",
             (day_iso, t["id"], t["name"], t["meal_type"] or "Lunch",
-             t["delivery_status"] or "Pending", month_label, t["order_text"], db.now_iso()))
+             t["delivery_status"] or "Pending", month_label, t["order_text"],
+             db.now_iso(), max(1, int(t["qty"] or 1))))
         created += 1
     if created:
         conn.commit()
@@ -721,10 +731,11 @@ def sync_trial_delivery(conn, trial_id):
     if t and t["delivery_date"]:
         month_label = datetime.strptime(t["delivery_date"], "%Y-%m-%d").strftime("%b-%Y")
         conn.execute(
-            "INSERT INTO deliveries(date,trial_id,name,meal_type,status,month,notes,created_at) "
-            "VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO deliveries(date,trial_id,name,meal_type,status,month,notes,"
+            "created_at,qty) VALUES(?,?,?,?,?,?,?,?,?)",
             (t["delivery_date"], trial_id, t["name"], t["meal_type"] or "Lunch",
-             t["delivery_status"] or "Pending", month_label, t["order_text"], db.now_iso()))
+             t["delivery_status"] or "Pending", month_label, t["order_text"],
+             db.now_iso(), max(1, int(t["qty"] or 1))))
     conn.commit()
 
 
@@ -872,7 +883,8 @@ def plan_week(conn, sub_id, wanted_days, window_days, slot=None):
                 continue
             # Never plan past what the pack still owes.
             planned = conn.execute(
-                "SELECT COUNT(*) FROM deliveries WHERE subscription_id=? AND status='Pending'",
+                "SELECT COALESCE(SUM(COALESCE(qty,1)),0) FROM deliveries "
+                "WHERE subscription_id=? AND status='Pending'",
                 (sub_id,)).fetchone()[0]
             if planned >= (sub["remaining_meals"] or 0):
                 continue
@@ -991,6 +1003,7 @@ def _delivered_meal_rows(conn):
     for the day/week/month earned-revenue views and the per-day drill-down."""
     rows = conn.execute(
         "SELECT d.id, d.date, d.meal_type, d.subscription_id, d.trial_id, "
+        "       COALESCE(d.qty,1) AS qty, "
         "       COALESCE(s.customer_name, t.name, d.name) AS name, "
         "       COALESCE(s.plan_name, t.order_text, d.notes) AS label, "
         "       s.subscription_price AS sub_price, s.delivery_fee AS sub_fee, "
@@ -1012,12 +1025,18 @@ def _delivered_meal_rows(conn):
         # Split each delivered meal into food vs delivery so the views can show them
         # separately. A pack's delivery fee is the whole-pack figure, so the per-meal
         # delivery share is fee ÷ meals (e.g. ₹1200 / 20 = ₹60 a delivery).
+        qty = max(1, int(r["qty"] or 1))
         if r["subscription_id"]:
             meals = r["sub_meals"] or 0
-            food = round((r["sub_price"] or 0) / meals) if meals else 0
-            deliv = round((r["sub_fee"] or 0) / meals) if meals else 0
+            # Two boxes on one stop draw two meals off the pack, so they earn two
+            # meals' worth of the pack price.
+            food = round((r["sub_price"] or 0) / meals * qty) if meals else 0
+            deliv = round((r["sub_fee"] or 0) / meals * qty) if meals else 0
             source = "sub"
         elif r["trial_id"]:
+            # NOT multiplied: a one-meal order's amount is already the whole
+            # order (he charged 600 for the two Elite boxes, not 600 each). It is
+            # only split when one order was carried out over several days.
             n = trial_counts.get(r["trial_id"], 1) or 1
             food = round((r["trial_amount"] or 0) / n)
             deliv = 0
@@ -1027,7 +1046,7 @@ def _delivered_meal_rows(conn):
         out.append({
             "id": r["id"], "day": str(r["date"])[:10],
             "name": r["name"] or "—", "label": r["label"] or "",
-            "meal_type": r["meal_type"] or "Lunch",
+            "meal_type": r["meal_type"] or "Lunch", "qty": qty,
             "source": source, "value": food + deliv, "food": food, "delivery": deliv,
             "sub_id": r["subscription_id"], "trial_id": r["trial_id"],
         })
@@ -1040,13 +1059,16 @@ def _blank_bucket():
 
 
 def _add_meal(bucket, m):
-    bucket["delivered"] += 1
+    # Counts are in MEALS. One stop carrying two boxes fed two people, and every
+    # per-meal figure downstream divides by this.
+    n = m.get("qty", 1) or 1
+    bucket["delivered"] += n
     bucket["food"] += m["food"]
     bucket["delivery"] += m["delivery"]
     if m["source"] == "trial":
-        bucket["trial_sales"] += m["value"]; bucket["trial_meals"] += 1
+        bucket["trial_sales"] += m["value"]; bucket["trial_meals"] += n
     else:
-        bucket["sub_sales"] += m["value"]; bucket["sub_meals"] += 1
+        bucket["sub_sales"] += m["value"]; bucket["sub_meals"] += n
 
 
 def daily_view(conn, limit=30, month=None):

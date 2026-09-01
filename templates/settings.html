@@ -203,7 +203,7 @@
 <div class="card">
   <div class="card-title"><h3>Meal plans &amp; prices</h3></div>
   <div class="table-wrap"><table>
-    <tr><th>Plan</th><th>Category</th><th class="num">Monthly</th><th class="num">Weekly</th><th class="num">Trial</th><th class="num">Validity</th></tr>
+    <tr><th>Plan</th><th>Category</th><th class="num">Monthly</th><th class="num">Weekly</th><th class="num">One meal</th><th class="num">Validity</th></tr>
     {% for p in plans %}
     <tr>
       <td><b>{{ p.name }}</b></td><td>{{ p.category }}</td>
@@ -222,7 +222,7 @@
       <div><label>Validity (days)</label><input name="validity_days" type="number"></div>
       <div><label>Monthly ₹</label><input name="price_monthly" type="number"></div>
       <div><label>Weekly ₹</label><input name="price_weekly" type="number"></div>
-      <div><label>Trial ₹</label><input name="price_trial" type="number"></div>
+      <div><label>One meal ₹</label><input name="price_trial" type="number"></div>
       <div class="full form-actions"><button class="btn btn-primary btn-sm">Save plan</button></div>
     </form>
   </details>

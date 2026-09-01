@@ -2099,15 +2099,20 @@ def _save_trial(c, f, tid):
         _flash_pin_result(f.get("pin"), plat, how)
         if plat is not None:
             lat, lng = plat, plng
+    try:
+        qty = max(1, int(f.get("qty") or 1))
+    except (TypeError, ValueError):
+        qty = 1
     c.execute("""INSERT OR REPLACE INTO trial_orders(id,date,name,phone,order_text,amount,
                    payment_status,month,conversion,address,notes,delivery_date,meal_type,
-                   delivery_status,plan_id,lat,lng,created_at)
-                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   delivery_status,plan_id,lat,lng,qty,created_at)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
               (tid, d, f.get("name"), f.get("phone"), f.get("order_text"),
                float(f.get("amount") or 0), f.get("payment_status", "Paid"),
                core.month_label_iso(d), f.get("conversion"), f.get("address"),
                f.get("notes"), dd, f.get("meal_type", "Lunch"),
-               f.get("delivery_status", "Pending"), plan_id, lat, lng, db.now_iso()))
+               f.get("delivery_status", "Pending"), plan_id, lat, lng, qty,
+               db.now_iso()))
     c.commit()
     core.sync_trial_delivery(c, tid)     # add/update/remove its slot in the day's orders
 
@@ -2119,9 +2124,10 @@ def trial_new():
         tid = next_id(c, "trial_orders", "T")
         _save_trial(c, request.form, tid)
         c.close()
-        flash(f"Trial {tid} added.", "ok")
+        flash(f"One-meal order {tid} added.", "ok")
         return redirect(url_for("trials"))
-    plans = c.execute("SELECT id,name FROM plans WHERE active=1 ORDER BY id").fetchall()
+    plans = c.execute("SELECT id,name,price_trial FROM plans WHERE active=1 "
+                      "ORDER BY id").fetchall()
     c.close()
     return render_template("trial_form.html", trial=None, plans=plans,
                            today=date.today().strftime("%Y-%m-%d"))
@@ -2136,9 +2142,10 @@ def trial_edit(tid):
     if request.method == "POST":
         _save_trial(c, request.form, tid)
         c.close()
-        flash(f"Trial {tid} updated.", "ok")
+        flash(f"One-meal order {tid} updated.", "ok")
         return redirect(url_for("trials"))
-    plans = c.execute("SELECT id,name FROM plans WHERE active=1 ORDER BY id").fetchall()
+    plans = c.execute("SELECT id,name,price_trial FROM plans WHERE active=1 "
+                      "ORDER BY id").fetchall()
     c.close()
     return render_template("trial_form.html", trial=trial, plans=plans,
                            today=date.today().strftime("%Y-%m-%d"))
@@ -2156,7 +2163,7 @@ def trial_pay(tid):
     c.commit(); c.close()
     if _wants_json():
         return jsonify({"ok": True, "payment_status": new})
-    flash(f"Trial {tid} marked {new}.", "ok")
+    flash(f"One-meal order {tid} marked {new}.", "ok")
     return redirect(request.referrer or url_for("trials"))
 
 
@@ -2174,7 +2181,7 @@ def trial_deliver(tid):
     c.close()
     if _wants_json():
         return jsonify({"ok": True, "delivery_status": new})
-    flash(f"Trial {tid} marked {new}.", "ok")
+    flash(f"One-meal order {tid} marked {new}.", "ok")
     return redirect(request.referrer or url_for("trials"))
 
 

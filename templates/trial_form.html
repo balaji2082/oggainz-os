@@ -1,32 +1,46 @@
 {% extends "base.html" %}
-{% block title %}{{ 'Edit' if trial else 'New' }} trial · OG Gainz{% endblock %}
+{% block title %}{{ 'Edit' if trial else 'New' }} one-meal order · OG Gainz{% endblock %}
 {% block content %}
 <div class="page-head">
   <a class="btn btn-ghost btn-sm" href="{{ url_for('trials') }}">‹ Cancel</a>
-  <h1 style="margin:0 0 0 6px">{{ 'Edit trial' if trial else 'New trial order' }}</h1>
+  <h1 style="margin:0 0 0 6px">{{ 'Edit one-meal order' if trial else 'New one-meal order' }}</h1>
 </div>
 <form method="post" class="card">
   <div class="form-grid">
     <div><label>Booking date</label><input name="date" type="date" value="{{ trial.date if trial else today }}"></div>
     <div><label>Name</label><input name="name" value="{{ trial.name if trial }}" required {{ '' if trial else 'autofocus' }}></div>
     <div><label>Contact number</label><input name="phone" value="{{ trial.phone if trial }}" placeholder="10-digit number"></div>
-    <div><label>Amount (₹)</label><input name="amount" type="number" step="1" value="{{ trial.amount if trial else 0 }}"></div>
-    <div class="full"><label>Order</label><input name="order_text" value="{{ trial.order_text if trial }}" placeholder="Elite Meal Pack trial…"></div>
+
+    {# Quantity is boxes to ONE door on ONE slot -- two Elite meals to Arumbakkam
+       is a single ride and a single porter fee, but two boxes to cook. #}
+    <div><label>How many meals</label>
+      <input name="qty" id="qty" type="number" min="1" step="1"
+             value="{{ (trial.qty or 1) if trial else 1 }}">
+      <div class="small muted" style="margin-top:4px">Boxes going to this one address, this one slot.</div></div>
+
+    <div><label>Amount charged (₹)</label>
+      <input name="amount" id="amount" type="number" step="1"
+             value="{{ trial.amount if trial else 0 }}">
+      <div class="small muted" id="pricehint" style="margin-top:4px"></div></div>
+
+    <div class="full"><label>Order</label><input name="order_text" value="{{ trial.order_text if trial }}" placeholder="Elite Meal Pack…"></div>
     <div class="full"><label>Pack (for the prep list)</label>
-      <select name="plan_id">
+      <select name="plan_id" id="plan">
         <option value="">— not set (prep list shows it separately) —</option>
-        {% for p in plans %}<option value="{{ p.id }}" {{ 'selected' if trial and trial.plan_id==p.id }}>{{ p.name }}</option>{% endfor %}
+        {% for p in plans %}<option value="{{ p.id }}" data-price="{{ p.price_trial or 0 }}"
+          {{ 'selected' if trial and trial.plan_id==p.id }}>{{ p.name }}</option>{% endfor %}
       </select>
-      <div class="small muted" style="margin-top:6px">Picking the pack lets the prep list count this trial's chicken/eggs/carbs automatically.</div></div>
+      <div class="small muted" style="margin-top:6px">Picking the pack lets the prep list count this order's chicken/eggs/carbs automatically — multiplied by the number of meals.</div></div>
 
     <div><label>Payment status</label>
       <select name="payment_status">
         {% for p in ['Paid','Unpaid'] %}<option {{ 'selected' if trial and trial.payment_status==p }}>{{ p }}</option>{% endfor %}
       </select></div>
-    <div><label>Conversion status</label>
-      <input name="conversion" value="{{ trial.conversion if trial }}" placeholder="Converted / blank"></div>
+    <div><label>First time? (for follow-up)</label>
+      <input name="conversion" value="{{ trial.conversion if trial }}" placeholder="Converted / callback / blank">
+      <div class="small muted" style="margin-top:4px">Leave blank for a repeat customer. Fill it in when this is a taste-test worth chasing.</div></div>
 
-    <div class="full hr-label"><b>Schedule the trial meal</b> <span class="muted small">(it will appear in that day's orders to prep)</span></div>
+    <div class="full hr-label"><b>Schedule the meal</b> <span class="muted small">(it will appear in that day's orders to prep)</span></div>
     <div><label>Delivery date</label><input name="delivery_date" type="date" value="{{ trial.delivery_date if trial }}"></div>
     <div><label>Meal slot</label>
       <select name="meal_type">{% for sl in ['Lunch','Dinner'] %}<option {{ 'selected' if trial and trial.meal_type==sl }}>{{ sl }}</option>{% endfor %}</select></div>
@@ -35,19 +49,72 @@
 
     <div class="full"><label>Address</label><textarea name="address">{{ trial.address if trial }}</textarea></div>
 
-    {# A trial box rides the same route as everything else, so it needs a pin or
+    {# A one-meal box rides the same route as everything else, so it needs a pin or
        it goes out with no distance and no share of the km allowance. #}
     <div class="full"><label>Map pin</label>
       <input name="pin" placeholder="Plus code, coordinates, Maps link, or the place name">
       <div class="small muted" style="margin-top:4px">
         {% if trial and trial.lat %}Pinned at {{ '%.6f'|format(trial.lat) }},
           {{ '%.6f'|format(trial.lng) }} — type a new one to replace it.
-        {% else %}Not pinned yet. Without this the trial rides with no distance and no zone.
+        {% else %}Not pinned yet. Without this it rides with no distance and no zone.
         {% endif %}
       </div>
     </div>
     <div class="full"><label>Notes</label><textarea name="notes" placeholder="Preferences, feedback, follow-up…">{{ trial.notes if trial }}</textarea></div>
   </div>
-  <div class="form-actions"><button class="btn btn-primary">{{ 'Save changes' if trial else 'Add trial' }}</button></div>
+  <div class="form-actions"><button class="btn btn-primary">{{ 'Save changes' if trial else 'Add order' }}</button></div>
 </form>
+
+<script>
+/* Suggests quantity x the pack's single-meal price, and never overrules him: he
+   charged 600 for two Elite meals where the arithmetic says 598, and what he
+   ACTUALLY charged is the number that must be stored. So the amount is filled in
+   automatically only while it still matches the last suggestion (or is empty) --
+   once he types his own figure, it is left alone. */
+(function () {
+  var plan = document.getElementById('plan');
+  var qty = document.getElementById('qty');
+  var amount = document.getElementById('amount');
+  var hint = document.getElementById('pricehint');
+  if (!plan || !qty || !amount || !hint) return;
+  var lastSuggested = null;
+
+  function unitPrice() {
+    var o = plan.options[plan.selectedIndex];
+    return o ? (parseFloat(o.dataset.price || 0) || 0) : 0;
+  }
+  function boxes() {
+    return Math.max(1, parseInt(qty.value || 1, 10) || 1);
+  }
+  function say(unit, n, suggested) {
+    var shown = parseFloat(amount.value || 0) || 0;
+    hint.textContent = n + ' × ₹' + unit + ' = ₹' + suggested
+      + (shown && shown !== suggested
+           ? '  ·  you are charging ₹' + shown
+           : '  ·  change it if you charged something else');
+  }
+
+  function update() {
+    var unit = unitPrice();
+    if (!unit) { hint.textContent = 'Pick a pack to see the usual price.'; return; }
+    var n = boxes(), suggested = unit * n;
+    var cur = parseFloat(amount.value || 0) || 0;
+    if (!cur || (lastSuggested !== null && cur === lastSuggested)) {
+      amount.value = suggested;
+    }
+    lastSuggested = suggested;
+    say(unit, n, suggested);
+  }
+
+  plan.addEventListener('change', update);
+  qty.addEventListener('input', update);
+  amount.addEventListener('input', function () {
+    var unit = unitPrice();
+    if (!unit) return;
+    var n = boxes();
+    say(unit, n, unit * n);
+  });
+  update();
+})();
+</script>
 {% endblock %}
