@@ -904,21 +904,54 @@ def plan_week(conn, sub_id, wanted_days, window_days, slot=None):
     return added, removed
 
 
+def expand_boxes(rows):
+    """One display entry per BOX, for the day's order list.
+
+    A row is a drop; qty is what rides on it. The kitchen packs boxes and the
+    rider hands over boxes, so the list has to show two Elite packs as two lines
+    or the count disagrees with what is actually going out.
+
+    Every entry keeps the SAME delivery id on purpose: the route still has one
+    stop, and ticking any of the lines marks the whole order (the page updates
+    every line sharing that id).
+    """
+    out = []
+    for r in rows:
+        n = boxes_on(r)
+        for i in range(n):
+            d = dict(r)
+            d["box_no"] = i + 1
+            d["box_of"] = n
+            out.append(d)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Dashboard / stats
 # ---------------------------------------------------------------------------
+def boxes_on(row):
+    """How many boxes this one stop carries. Always at least one."""
+    try:
+        return max(1, int(row["qty"] or 1))
+    except (IndexError, KeyError, TypeError, ValueError):
+        return 1
+
+
 def today_summary(conn, day_iso):
     rows = deliveries_for_day(conn, day_iso)
-    total = len(rows)
-    done = sum(1 for r in rows if r["status"] == "Delivered")
-    skipped = sum(1 for r in rows if r["status"] == "Skipped")
-    pending = sum(1 for r in rows if r["status"] == "Pending")
+    # Counts are in MEALS, not stops. Two Elite boxes to one door is one ride but
+    # two meals to cook, hand over and tick off; counting rows read one short and
+    # made the day's total disagree with the order list beside it.
+    total = sum(boxes_on(r) for r in rows)
+    done = sum(boxes_on(r) for r in rows if r["status"] == "Delivered")
+    skipped = sum(boxes_on(r) for r in rows if r["status"] == "Skipped")
+    pending = sum(boxes_on(r) for r in rows if r["status"] == "Pending")
     # cook counts by plan + meal type, also grouped by slot for a structured prep list
     cook = {}
     for r in rows:
         if r["status"] in ("Delivered", "Pending"):
             key = (r["plan_name"] or "—", r["meal_type"] or "—")
-            cook[key] = cook.get(key, 0) + 1
+            cook[key] = cook.get(key, 0) + boxes_on(r)
     cook_flat = sorted(([p, m, n] for (p, m), n in cook.items()), key=lambda x: -x[2])
     cook_lunch = sorted(([p, n] for (p, m), n in cook.items() if m != "Dinner"), key=lambda x: -x[1])
     cook_dinner = sorted(([p, n] for (p, m), n in cook.items() if m == "Dinner"), key=lambda x: -x[1])
@@ -1034,7 +1067,7 @@ def _delivered_meal_rows(conn):
             deliv = round((r["sub_fee"] or 0) / meals * qty) if meals else 0
             source = "sub"
         elif r["trial_id"]:
-            # NOT multiplied: a one-meal order's amount is already the whole
+            # NOT multiplied: a one-time order's amount is already the whole
             # order (he charged 600 for the two Elite boxes, not 600 each). It is
             # only split when one order was carried out over several days.
             n = trial_counts.get(r["trial_id"], 1) or 1

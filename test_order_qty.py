@@ -88,7 +88,7 @@ legacy = conn.execute("SELECT COALESCE(qty,1) q FROM deliveries "
                       "WHERE name='Legacy row'").fetchone()["q"]
 eq("a row written without qty still means one meal", legacy, 1)
 
-# ---------------------------------------------------------------- one-meal order
+# ---------------------------------------------------------------- one-time order
 print("\n the Arumbakkam order: 2 Elite meals, one door, Rs 600")
 conn.execute(
     "INSERT INTO trial_orders(id,date,name,order_text,amount,payment_status,month,"
@@ -118,6 +118,27 @@ eq("the order is on the day sheet once", len(mine), 1)
 prep = menu.prep_for_day(conn, "2026-09-02", rows)
 check("the prep list counts two meals, not one",
       prep["lunch"]["meals"] >= 2, "meals=%d" % prep["lunch"]["meals"])
+
+# ------------------------------------------- the day's list shows one line per box
+print("\n today's orders list one line per box")
+# His complaint: a single line reading "x2" made the day's count read one short,
+# so the header disagreed with what was actually going out.
+shown = core.expand_boxes(rows)
+mine_shown = [r for r in shown if r["trial_id"] == "T900"]
+eq("two lines for the two-box order", len(mine_shown), 2)
+eq("labelled box 1 of 2", (mine_shown[0]["box_no"], mine_shown[0]["box_of"]), (1, 2))
+eq("labelled box 2 of 2", (mine_shown[1]["box_no"], mine_shown[1]["box_of"]), (2, 2))
+check("both lines share ONE delivery id, so the route has one stop and one tick "
+      "marks both", mine_shown[0]["id"] == mine_shown[1]["id"])
+eq("the list is longer than the row set by exactly the extra boxes",
+   len(shown) - len(rows), sum(core.boxes_on(r) - 1 for r in rows))
+
+summ = core.today_summary(conn, "2026-09-02")
+by_hand = sum(core.boxes_on(r) for r in rows)
+eq("the day's total counts meals, not stops", summ["total"], by_hand)
+eq("the total matches the number of lines shown", summ["total"], len(shown))
+eq("the cook list counts two Elite boxes", summ["cook_total"],
+   sum(core.boxes_on(r) for r in rows if r["status"] in ("Pending", "Delivered")))
 
 # ------------------------------------------------------- a pack is drawn down right
 print("\n a subscription pack is drawn down in meals")
@@ -173,9 +194,9 @@ eq("the bucket counts three meals from two stops", bucket["delivered"], 3)
 
 trial_meals = [m for m in meals if m["trial_id"] == "T900"]
 if trial_meals:
-    eq("a one-meal order's price is NOT multiplied", trial_meals[0]["food"], 600)
+    eq("a one-time order's price is NOT multiplied", trial_meals[0]["food"], 600)
 
-print("\n a one-meal order marked delivered is valued once")
+print("\n a one-time order marked delivered is valued once")
 conn.execute("UPDATE deliveries SET status='Delivered' WHERE trial_id='T900'")
 conn.commit()
 meals = core._delivered_meal_rows(conn)
@@ -186,7 +207,7 @@ eq("but it fed two people", t[0]["qty"], 2)
 b2 = core._blank_bucket()
 core._add_meal(b2, t[0])
 eq("so it counts as two meals delivered", b2["delivered"], 2)
-eq("and 600 of one-meal sales", b2["trial_sales"], 600)
+eq("and 600 of one-time sales", b2["trial_sales"], 600)
 
 print("-" * 58)
 if FAILS:

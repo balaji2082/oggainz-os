@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}{{ 'Edit' if trial else 'New' }} one-meal order · OG Gainz{% endblock %}
+{% block title %}{{ 'Edit' if trial else 'New' }} one-time order · OG Gainz{% endblock %}
 {% block content %}
 <div class="page-head">
   <a class="btn btn-ghost btn-sm" href="{{ url_for('trials') }}">‹ Cancel</a>
-  <h1 style="margin:0 0 0 6px">{{ 'Edit one-meal order' if trial else 'New one-meal order' }}</h1>
+  <h1 style="margin:0 0 0 6px">{{ 'Edit one-time order' if trial else 'New one-time order' }}</h1>
 </div>
 <form method="post" class="card">
   <div class="form-grid">
@@ -11,8 +11,9 @@
     <div><label>Name</label><input name="name" value="{{ trial.name if trial }}" required {{ '' if trial else 'autofocus' }}></div>
     <div><label>Contact number</label><input name="phone" value="{{ trial.phone if trial }}" placeholder="10-digit number"></div>
 
-    {# Quantity is boxes to ONE door on ONE slot -- two Elite meals to Arumbakkam
-       is a single ride and a single porter fee, but two boxes to cook. #}
+    {# Boxes to ONE door on ONE slot. Two Elite meals to Arumbakkam is a single
+       ride and a single porter fee, but two boxes to cook -- and the day's order
+       list shows them as two lines so the count matches what goes out. #}
     <div><label>How many meals</label>
       <input name="qty" id="qty" type="number" min="1" step="1"
              value="{{ (trial.qty or 1) if trial else 1 }}">
@@ -49,7 +50,7 @@
 
     <div class="full"><label>Address</label><textarea name="address">{{ trial.address if trial }}</textarea></div>
 
-    {# A one-meal box rides the same route as everything else, so it needs a pin or
+    {# A one-time order rides the same route as everything else, so it needs a pin or
        it goes out with no distance and no share of the km allowance. #}
     <div class="full"><label>Map pin</label>
       <input name="pin" placeholder="Plus code, coordinates, Maps link, or the place name">

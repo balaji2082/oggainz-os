@@ -498,7 +498,7 @@ def order_items(conn, r, day_iso, cache=None, plan_cache=None):
                 label = v["name"]
     elif r["trial_id"]:
         t = conn.execute("SELECT * FROM trial_orders WHERE id=?", (r["trial_id"],)).fetchone()
-        label = "ONE-MEAL · " + ((t["order_text"] if t else None) or "One-meal order")
+        label = "ONE-TIME · " + ((t["order_text"] if t else None) or "One-time order")
         pid = t["plan_id"] if t else None
         if not pid and t:
             p = match_plan(conn, t["order_text"])

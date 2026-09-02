@@ -21,7 +21,7 @@
       <a href="{{ url_for('subscriptions') }}" class="{{ 'on' if nav and 'subscription' in nav }}">Subscriptions</a>
       <a href="{{ url_for('customers') }}" class="{{ 'on' if nav and 'customer' in nav }}">Customers</a>
       <a href="{{ url_for('crm_home') }}" class="{{ 'on' if nav and 'crm' in nav }}">CRM{% if g_due %} <span class="navbadge">{{ g_due }}</span>{% endif %}</a>
-      <a href="{{ url_for('trials') }}" class="{{ 'on' if nav and 'trial' in nav }}">One-Meal</a>
+      <a href="{{ url_for('trials') }}" class="{{ 'on' if nav and 'trial' in nav }}">One-Time</a>
       <a href="{{ url_for('revenue') }}" class="{{ 'on' if nav=='revenue' }}">Revenue</a>
       <a href="{{ url_for('content_board') }}" class="{{ 'on' if nav and nav.startswith('content') }}">Content</a>
       <a href="{{ url_for('settings') }}" class="{{ 'on' if nav and 'setting' in nav }}">Settings</a>

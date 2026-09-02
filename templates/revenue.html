@@ -24,7 +24,7 @@
       <span class="mh-n">{{ cur.sub_count if cur else 0 }} pack{{ 's' if not cur or cur.sub_count!=1 }}</span>
     </div>
     <div class="mh-stat">
-      <span class="mh-k">One-meal</span>
+      <span class="mh-k">One-time</span>
       <span class="mh-v">{{ cur.trial_value|inr if cur else '₹0' }}</span>
       <span class="mh-n">{{ cur.trial_count if cur else 0 }} trial{{ 's' if not cur or cur.trial_count!=1 }}</span>
     </div>
@@ -89,7 +89,7 @@
       </ul>
       {% endif %}
       {% if outstanding.trials %}
-      <div class="oc-head" style="margin-top:6px">One-meal · {{ outstanding.trial_n }} · <b>{{ outstanding.trial_total|inr }}</b></div>
+      <div class="oc-head" style="margin-top:6px">One-time · {{ outstanding.trial_n }} · <b>{{ outstanding.trial_total|inr }}</b></div>
       <ul class="disc-list">
         {% for t in outstanding.trials %}
         <li><a href="{{ url_for('trial_edit', tid=t.id) }}">{{ t.name }}</a>
@@ -208,7 +208,7 @@
         <div class="ds-sub">
           <span class="ds-plan">{{ it.label or 'Meal' }}</span>
           <span class="chip chip-xs {{ 'chip-dinner' if it.meal_type=='Dinner' else 'chip-lunch' }}">{{ it.meal_type }}</span>
-          {% if it.source=='trial' %}<span class="chip chip-xs chip-trial">One-meal</span>{% endif %}
+          {% if it.source=='trial' %}<span class="chip chip-xs chip-trial">One-time</span>{% endif %}
         </div>
       </div>
       <div class="ds-price">{{ it.value|inr }}
@@ -339,7 +339,7 @@
   <div class="card-title"><h3>Month by month</h3><span class="spacer"></span>
     <span class="small muted">sold vs food delivered · tap to open</span></div>
   <div class="table-wrap"><table class="rev-table revx">
-    <tr><th>Month</th><th class="num">Subs sold</th><th class="num">One-meal</th>
+    <tr><th>Month</th><th class="num">Subs sold</th><th class="num">One-time</th>
         <th class="num">Food delivered</th><th class="num">Revenue</th><th class="num">Growth</th></tr>
     {% for m in monthly_rev|reverse %}
     <tr class="rowlink" onclick="location.href='{{ url_for('revenue', period='day', month=m.month) }}'">

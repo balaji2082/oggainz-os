@@ -41,7 +41,14 @@ async function mark(btn, deliveryId, status) {
     // reads like a bug and invites a second tap.
     if (!data.ok && data.locked) { showToast(data.error, false); return; }
     if (!data.ok) throw new Error();
-    applyRowStatus(row, target);
+    // A stop carrying two boxes is shown as two lines that share one delivery
+    // id, so one tick has to move both. Falls back to the clicked row when the
+    // id is missing for any reason.
+    const id = row.dataset.id;
+    const siblings = id
+      ? document.querySelectorAll('.drow[data-id="' + CSS.escape(id) + '"]')
+      : [row];
+    siblings.forEach(el => applyRowStatus(el, target));
     updateCounters(data);
     if (target === 'Delivered') showToast('Marked delivered ✓');
     else if (target === 'Skipped') showToast('Marked skipped', false);

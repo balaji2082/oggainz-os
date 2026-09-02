@@ -649,7 +649,7 @@ MIGRATIONS = {
                       # like any other stop, or it rides with no distance and no
                       # share of the km allowance.
                       ("lat", "REAL"), ("lng", "REAL"),
-                      # Boxes on one one-meal order -- his Arumbakkam client took
+                      # Boxes on one one-time order -- his Arumbakkam client took
                       # two Elite meals to one address in one slot.
                       ("qty", "INTEGER DEFAULT 1")],
     # email: customers were only ever reached on WhatsApp, so this never existed.

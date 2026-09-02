@@ -466,6 +466,9 @@ def deliveries():
     next_d = (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
     variant_map = _variant_map(c, rows)
     c.close()
+    # One line per BOX in the list. Routing and prep still work off `rows`, so a
+    # two-box stop stays one ride and one porter fee -- only the list splits.
+    rows = core.expand_boxes(rows)
     return render_template("deliveries.html", d=d, rows=rows, view=view, override=override,
                            operating=operating, prev_d=prev_d, next_d=next_d,
                            variant_map=variant_map,
@@ -2124,7 +2127,7 @@ def trial_new():
         tid = next_id(c, "trial_orders", "T")
         _save_trial(c, request.form, tid)
         c.close()
-        flash(f"One-meal order {tid} added.", "ok")
+        flash(f"One-time order {tid} added.", "ok")
         return redirect(url_for("trials"))
     plans = c.execute("SELECT id,name,price_trial FROM plans WHERE active=1 "
                       "ORDER BY id").fetchall()
@@ -2142,7 +2145,7 @@ def trial_edit(tid):
     if request.method == "POST":
         _save_trial(c, request.form, tid)
         c.close()
-        flash(f"One-meal order {tid} updated.", "ok")
+        flash(f"One-time order {tid} updated.", "ok")
         return redirect(url_for("trials"))
     plans = c.execute("SELECT id,name,price_trial FROM plans WHERE active=1 "
                       "ORDER BY id").fetchall()
@@ -2163,7 +2166,7 @@ def trial_pay(tid):
     c.commit(); c.close()
     if _wants_json():
         return jsonify({"ok": True, "payment_status": new})
-    flash(f"One-meal order {tid} marked {new}.", "ok")
+    flash(f"One-time order {tid} marked {new}.", "ok")
     return redirect(request.referrer or url_for("trials"))
 
 
@@ -2181,7 +2184,7 @@ def trial_deliver(tid):
     c.close()
     if _wants_json():
         return jsonify({"ok": True, "delivery_status": new})
-    flash(f"One-meal order {tid} marked {new}.", "ok")
+    flash(f"One-time order {tid} marked {new}.", "ok")
     return redirect(request.referrer or url_for("trials"))
 
 
