@@ -66,6 +66,24 @@
   <div class="form-actions"><button class="btn btn-primary">{{ 'Save changes' if trial else 'Add order' }}</button></div>
 </form>
 
+{% if trial %}
+{# Deleting from inside the order you are looking at, which is where you usually
+   realise it was a mistake. Its own form: a nested one would not submit. #}
+<form method="post" action="{{ url_for('trial_delete', tid=trial.id) }}"
+      style="margin-top:14px"
+      onsubmit="return confirm('Delete this one-time order for {{ trial.name|e }}?
+
+{{ trial.order_text|e }} — {{ trial.amount|int }}{% if trial.delivery_status == 'Delivered' %}
+
+It is marked DELIVERED, so this also removes that money from the books.{% endif %}
+
+It leaves the day's orders as well. A backup is taken first.');">
+  <button type="submit" class="btn btn-ghost btn-sm"
+          style="color:var(--bad,#c0392b)">Delete this order</button>
+  <span class="small muted" style="margin-left:8px">Booked by mistake, or a duplicate.</span>
+</form>
+{% endif %}
+
 <script>
 /* Suggests quantity x the pack's single-meal price, and never overrules him: he
    charged 600 for two Elite meals where the arithmetic says 598, and what he

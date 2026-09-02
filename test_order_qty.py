@@ -209,6 +209,45 @@ core._add_meal(b2, t[0])
 eq("so it counts as two meals delivered", b2["delivered"], 2)
 eq("and 600 of one-time sales", b2["trial_sales"], 600)
 
+# ------------------------------------------------- both day screens, and delete
+print("\n every screen that LISTS the day agrees on the count")
+# The first fix shipped only /deliveries. Today is the screen he actually uses,
+# and it built its own list from the unexpanded rows -- so a two-box order still
+# showed as one line there. today_summary now carries both.
+summ = core.today_summary(conn, "2026-09-02")
+eq("summary keeps the true rows for routing and prep",
+   len(summ["rows"]), len(core.deliveries_for_day(conn, "2026-09-02")))
+eq("and separate display lines, one per box",
+   len(summ["lines"]), sum(core.boxes_on(r) for r in summ["rows"]))
+eq("the headline total matches the lines shown", summ["total"], len(summ["lines"]))
+check("the two are not the same object — prep must never get the expanded list",
+      len(summ["lines"]) != len(summ["rows"]))
+
+print("\n a one-time order can be deleted")
+import app as A                                                  # noqa: E402
+A.today_iso = lambda: "2026-09-02"
+cl = A.app.test_client()
+with cl.session_transaction() as sess:
+    sess["role"] = "admin"
+conn.execute(
+    "INSERT INTO trial_orders(id,date,name,order_text,amount,payment_status,month,"
+    "delivery_date,meal_type,delivery_status,qty) "
+    "VALUES('T901','2026-09-02','Duplicate','Elite Meal Pack',299,'Unpaid',"
+    "'Sep-2026','2026-09-02','Lunch','Pending',1)")
+conn.commit()
+core.sync_trial_delivery(conn, "T901")
+eq("the duplicate is on the day", conn.execute(
+    "SELECT COUNT(*) n FROM deliveries WHERE trial_id='T901'").fetchone()["n"], 1)
+
+r = cl.post("/trials/T901/delete", follow_redirects=True)
+eq("delete responds", r.status_code, 200)
+eq("the order is gone", conn.execute(
+    "SELECT COUNT(*) n FROM trial_orders WHERE id='T901'").fetchone()["n"], 0)
+eq("and so is its place in the day's orders", conn.execute(
+    "SELECT COUNT(*) n FROM deliveries WHERE trial_id='T901'").fetchone()["n"], 0)
+eq("deleting one that does not exist is a clean 404",
+   cl.post("/trials/T999/delete").status_code, 404)
+
 print("-" * 58)
 if FAILS:
     print("FAILED: %d check(s) -> %s\n" % (len(FAILS), ", ".join(FAILS)))

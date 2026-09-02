@@ -221,9 +221,11 @@
   {{ m.view_toggle('today', d, view) }}
 
   {% set lunch = [] %}{% set dinner = [] %}
-  {% for r in s.rows %}{% if (r.meal_type or 'Lunch') == 'Dinner' %}{% set _ = dinner.append(r) %}{% else %}{% set _ = lunch.append(r) %}{% endif %}{% endfor %}
+  {# s.lines, not s.rows: one line per BOX, so a two-box stop is listed twice and
+     the counts above match what actually goes out. #}
+  {% for r in s.lines %}{% if (r.meal_type or 'Lunch') == 'Dinner' %}{% set _ = dinner.append(r) %}{% else %}{% set _ = lunch.append(r) %}{% endif %}{% endfor %}
 
-  {% if s.rows %}
+  {% if s.lines %}
     {% if view in ['all','lunch'] and lunch %}
       {% if view == 'all' %}<h3 class="sect">☀ Lunch <span class="muted small">({{ lunch|length }})</span></h3>{% endif %}
       <div class="dlist" style="margin-bottom:14px">{% for r in lunch %}{{ m.drow(r, addr_map.get(r.customer_id)) }}{% endfor %}</div>

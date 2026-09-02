@@ -956,7 +956,13 @@ def today_summary(conn, day_iso):
     cook_lunch = sorted(([p, n] for (p, m), n in cook.items() if m != "Dinner"), key=lambda x: -x[1])
     cook_dinner = sorted(([p, n] for (p, m), n in cook.items() if m == "Dinner"), key=lambda x: -x[1])
     return {
-        "rows": rows, "total": total, "done": done, "skipped": skipped,
+        # rows  = the real delivery rows. One per STOP. This is what routing and
+        #         the prep list must use -- prep multiplies by qty itself, so
+        #         handing it expanded lines would cook everything twice.
+        # lines = one entry per BOX, for any screen that LISTS the day's orders.
+        #         Both Today and the full Deliveries view read this one.
+        "rows": rows, "lines": expand_boxes(rows),
+        "total": total, "done": done, "skipped": skipped,
         "pending": pending, "operating": is_operating_day(conn, day_iso),
         "cook": cook_flat, "cook_lunch": cook_lunch, "cook_dinner": cook_dinner,
         "cook_total": sum(n for _, _, n in cook_flat),

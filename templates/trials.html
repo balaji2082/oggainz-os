@@ -69,6 +69,19 @@
       </form>
       <span class="spacer"></span>
       <a class="btn btn-ghost btn-sm" href="{{ url_for('trial_edit', tid=r.id) }}">Edit</a>
+      {# Booked by mistake, or duplicated. Without this the only way out was to
+         rename it and leave it in the day's orders still being cooked. #}
+      <form method="post" action="{{ url_for('trial_delete', tid=r.id) }}"
+            onsubmit="return confirm('Delete this one-time order for {{ r.name|e }}?
+
+{{ r.order_text|e }} — {{ r.amount|int }}{% if r.delivery_status == 'Delivered' %}
+
+It is marked DELIVERED, so this also removes that money from the books.{% endif %}
+
+It leaves today's orders as well. A backup is taken first.');">
+        <input type="hidden" name="back" value="{{ request.full_path }}">
+        <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--bad,#c0392b)">Delete</button>
+      </form>
     </div>
   </div>
   {% else %}

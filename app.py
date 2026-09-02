@@ -1374,6 +1374,9 @@ def sheet(d, slot):
             "locality": r["locality"] or "",
             "map_note": (stop["map_note"] if stop else r["map_note"]),
             "plan": label or "Meal",
+            # The rider carries BOXES, not orders. A stop with two on it has to
+            # say so on the paper or one box stays in the bag.
+            "boxes": core.boxes_on(r),
             "items": [{"name": sheet_i18n.component_name(i["name"], lang),
                        "qty": menu.fmt_qty(i["qty"], i["unit"]),
                        "note": i.get("note")} for i in items],
@@ -2436,6 +2439,50 @@ def crm_new():
                            temps=crm.TEMPS, kinds=crm.KINDS,
                            lost_reasons=crm.LOST_REASONS,
                            today=date.today().strftime("%Y-%m-%d"))
+
+
+@app.route("/trials/<tid>/delete", methods=["POST"])
+def trial_delete(tid):
+    """Remove a one-time order booked by mistake.
+
+    There was no way to do this, so a duplicate had to be renamed "Bug duplicate"
+    and left sitting in the day's orders where it still got counted and still got
+    cooked. A mistake you cannot take back is worse than one you can.
+
+    Deletes the order and the delivery row it put on the day. A backup is taken
+    first, exactly as deleting a subscription does, so nothing is truly lost.
+    """
+    c = conn()
+    t = c.execute("SELECT * FROM trial_orders WHERE id=?", (tid,)).fetchone()
+    if not t:
+        c.close(); abort(404)
+    try:
+        import backup
+        backup.make_backup(quiet=True)
+    except Exception:
+        pass                                  # never block a delete on backup trouble
+
+    name = t["name"] or tid
+    amount = t["amount"] or 0
+    was_delivered = (t["delivery_status"] or "") == "Delivered"
+
+    # A lead may point at this order as the trial it was sent. Clear the link
+    # rather than leave it dangling at a row that no longer exists.
+    c.execute("UPDATE leads SET trial_id=NULL WHERE trial_id=?", (tid,))
+    c.execute("DELETE FROM deliveries WHERE trial_id=?", (tid,))
+    c.execute("DELETE FROM trial_orders WHERE id=?", (tid,))
+    c.commit()
+    c.close()
+
+    # Say what it actually cost. Deleting a delivered, paid order takes real money
+    # out of the books, and that should never happen quietly.
+    note = f"Deleted one-time order {tid} for {name}."
+    if was_delivered and amount:
+        note += f" That removed ₹{int(amount):,} of delivered revenue from the books."
+    elif amount:
+        note += f" It was for ₹{int(amount):,}."
+    flash(note, "ok")
+    return redirect(request.form.get("back") or url_for("trials"))
 
 
 @app.route("/crm/import-trials", methods=["POST"])

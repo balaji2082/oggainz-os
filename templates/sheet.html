@@ -258,7 +258,8 @@ tr.backrow td { background: #f2f4f3; font-size: 9pt; }
     <div class="card-h">
       <span class="seq">{{ o.seq or '–' }}</span>
       <span class="who" data-k="o{{ loop.index }}.name" contenteditable="false">{{ o.name }}</span>
-      <span class="plan" data-k="o{{ loop.index }}.plan" contenteditable="false">{{ o.plan }}</span>
+      <span class="plan" data-k="o{{ loop.index }}.plan" contenteditable="false">{{ o.plan }}{% if (o.boxes or 1) > 1 %} &times; {{ o.boxes }}{% endif %}</span>
+      {% if (o.boxes or 1) > 1 %}<span class="qty">{{ o.boxes }} BOXES</span>{% endif %}
     </div>
     <div class="card-b">
       <div class="line"><span class="lbl">{{ T.phone }}</span><span data-k="o{{ loop.index }}.ph" contenteditable="false">{{ o.phone or '—' }}</span></div>
