@@ -752,6 +752,16 @@ def subscription_new():
     c = conn()
     if request.method == "POST":
         f = request.form
+        # The same form sent twice (a second tap while the phone was still saving)
+        # made Nivitha's renewal twice. Land on the one that already exists instead.
+        twin = core.recent_twin_subscription(c, f.get("customer_id"), f.get("plan_name"),
+                                             f.get("slot", "Lunch"),
+                                             f.get("start_date") or None)
+        if twin:
+            c.close()
+            flash(f"{twin['customer_name']} already has this exact pack — {twin['id']}, made "
+                  f"a few minutes ago. Opened that one instead of creating a duplicate.", "warn")
+            return redirect(url_for("subscription_detail", sid=twin["id"]))
         sid = next_id(c, "subscriptions", "S")
         duration = f.get("duration", "Monthly")
         scheduled = int(f.get("total_meals_scheduled") or (5 if duration == "Weekly" else 20))
@@ -1005,6 +1015,13 @@ def subscription_renew(sid):
     # come from the renew form (default today) so a renewal can be billed on a chosen day.
     start = (request.form.get("start_date") or "").strip() or today_iso
     booking = (request.form.get("booking_date") or "").strip() or start
+    twin = core.recent_twin_subscription(c, old["customer_id"], old["plan_name"],
+                                         old["slot"], start)
+    if twin:
+        c.close()
+        flash(f"{old['customer_name']} already has this exact pack — {twin['id']}, made a "
+              f"few minutes ago. Opened that one instead of creating a duplicate.", "warn")
+        return redirect(url_for("subscription_detail", sid=twin["id"]))
     # Carry over the received amount/payment only if asked (default: fresh unpaid pack).
     received = float(request.form.get("amount_received") or 0)
     total = old["total_amount"] or 0
@@ -1034,8 +1051,8 @@ def subscription_renew(sid):
 
 @app.route("/subscriptions/<sid>/delete", methods=["POST"])
 def subscription_delete(sid):
-    """Delete a subscription (e.g. created by mistake) and renumber the rest so the
-    IDs stay gap-free. A safety backup is taken first so nothing is ever truly lost."""
+    """Delete a subscription (e.g. created by mistake). The other packs keep their
+    ids. A safety backup is taken first so nothing is ever truly lost."""
     c = conn()
     sub = c.execute("SELECT customer_name FROM subscriptions WHERE id=?", (sid,)).fetchone()
     if not sub:
@@ -1046,9 +1063,17 @@ def subscription_delete(sid):
     except Exception:
         pass                                  # never block a delete on backup trouble
     name = sub["customer_name"]
-    core.delete_subscription(c, sid)
+    try:
+        core.delete_subscription(c, sid)
+    except Exception as e:
+        # Say what went wrong and stay on the pack, instead of a bare server error
+        # page. delete_subscription is all-or-nothing, so nothing was half-removed.
+        app.logger.exception("delete of %s failed", sid)
+        c.close()
+        flash(f"Couldn't delete {sid} — nothing was changed. ({e})", "warn")
+        return redirect(url_for("subscription_detail", sid=sid))
     c.close()
-    flash(f"Deleted subscription for {name}. Remaining subscriptions renumbered.", "ok")
+    flash(f"Deleted subscription {sid} for {name}.", "ok")
     return redirect(url_for("subscriptions"))
 
 
@@ -2120,7 +2145,60 @@ def _save_trial(c, f, tid):
                f.get("delivery_status", "Pending"), plan_id, lat, lng, qty,
                db.now_iso()))
     c.commit()
+    _save_trial_box_from_form(c, tid, f)
     core.sync_trial_delivery(c, tid)     # add/update/remove its slot in the day's orders
+
+
+def _save_trial_box_from_form(c, tid, f):
+    """Store the box the form's builder sends as `comp_json` — the items in ONE
+    box of this order ("Custom pack: Chicken 300g, Rice"). A form that sends no
+    comp_json at all (JS off, an old open tab) leaves the saved box alone."""
+    raw = f.get("comp_json")
+    if raw is None:
+        return
+    try:
+        items = json.loads(raw) if raw.strip() else []
+    except ValueError:
+        return
+    if not isinstance(items, list):
+        return
+    box = []
+    for i in items:
+        try:
+            cid, qty = int(i["id"]), float(i.get("qty") or 0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if qty > 0:
+            box.append((cid, qty, (i.get("note") or "").strip()))
+    menu.save_trial_composition(c, tid, box)
+
+
+def _trial_form_ctx(c, trial=None):
+    """Everything the one-time order form needs: the packs to pick from, the item
+    catalog + pack recipes for the box builder, and the box as saved (or, for an
+    order saved before boxes existed, the recipe of its pack — which is what the
+    kitchen has been cooking for it)."""
+    plans = c.execute("SELECT id,name,price_trial FROM plans WHERE active=1 "
+                      "ORDER BY id").fetchall()
+    box = []
+    if trial:
+        box = [{"id": r["component_id"], "qty": r["qty"], "note": r["note"] or ""}
+               for r in menu.trial_composition(c, trial["id"])]
+        if not box and trial["plan_id"]:
+            box = [{"id": r["component_id"], "qty": r["qty"], "note": r["note"] or ""}
+                   for r in menu.plan_recipe(c, trial["plan_id"])]
+    md = _menu_data(c)
+    # An item hidden from the menu since this order was saved must still show up
+    # (and be kept on save) — it just isn't offered in the picker any more.
+    known = {x["id"] for x in md["components"]}
+    for r in menu.all_components(c, active_only=False):
+        if r["id"] not in known and any(b["id"] == r["id"] for b in box):
+            md["components"].append({"id": r["id"], "name": r["name"], "unit": r["unit"],
+                                     "step": r["step"], "default_qty": r["default_qty"],
+                                     "addon_price": r["addon_price"], "protein": r["protein"],
+                                     "emoji": r["emoji"], "hidden": True})
+    return {"plans": plans, "menu_data": md, "existing_box": box,
+            "today": date.today().strftime("%Y-%m-%d")}
 
 
 @app.route("/trials/new", methods=["GET", "POST"])
@@ -2132,11 +2210,9 @@ def trial_new():
         c.close()
         flash(f"One-time order {tid} added.", "ok")
         return redirect(url_for("trials"))
-    plans = c.execute("SELECT id,name,price_trial FROM plans WHERE active=1 "
-                      "ORDER BY id").fetchall()
+    ctx = _trial_form_ctx(c)
     c.close()
-    return render_template("trial_form.html", trial=None, plans=plans,
-                           today=date.today().strftime("%Y-%m-%d"))
+    return render_template("trial_form.html", trial=None, **ctx)
 
 
 @app.route("/trials/<tid>/edit", methods=["GET", "POST"])
@@ -2150,11 +2226,9 @@ def trial_edit(tid):
         c.close()
         flash(f"One-time order {tid} updated.", "ok")
         return redirect(url_for("trials"))
-    plans = c.execute("SELECT id,name,price_trial FROM plans WHERE active=1 "
-                      "ORDER BY id").fetchall()
+    ctx = _trial_form_ctx(c, trial)
     c.close()
-    return render_template("trial_form.html", trial=trial, plans=plans,
-                           today=date.today().strftime("%Y-%m-%d"))
+    return render_template("trial_form.html", trial=trial, **ctx)
 
 
 @app.route("/trials/<tid>/pay", methods=["POST"])
@@ -2281,13 +2355,13 @@ def revenue():
     period = request.args.get("period", "day")       # day | week | month
     months = core.monthly_breakdown(c)
     month_opts = [m["month"] for m in months]
+    monthly_rev = core.monthly_revenue(c)            # ACTUAL revenue (subs + trials) by month
     scope = request.args.get("month", "all")         # 'all' or a 'Mon-YYYY' label
-    if scope not in month_opts:
+    if scope not in set(month_opts) | {m["month"] for m in monthly_rev}:
         scope = "all"
 
     stats = core.headline_stats(c)
     outstanding = core.outstanding_detail(c)         # itemised 'to collect' drill-down
-    monthly_rev = core.monthly_revenue(c)            # ACTUAL revenue (subs + trials) by month
     _, _, earned = core.daily_view(c)                # all-time delivered ESTIMATE (day/week only)
     by_plan = c.execute(
         "SELECT plan_name, COUNT(*) n, COALESCE(SUM(total_amount),0) amt, "
@@ -2296,7 +2370,27 @@ def revenue():
     # Collection rate against true revenue (subscriptions + trials).
     collected = (stats["received_all"] / stats["overall"] * 100) if stats["overall"] else 0
     this_month = core.month_label_iso()
-    cur = next((m for m in monthly_rev if m["month"] == this_month), None)
+    # The big green box shows the month being LOOKED AT — the one picked in the
+    # month filter, or this month when none is picked. It used to be hard-wired to
+    # this month, so choosing August changed every table on the page except the
+    # one box he actually reads.
+    hero_month = scope if scope != "all" else this_month
+    cur = next((m for m in monthly_rev if m["month"] == hero_month), None)
+    nav = sorted(set(month_opts) | {m["month"] for m in monthly_rev} | {this_month},
+                 key=core._mkey)
+    i = nav.index(hero_month)
+    rev_months = [m["month"] for m in monthly_rev]
+    j = rev_months.index(hero_month) if hero_month in rev_months else -1
+    hero = {
+        "month": hero_month,
+        "label": datetime.strptime(hero_month, "%b-%Y").strftime("%B %Y"),
+        "is_current": hero_month == this_month,
+        "prev": nav[i - 1] if i > 0 else None,
+        "next": nav[i + 1] if i + 1 < len(nav) else None,
+        # growth is measured against the month before it in the revenue list
+        "vs": ("last month" if hero_month == this_month
+               else (rev_months[j - 1] if j > 0 else "previous month")),
+    }
 
     # Month-scoped data for the charts + tables (day & week views honour the scope).
     days, _, earned_scope = core.daily_view(c, limit=999, month=scope)
@@ -2331,7 +2425,7 @@ def revenue():
     c.close()
     return render_template("revenue.html", months=months, weeks=weeks, days=days,
                            earned=earned, stats=stats, by_plan=by_plan, period=period,
-                           collected=collected, cur=cur, this_month=this_month,
+                           collected=collected, cur=cur, this_month=this_month, hero=hero,
                            subs_days=subs_days, subs_weeks=subs_weeks,
                            subs_months=subs_months, subs_map=subs_map,
                            subs_week_map=subs_week_map, subs_month_map=subs_month_map,
@@ -2470,6 +2564,8 @@ def trial_delete(tid):
     # rather than leave it dangling at a row that no longer exists.
     c.execute("UPDATE leads SET trial_id=NULL WHERE trial_id=?", (tid,))
     c.execute("DELETE FROM deliveries WHERE trial_id=?", (tid,))
+    # its box goes too — the next order to reuse this id must not inherit it
+    c.execute("DELETE FROM trial_components WHERE trial_id=?", (tid,))
     c.execute("DELETE FROM trial_orders WHERE id=?", (tid,))
     c.commit()
     c.close()
@@ -3135,6 +3231,8 @@ def menu_component():
         used = (c.execute("SELECT 1 FROM subscription_components WHERE component_id=? LIMIT 1",
                           (cid,)).fetchone()
                 or c.execute("SELECT 1 FROM plan_components WHERE component_id=? LIMIT 1",
+                             (cid,)).fetchone()
+                or c.execute("SELECT 1 FROM trial_components WHERE component_id=? LIMIT 1",
                              (cid,)).fetchone())
         if used:
             c.execute("UPDATE components SET active=0 WHERE id=?", (cid,))

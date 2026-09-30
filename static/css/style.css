@@ -731,6 +731,16 @@ tr.rowlink:hover{background:var(--cream)}
 .month-hero .mh-n{font-size:.68rem; color:#a9d6bf}
 .month-hero .growth.up{color:var(--lime-e)} .month-hero .growth.down{color:#ffb3a8}
 .month-hero .btn-forest{background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.2)}
+/* ‹ month › — the hero follows whichever month is being looked at */
+.month-hero .mh-top{flex-wrap:wrap}
+.month-hero .mh-arrow{width:34px; height:34px; flex:none; display:inline-flex; align-items:center;
+  justify-content:center; border-radius:10px; font-size:1.3rem; font-weight:700; line-height:1;
+  color:#fff; text-decoration:none; background:rgba(255,255,255,.12);
+  border:1px solid rgba(255,255,255,.22)}
+.month-hero .mh-arrow:hover{background:rgba(255,255,255,.22)}
+.month-hero .mh-arrow.is-off{opacity:.3; pointer-events:none}
+.month-hero .mh-today{font-size:.74rem; font-weight:700; color:var(--lime-e); text-decoration:none;
+  padding:6px 10px; border-radius:999px; border:1px solid rgba(197,232,75,.4)}
 
 /* Food vs delivery split strip */
 .split-strip{display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:13px; padding:10px 12px;
@@ -861,6 +871,14 @@ tr.rowlink:hover{background:var(--cream)}
   background:var(--cream); font-size:1.05rem; font-weight:800; color:var(--forest);
   cursor:pointer; font-family:inherit}
 .stepper button:active{background:var(--sage)}
+/* one-time order box: the amount is typeable ("300" g), not only tappable */
+.qtybox{display:inline-flex; align-items:baseline; justify-content:center; gap:3px; min-width:74px}
+.qtybox input{width:54px; padding:5px 4px; text-align:right; border:1px solid var(--line);
+  border-radius:8px; font:inherit; font-size:.9rem; font-weight:700; color:var(--forest); background:#fff}
+.qtybox em{font-style:normal; font-size:.74rem; color:var(--muted)}
+.b-del{flex:none; border:none; background:none; color:var(--muted); font-size:1rem;
+  padding:4px 6px; cursor:pointer; font-family:inherit}
+.b-del:hover{color:var(--danger)}
 
 /* item picker sheet */
 .sheet{position:fixed; inset:0; background:rgba(0,25,18,.45); z-index:80; display:flex;

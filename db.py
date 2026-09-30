@@ -255,6 +255,20 @@ CREATE TABLE IF NOT EXISTS component_rules (
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
 );
 
+-- What goes in ONE box of a one-time order, when he builds it himself ("Custom
+-- pack, 300g chicken") or changes a standard pack. No rows = the order simply
+-- cooks the recipe of the pack it is set to, which is what every order before
+-- this table did. Deliberately no foreign key to trial_orders: that row is saved
+-- with INSERT OR REPLACE, which deletes and re-inserts it on every edit, and a
+-- key would either block the edit or cascade and wipe the box.
+CREATE TABLE IF NOT EXISTS trial_components (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    trial_id     TEXT NOT NULL,
+    component_id INTEGER NOT NULL,
+    qty          REAL NOT NULL DEFAULT 1,
+    note         TEXT
+);
+
 -- ===================== INVOICES =====================
 -- items is a JSON list of {desc, qty, unit, amount}. token makes the private
 -- customer-facing link (/i/<token>) unguessable without needing a login.
@@ -567,6 +581,7 @@ CREATE INDEX IF NOT EXISTS idx_variants_sub ON subscription_variants(subscriptio
 CREATE INDEX IF NOT EXISTS idx_sub_comps      ON subscription_components(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_plan_comps     ON plan_components(plan_id);
 CREATE INDEX IF NOT EXISTS idx_comp_rules_sub ON component_rules(subscription_id);
+CREATE INDEX IF NOT EXISTS idx_trial_comps    ON trial_components(trial_id);
 CREATE INDEX IF NOT EXISTS idx_notif_read     ON notifications(is_read);
 
 CREATE INDEX IF NOT EXISTS idx_deliveries_date ON deliveries(date);

@@ -1416,11 +1416,31 @@ def delivered_detail(conn, period, key):
 
 
 # ---------------------------------------------------------------------------
-# Delete + renumber subscriptions
+# Delete subscriptions (renumbering is kept for manual use only)
 # ---------------------------------------------------------------------------
 def _sub_num(sid):
     digits = "".join(ch for ch in str(sid) if ch.isdigit())
     return int(digits) if digits else 0
+
+
+# Every table that carries a subscription_id, split by what a delete does to it.
+# OWNED rows are part of the pack (its orders, contents, boxes, schedule) and go
+# with it. HISTORY rows are records of something that happened — an invoice, a
+# won lead, a customer's skip request — so they stay and are only unlinked.
+# The list used to be written out inside each function and stopped at the tables
+# that existed in June; subscription_variants and subscription_day_plan (August)
+# were never added, so every delete of a pack that had them hit "FOREIGN KEY
+# constraint failed" (Nivitha's duplicate renewal, 30 Sep). test_sub_delete.py
+# fails if a table with a subscription_id column is missing from both.
+SUB_OWNED_TABLES = ("deliveries", "subscription_pauses", "subscription_slot_moves",
+                    "subscription_components", "component_rules",
+                    "subscription_variants", "subscription_day_plan")
+SUB_HISTORY_TABLES = ("invoices", "leads", "skip_requests")
+
+
+def _tables_present(conn, names):
+    have = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    return [t for t in names if t in have]
 
 
 def resequence_subscriptions(conn):
@@ -1445,8 +1465,7 @@ def resequence_subscriptions(conn):
     conn.execute("PRAGMA foreign_keys=OFF")
     try:
         # every table that references subscriptions.id moves in lock-step
-        CHILD_TABLES = ("deliveries", "subscription_pauses", "subscription_slot_moves",
-                        "subscription_components", "component_rules", "invoices")
+        CHILD_TABLES = _tables_present(conn, SUB_OWNED_TABLES + SUB_HISTORY_TABLES)
         for i, old in enumerate(ordered):          # pass 1: park everything in temp space
             tmp = f"__SEQ_{i}"
             for t in CHILD_TABLES:
@@ -1465,22 +1484,43 @@ def resequence_subscriptions(conn):
 
 def delete_subscription(conn, sid):
     """
-    Remove a subscription and its delivery rows, then renumber the rest so the IDs
-    stay gap-free. Returns True if something was deleted.
+    Remove a subscription with everything that belongs to it. Returns True if
+    something was deleted. All-or-nothing: on any error nothing is removed.
+
+    The other packs are NOT renumbered any more. Closing the gap meant deleting
+    one duplicate quietly changed the id of every pack after it (29 of them at the
+    time, because S085 was already missing) — ids he knows packs by. A gap costs
+    nothing; the next new pack still takes the highest number + 1.
     """
     if not conn.execute("SELECT 1 FROM subscriptions WHERE id=?", (sid,)).fetchone():
         return False
-    conn.execute("DELETE FROM deliveries WHERE subscription_id=?", (sid,))
-    conn.execute("DELETE FROM subscription_pauses WHERE subscription_id=?", (sid,))
-    conn.execute("DELETE FROM subscription_slot_moves WHERE subscription_id=?", (sid,))
-    conn.execute("DELETE FROM subscription_components WHERE subscription_id=?", (sid,))
-    conn.execute("DELETE FROM component_rules WHERE subscription_id=?", (sid,))
-    # invoices stay (they're financial history) but stop pointing at a dead id
-    conn.execute("UPDATE invoices SET subscription_id=NULL WHERE subscription_id=?", (sid,))
-    conn.execute("DELETE FROM subscriptions WHERE id=?", (sid,))
-    conn.commit()
-    resequence_subscriptions(conn)
+    try:
+        for t in _tables_present(conn, SUB_OWNED_TABLES):
+            conn.execute(f"DELETE FROM {t} WHERE subscription_id=?", (sid,))
+        # invoices, leads and skip requests are history: they stay, unlinked
+        for t in _tables_present(conn, SUB_HISTORY_TABLES):
+            conn.execute(f"UPDATE {t} SET subscription_id=NULL WHERE subscription_id=?", (sid,))
+        conn.execute("DELETE FROM subscriptions WHERE id=?", (sid,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return True
+
+
+def recent_twin_subscription(conn, customer_id, plan_name, slot, start_date, minutes=15):
+    """A pack identical to the one about to be created, made in the last few
+    minutes — i.e. the same form submitted twice. Nivitha's renewal went in twice
+    30 seconds apart on 29 Sep (S113 + S114), most likely a second tap while the
+    first save was still loading on the phone. Returns that pack's row or None."""
+    if not customer_id:
+        return None
+    since = (datetime.now() - timedelta(minutes=minutes)).strftime("%Y-%m-%d %H:%M:%S")
+    return conn.execute(
+        "SELECT * FROM subscriptions WHERE customer_id=? AND COALESCE(plan_name,'')=? "
+        "AND COALESCE(slot,'')=? AND COALESCE(start_date,'')=? AND created_at >= ? "
+        "ORDER BY created_at DESC LIMIT 1",
+        (customer_id, plan_name or "", slot or "", start_date or "", since)).fetchone()
 
 
 def trials_by_month(conn):

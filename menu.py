@@ -181,6 +181,27 @@ def save_sub_composition(conn, sub_id, base_items, addon_items, variant_id=None)
 
 
 # ---------------------------------------------------------------------------
+# One-time orders — what goes in their box
+# ---------------------------------------------------------------------------
+def trial_composition(conn, trial_id):
+    """The box of one one-time order, as he built it. Empty = it cooks the recipe
+    of the pack it is set to (every order saved before this existed)."""
+    return conn.execute(
+        "SELECT tc.*, c.name, c.unit, c.step, c.emoji, c.protein, c.addon_price "
+        "FROM trial_components tc JOIN components c ON c.id=tc.component_id "
+        "WHERE tc.trial_id=? ORDER BY c.sort, tc.id", (trial_id,)).fetchall()
+
+
+def save_trial_composition(conn, trial_id, items):
+    """Replace one one-time order's box. Items = [(component_id, qty, note)]."""
+    conn.execute("DELETE FROM trial_components WHERE trial_id=?", (trial_id,))
+    for cid, qty, note in items:
+        conn.execute("INSERT INTO trial_components(trial_id,component_id,qty,note) "
+                     "VALUES(?,?,?,?)", (trial_id, cid, qty, note or None))
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
 # Variants — a named alternative box for one subscription
 # ---------------------------------------------------------------------------
 def variants_for_sub(conn, sub_id):
@@ -469,7 +490,8 @@ def order_items(conn, r, day_iso, cache=None, plan_cache=None):
     """What one order actually contains: ([items], label).
 
     Resolves a subscription's saved composition (with any weekday swap/add/remove
-    rules applied for this date) or, for a trial, the recipe of the pack it maps to.
+    rules applied for this date) or, for a one-time order, the box he built for it
+    — falling back to the recipe of the pack it maps to when he built none.
     Returns ([], label) when the order can't be decomposed — the caller must still
     show it, just without quantities.
 
@@ -499,6 +521,12 @@ def order_items(conn, r, day_iso, cache=None, plan_cache=None):
     elif r["trial_id"]:
         t = conn.execute("SELECT * FROM trial_orders WHERE id=?", (r["trial_id"],)).fetchone()
         label = "ONE-TIME · " + ((t["order_text"] if t else None) or "One-time order")
+        # A box he built himself ("Custom, 300g chicken") wins over any pack recipe.
+        own = [{"component_id": x["component_id"], "name": x["name"], "unit": x["unit"],
+                "step": x["step"], "emoji": x["emoji"], "qty": x["qty"], "note": x["note"]}
+               for x in trial_composition(conn, r["trial_id"])] if t else []
+        if own:
+            return own, label
         pid = t["plan_id"] if t else None
         if not pid and t:
             p = match_plan(conn, t["order_text"])

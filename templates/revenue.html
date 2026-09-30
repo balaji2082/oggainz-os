@@ -4,18 +4,28 @@
 <div class="page-head"><h1>Revenue</h1><span class="spacer"></span>
   <a class="btn btn-ghost btn-sm" href="{{ url_for('export') }}">⬇ Export Excel</a></div>
 
-{# ===================== THIS MONTH — the headline ===================== #}
+{# ============ THE MONTH BEING LOOKED AT — the headline ============
+   Follows the month filter (and its own ‹ › arrows). This month when nothing
+   is picked. `cur` is that month's row from monthly_revenue. #}
 <div class="card month-hero">
   <div class="mh-top">
-    <span class="mh-label">This month · {{ cur.month if cur else this_month }}</span>
+    {% if hero.prev %}<a class="mh-arrow" href="{{ url_for('revenue', period=period, month=hero.prev) }}"
+       aria-label="Previous month">‹</a>{% else %}<span class="mh-arrow is-off" aria-hidden="true">‹</span>{% endif %}
+    <span class="mh-label">{{ 'This month · ' if hero.is_current }}{{ hero.label }}</span>
+    {% if hero.next %}<a class="mh-arrow" href="{{ url_for('revenue', period=period, month=hero.next) }}"
+       aria-label="Next month">›</a>{% else %}<span class="mh-arrow is-off" aria-hidden="true">›</span>{% endif %}
     <span class="spacer"></span>
-    {% if cur and cur.growth is not none %}
-    <span class="growth {{ 'up' if cur.growth>=0 else 'down' }}">
-      {{ '▲' if cur.growth>=0 else '▼' }} {{ (cur.growth*100)|round(0,'floor')|int|abs }}% vs last month</span>
+    {% if not hero.is_current %}
+    <a class="mh-today" href="{{ url_for('revenue', period=period) }}">This month ›</a>
     {% endif %}
   </div>
   <div class="mh-figure">{{ cur.revenue|inr if cur else '₹0' }}</div>
-  <div class="mh-cap">revenue billed this month (subscriptions + trials)</div>
+  <div class="mh-cap">revenue billed in {{ hero.label }} (subscriptions + one-time)
+    {% if cur and cur.growth is not none %}
+    · <span class="growth {{ 'up' if cur.growth>=0 else 'down' }}">
+      {{ '▲' if cur.growth>=0 else '▼' }} {{ (cur.growth*100)|round(0,'floor')|int|abs }}% vs {{ hero.vs }}</span>
+    {% endif %}
+  </div>
 
   <div class="mh-stats">
     <div class="mh-stat">
@@ -34,15 +44,17 @@
       <span class="mh-n">{{ cur.deliv_meals if cur else 0 }} meal{{ 's' if not cur or cur.deliv_meals!=1 }}</span>
     </div>
   </div>
-  {% if cur and (cur.sub_delivery or cur.deliv_delivery) %}
+  {% if cur and cur.revenue %}
   <div class="split-strip">
     <span>🍱 Food sold <b>{{ (cur.sub_food + cur.trial_value)|inr }}</b></span>
     <span>🛵 Delivery <b>{{ cur.sub_delivery|inr }}</b></span>
+    <span>✅ Collected <b>{{ cur.received|inr }}</b></span>
+    {% if cur.revenue > cur.received %}<span>⏳ To collect <b>{{ (cur.revenue - cur.received)|inr }}</b></span>{% endif %}
   </div>
   {% endif %}
   <a class="btn btn-forest btn-sm btn-block" style="margin-top:12px"
-     href="{{ url_for('revenue', period='day', month=cur.month if cur else this_month) }}">
-    Open this month, day by day ›</a>
+     href="{{ url_for('revenue', period='day', month=hero.month) }}">
+    Open {{ hero.label }}, day by day ›</a>
 </div>
 
 {# ===================== Tap-to-open detail boxes ===================== #}
@@ -326,7 +338,7 @@
     <div class="small muted">subscriptions + trials sold · tap a bar to open that month</div></div></div>
   <div class="daychart daychart-tall">
     {% for m in monthly_rev %}
-    <a class="col {{ 'peak' if m.revenue==maxv }}" href="{{ url_for('revenue', period='day', month=m.month) }}"
+    <a class="col {{ 'peak' if m.revenue==maxv }} {{ 'sel' if scope != 'all' and m.month==hero.month }}" href="{{ url_for('revenue', period='day', month=m.month) }}"
        style="--h:{{ (100*m.revenue/maxv)|round(0,'floor')|int }}%">
       <span class="col-val">{{ m.revenue|inr }}</span>
       <span class="col-bar"><i></i></span>

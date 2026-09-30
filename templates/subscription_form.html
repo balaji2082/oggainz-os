@@ -362,7 +362,18 @@ document.getElementById('picker').addEventListener('click', e => {
 function packComp(){
   document.getElementById('comp_json').value = JSON.stringify(rows);
 }
-document.getElementById('subform').addEventListener('submit', packComp);
+// One tap, one pack: a second tap while a slow connection is still saving is
+// how Nivitha's renewal was created twice. The label is restored when the phone's
+// back button brings the page back from its cache.
+const saveBtn = document.querySelector('#subform .form-actions .btn-primary');
+const saveLabel = saveBtn ? saveBtn.textContent : '';
+document.getElementById('subform').addEventListener('submit', function () {
+  packComp();
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+});
+window.addEventListener('pageshow', function () {
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = saveLabel; }
+});
 
 function feeHint(){
   const fee = parseFloat(document.getElementById('f_fee').value) || 0;

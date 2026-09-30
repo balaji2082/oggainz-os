@@ -456,8 +456,8 @@
   </div>
 
   <div class="danger-zone">
-    <div class="small muted">Created by mistake? Deleting removes this subscription and its meal
-      history, then renumbers the rest so the IDs stay gap-free.</div>
+    <div class="small muted">Created by mistake? Deleting removes this subscription with its
+      meal history, boxes and schedule. Every other pack keeps its ID.</div>
     <form method="post" action="{{ url_for('subscription_delete', sid=sub.id) }}"
           onsubmit="return confirm('Delete this subscription for {{ sub.customer_name|e }} ({{ sub.id }})?\n\nThis removes its delivery history and cannot be undone. A backup is saved first.');">
       <button class="btn btn-danger btn-sm">🗑 Delete subscription</button></form>

@@ -5,7 +5,8 @@
   <a class="btn btn-ghost btn-sm" href="{{ url_for('trials') }}">‹ Cancel</a>
   <h1 style="margin:0 0 0 6px">{{ 'Edit one-time order' if trial else 'New one-time order' }}</h1>
 </div>
-<form method="post" class="card">
+<form method="post" class="card" id="trialform">
+  <input type="hidden" name="comp_json" id="comp_json">
   <div class="form-grid">
     <div><label>Booking date</label><input name="date" type="date" value="{{ trial.date if trial else today }}"></div>
     <div><label>Name</label><input name="name" value="{{ trial.name if trial }}" required {{ '' if trial else 'autofocus' }}></div>
@@ -24,14 +25,24 @@
              value="{{ trial.amount if trial else 0 }}">
       <div class="small muted" id="pricehint" style="margin-top:4px"></div></div>
 
-    <div class="full"><label>Order</label><input name="order_text" value="{{ trial.order_text if trial }}" placeholder="Elite Meal Pack…"></div>
+    <div class="full"><label>Order</label><input name="order_text" id="order_text" value="{{ trial.order_text if trial }}" placeholder="Elite Meal Pack…"></div>
     <div class="full"><label>Pack (for the prep list)</label>
       <select name="plan_id" id="plan">
         <option value="">— not set (prep list shows it separately) —</option>
         {% for p in plans %}<option value="{{ p.id }}" data-price="{{ p.price_trial or 0 }}"
           {{ 'selected' if trial and trial.plan_id==p.id }}>{{ p.name }}</option>{% endfor %}
       </select>
-      <div class="small muted" style="margin-top:6px">Picking the pack lets the prep list count this order's chicken/eggs/carbs automatically — multiplied by the number of meals.</div></div>
+      <div class="small muted" style="margin-top:6px">Picking a pack fills the box below with its usual items. Pick <b>Custom Meal Pack</b> to build the box yourself.</div></div>
+
+    {# The box itself. A standard pack arrives pre-filled and every amount can be
+       changed; a custom pack starts empty. Whatever is here is what the prep list
+       and the rider sheet count -- times the number of meals above. #}
+    <div class="full">
+      <label>🍱 In each box <span class="muted small">(what the kitchen cooks — tap ＋/− or type the amount)</span></label>
+      <div class="builder" id="box_rows"></div>
+      <button type="button" class="btn btn-ghost btn-sm" id="box_add" style="margin-top:8px">＋ Add item</button>
+      <div class="small muted" id="box_hint" style="margin-top:6px"></div>
+    </div>
 
     <div><label>Payment status</label>
       <select name="payment_status">
@@ -115,7 +126,11 @@ It leaves the day's orders as well. A backup is taken first.');">
 
   function update() {
     var unit = unitPrice();
-    if (!unit) { hint.textContent = 'Pick a pack to see the usual price.'; return; }
+    if (!unit) {
+      hint.textContent = plan.value ? 'No set price for this pack — type what you charged.'
+                                    : 'Pick a pack to see the usual price.';
+      return;
+    }
     var n = boxes(), suggested = unit * n;
     var cur = parseFloat(amount.value || 0) || 0;
     if (!cur || (lastSuggested !== null && cur === lastSuggested)) {
@@ -134,6 +149,184 @@ It leaves the day's orders as well. A backup is taken first.');">
     say(unit, n, unit * n);
   });
   update();
+})();
+</script>
+
+<!-- item picker sheet -->
+<div class="sheet" id="picker" hidden>
+  <div class="sheet-card">
+    <div class="card-title"><h3>Add item to the box</h3><span class="spacer"></span>
+      <button type="button" class="btn btn-ghost btn-sm" id="picker_close">✕</button></div>
+    <div id="picker_rows"></div>
+  </div>
+</div>
+
+<script>
+/* The box builder. `box` is ONE box of this order: [{id, qty, note}]. Picking a
+   pack loads its usual items; every amount stays editable, so "Elite but 200g
+   chicken" and "Custom: 300g chicken + rice" are both just edits here. The form
+   posts the box as comp_json and the prep list cooks it x the number of meals. */
+(function () {
+  var MENU = {{ menu_data|tojson }};
+  var COMP = {}, RECIPE = {};
+  MENU.components.forEach(function (c) { COMP[c.id] = c; });
+  Object.keys(MENU.plans).forEach(function (n) {
+    var p = MENU.plans[n];
+    RECIPE[p.id] = { name: n, items: p.recipe || [] };
+  });
+  var box = {{ existing_box|tojson }};
+
+  var plan = document.getElementById('plan');
+  var qty = document.getElementById('qty');
+  var orderText = document.getElementById('order_text');
+  var rowsEl = document.getElementById('box_rows');
+  var hintEl = document.getElementById('box_hint');
+  var picker = document.getElementById('picker');
+  var shownPlan = plan.value;          // the pack whose items are in the box now
+
+  function unitWord(u, q) {
+    if (u === 'g') return 'g';
+    if (u === 'pcs') return q == 1 ? 'pc' : 'pcs';
+    return q == 1 ? 'serving' : 'servings';
+  }
+  function fmt(q, u) {
+    q = Math.round(q * 100) / 100;
+    return q + (u === 'g' ? 'g' : ' ' + unitWord(u, q));
+  }
+  function stepOf(c) { return (c.unit === 'g') ? (c.step || 50) : (c.step || 1); }
+  function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+  function recipeCopy(pid) {
+    var r = RECIPE[pid];
+    return r ? r.items.map(function (x) { return { id: x.id, qty: x.qty, note: x.note || '' }; }) : [];
+  }
+  function sameAs(a, b) {
+    var key = function (l) { return l.map(function (x) { return x.id + ':' + (+x.qty); }).sort().join('|'); };
+    return key(a) === key(b);
+  }
+
+  function render() {
+    rowsEl.innerHTML = '';
+    box.forEach(function (r, i) {
+      var c = COMP[r.id] || { name: 'Item #' + r.id, unit: 'serving', step: 1, emoji: '🍽️' };
+      var div = document.createElement('div');
+      div.className = 'b-row';
+      div.innerHTML =
+        '<span class="b-emoji">' + (c.emoji || '🍽️') + '</span>' +
+        '<span class="b-name">' + esc(c.name) +
+        '  <input class="b-note" placeholder="note (e.g. scrambled)" value="' + esc(r.note) + '"></span>' +
+        '<span class="stepper">' +
+        '  <button type="button" data-d="-1" aria-label="Less">−</button>' +
+        '  <span class="qtybox"><input class="b-qty" type="number" inputmode="decimal" min="0" step="any"' +
+        '     value="' + (Math.round(r.qty * 100) / 100) + '" aria-label="' + esc(c.name) + ' amount">' +
+        '  <em>' + unitWord(c.unit, r.qty) + '</em></span>' +
+        '  <button type="button" data-d="1" aria-label="More">＋</button>' +
+        '</span>' +
+        '<button type="button" class="b-del" aria-label="Remove ' + esc(c.name) + '">✕</button>';
+      div.querySelector('.b-note').addEventListener('input', function (e) { r.note = e.target.value; });
+      var q = div.querySelector('.b-qty');
+      q.addEventListener('input', function () {          // live, without redrawing mid-typing
+        var v = parseFloat(q.value);
+        if (v > 0) { r.qty = v; hint(); }
+      });
+      q.addEventListener('change', function () {
+        var v = parseFloat(q.value);
+        if (!(v > 0)) box.splice(box.indexOf(r), 1); else r.qty = v;
+        render();
+      });
+      div.querySelectorAll('.stepper button').forEach(function (b) {
+        b.addEventListener('click', function () {
+          r.qty = Math.round((r.qty + (+b.dataset.d) * stepOf(c)) * 100) / 100;
+          if (r.qty <= 0) box.splice(box.indexOf(r), 1);
+          render();
+        });
+      });
+      div.querySelector('.b-del').addEventListener('click', function () {
+        box.splice(box.indexOf(r), 1);
+        render();
+      });
+      rowsEl.appendChild(div);
+    });
+    if (!box.length) {
+      rowsEl.innerHTML = '<div class="empty small" style="padding:10px">' +
+        (plan.value ? 'Nothing in the box yet — tap “＋ Add item”.'
+                    : 'Pick a pack above, or add items for a custom box.') + '</div>';
+    }
+    hint();
+  }
+
+  function hint() {
+    var n = Math.max(1, parseInt(qty.value || 1, 10) || 1);
+    if (!box.length) {
+      hintEl.textContent = 'An empty box is not counted on the prep list.';
+      return;
+    }
+    if (n === 1) { hintEl.textContent = ''; return; }
+    hintEl.textContent = '× ' + n + ' meals → the kitchen cooks ' + box.map(function (r) {
+      var c = COMP[r.id]; return c ? c.name + ' ' + fmt(r.qty * n, c.unit) : '';
+    }).filter(Boolean).join(', ') + '.';
+  }
+
+  plan.addEventListener('change', function () {
+    var prev = RECIPE[shownPlan];
+    var next = recipeCopy(plan.value);
+    // A pack with no set items (Custom) keeps whatever is in the box as the
+    // starting point. A real pack replaces it — asking first if he changed it.
+    if (next.length) {
+      var edited = box.length && !sameAs(box, recipeCopy(shownPlan));
+      if (!edited || confirm('Replace the items in the box with the ' +
+          RECIPE[plan.value].name + ' items?')) {
+        box = next;
+      }
+    }
+    // the Order line follows the pack, unless he has typed his own wording
+    var typed = (orderText.value || '').trim();
+    if (RECIPE[plan.value] && (!typed || (prev && typed === prev.name))) {
+      orderText.value = RECIPE[plan.value].name;
+    }
+    shownPlan = plan.value;
+    render();
+  });
+  qty.addEventListener('input', hint);
+
+  // ---- picker ----
+  document.getElementById('box_add').addEventListener('click', function () {
+    var wrap = document.getElementById('picker_rows');
+    wrap.innerHTML = '';
+    MENU.components.forEach(function (c) {
+      if (c.hidden) return;
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'pick-row';
+      b.innerHTML = '<span class="b-emoji">' + (c.emoji || '🍽️') + '</span><b>' + esc(c.name) +
+        '</b><span class="muted small">' + esc(c.protein || '') + '</span><span class="spacer"></span>＋';
+      b.addEventListener('click', function () {
+        var ex = box.find(function (x) { return x.id === c.id; });
+        if (ex) ex.qty = Math.round((ex.qty + stepOf(c)) * 100) / 100;
+        else box.push({ id: c.id, qty: c.default_qty || 1, note: '' });
+        picker.hidden = true;
+        render();
+      });
+      wrap.appendChild(b);
+    });
+    picker.hidden = false;
+  });
+  document.getElementById('picker_close').addEventListener('click', function () { picker.hidden = true; });
+  picker.addEventListener('click', function (e) { if (e.target === picker) picker.hidden = true; });
+
+  // ---- save: send the box, and one tap = one order ----
+  var form = document.getElementById('trialform');
+  var saveBtn = form.querySelector('.form-actions .btn-primary');
+  var saveLabel = saveBtn ? saveBtn.textContent : '';
+  form.addEventListener('submit', function () {
+    document.getElementById('comp_json').value = JSON.stringify(box.map(function (r) {
+      return { id: r.id, qty: r.qty, note: (r.note || '').trim() };
+    }));
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+  });
+  window.addEventListener('pageshow', function () {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = saveLabel; }
+  });
+
+  render();
 })();
 </script>
 {% endblock %}
