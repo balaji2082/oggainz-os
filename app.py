@@ -326,6 +326,33 @@ def more():
     return render_template("more.html")
 
 
+def _week_ctx(c, d):
+    """The week `d` sits in, for the week strip above the day arrows.
+
+    Balaji thinks in weeks and the screens only moved a day at a time, so a
+    Wednesday he never ticked last week could only be found by stepping back
+    seven times. The per-day counts are the point: an amber number on a past day
+    means orders that were never marked, and an unmarked order is a meal missing
+    from the pack count and money missing from the day.
+    """
+    monday = core.monday_of(d)
+    days = core.week_days(monday)
+    counts = core.week_counts(c, monday)
+    today_s = date.today().strftime("%Y-%m-%d")
+    return {
+        "week": [{"date": wd, "counts": counts[wd],
+                  "open": core.is_operating_day(c, wd),
+                  "is_sel": wd == d, "is_today": wd == today_s,
+                  "is_past": wd < today_s}
+                 for wd in days],
+        "week_range": f"{fmt_date(days[0], '%d %b')} – {fmt_date(days[6], '%d %b')}",
+        "wk_monday": monday,
+        "this_monday": core.monday_of(),
+        "prev_w": core.shift_week(d, -1),
+        "next_w": core.shift_week(d, 1),
+    }
+
+
 @app.route("/today")
 def today():
     c = conn()
@@ -343,6 +370,7 @@ def today():
     prep = menu.prep_for_day(c, d, rows=summary["rows"])   # detailed kitchen quantities
     backlog = menu.backlog(c, date.today().strftime("%Y-%m-%d"))
     ticks = {r["key"] for r in c.execute("SELECT key FROM prep_ticks WHERE date=?", (d,))}
+    week_ctx = _week_ctx(c, d)
     prev_d = (datetime.strptime(d, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
     next_d = (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
     # Address lists, so a customer with more than one can be switched for today.
@@ -361,7 +389,7 @@ def today():
     return render_template("today.html", d=d, s=summary, ending=ending, unpaid=unpaid,
                            prev_d=prev_d, next_d=next_d, view=view, override=override,
                            prep=prep, backlog=backlog, ticks=ticks, addr_map=addr_map,
-                           variant_map=variant_map, chase=chase,
+                           variant_map=variant_map, chase=chase, **week_ctx,
                            day_label=fmt_date(d, "%A, %d %b %Y"))
 
 
@@ -465,13 +493,14 @@ def deliveries():
     prev_d = (datetime.strptime(d, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
     next_d = (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
     variant_map = _variant_map(c, rows)
+    week_ctx = _week_ctx(c, d)
     c.close()
     # One line per BOX in the list. Routing and prep still work off `rows`, so a
     # two-box stop stays one ride and one porter fee -- only the list splits.
     rows = core.expand_boxes(rows)
     return render_template("deliveries.html", d=d, rows=rows, view=view, override=override,
                            operating=operating, prev_d=prev_d, next_d=next_d,
-                           variant_map=variant_map,
+                           variant_map=variant_map, **week_ctx,
                            day_label=fmt_date(d, "%A, %d %b %Y"))
 
 
@@ -500,10 +529,13 @@ def _save_schedule_from_form(c, sid, f, vmap=None):
     """Persist the delivery schedule the create/edit form submitted.
 
     The form posts `schedule_mode` plus, for 'weekly', one `day_active_<n>` per
-    ticked weekday with optional `day_slot_<n>` / `day_variant_<n>`. A form that
-    sends no schedule_mode at all (an old bookmark, or the CRM conversion flow)
-    leaves the subscription exactly as it was rather than silently resetting it
-    to daily.
+    ticked weekday with optional `day_slot_<n>` / `day_variant_<n>`, and
+    `effective_week` saying which week the plan belongs to. A form that sends no
+    schedule_mode at all (an old bookmark, or the CRM conversion flow) leaves the
+    subscription exactly as it was rather than silently resetting it to daily.
+
+    Returns the number of past orders the change brought back into the backlog,
+    which is 0 unless the plan was back-dated.
 
     `vmap` translates old variant ids to new ones when renewing: the prefilled
     form is rendered from the pack being copied, so the ids it posts belong to
@@ -513,7 +545,7 @@ def _save_schedule_from_form(c, sid, f, vmap=None):
     """
     mode = f.get("schedule_mode")
     if mode not in ("daily", "weekly", "ondemand"):
-        return
+        return 0
     c.execute("UPDATE subscriptions SET schedule_mode=? WHERE id=?", (mode, sid))
     c.commit()
     if mode == "weekly":
@@ -533,23 +565,61 @@ def _save_schedule_from_form(c, sid, f, vmap=None):
                          "variant_id": vid,
                          "meals": f.get(f"day_meals_{wd}") or 1,
                          "note": f.get(f"day_note_{wd}") or None})
-        # A schedule change takes effect TODAY and never reaches backwards. A pack
-        # that has already delivered or skipped something has a history to protect;
-        # one that hasn't has nothing behind it, so its plan simply applies from the
-        # start. Without this the new days were treated as always having been true,
-        # and the backfill generated orders on days the customer was never due.
+        # WHICH WEEK does this plan belong to? By default today, which never
+        # reaches backwards: a pack that has already delivered or skipped
+        # something has a history to protect, and one that hasn't has nothing
+        # behind it, so its plan simply applies from the start. Without that the
+        # new days were treated as always having been true and the backfill
+        # generated orders on days the customer was never due.
+        #
+        # `effective_week` lets Balaji say otherwise, because sometimes the days
+        # DID change and he is only entering it now — "she moved to Mon/Thu from
+        # last Monday". Then the correction has to land on last Monday or the
+        # week it describes stays wrong. See core.save_day_plan: a date files a
+        # new generation and leaves earlier ones alone.
         settled = c.execute(
             "SELECT 1 FROM deliveries WHERE subscription_id=? "
             "AND status IN ('Delivered','Skipped') LIMIT 1", (sid,)).fetchone()
-        core.save_day_plan(c, sid, rows,
-                           effective_from=core._today_iso() if settled else None)
+        eff = _schedule_effective_from(c, sid, f, settled)
+        core.save_day_plan(c, sid, rows, effective_from=eff)
     else:
         # daily and ondemand don't read the weekday grid; clear it so a later
         # switch back to weekly starts from a clean, visible state.
         c.execute("DELETE FROM subscription_day_plan WHERE subscription_id=?", (sid,))
         c.commit()
-    # Bring already-planned future orders in line with the new schedule.
-    core.resync_scheduled_days(c, sid)
+        eff = None
+    # Bring already-planned orders in line with the new schedule. A back-dated
+    # change reaches back to the week it was filed for; anything else stops at
+    # today, exactly as it always did.
+    core.resync_scheduled_days(c, sid, since=eff)
+    # And fill in the days the corrected plan says were due but were never
+    # entered — the whole point of back-dating one. They land as Pending in
+    # Today → Unmarked past orders, ready to tick.
+    return core.backfill_sub_days(c, sid) if eff and eff < core._today_iso() else 0
+
+
+def _schedule_effective_from(c, sid, f, settled):
+    """The date a submitted weekly plan takes effect, from the form's week choice.
+
+    Returns None for "the whole pack" (replace the history — right for a new pack
+    or one that has delivered nothing), otherwise an ISO date. An unrecognised or
+    missing value means today when the pack has settled days and None when it has
+    not, which is the behaviour every schedule edit had before the choice existed.
+    """
+    want = (f.get("effective_week") or "").strip()
+    if want == "pack":
+        return None
+    if want in ("last", "this", "next"):
+        monday = core.week_of(want)
+        sub = c.execute("SELECT start_date FROM subscriptions WHERE id=?", (sid,)).fetchone()
+        start = str(sub["start_date"] or "")[:10] if sub else ""
+        # A plan can't take effect before the pack existed. Clamping to the start
+        # date rather than refusing keeps "from last week" meaning something
+        # sensible for a pack that only began mid-week.
+        if start and monday < start:
+            return start if settled else None
+        return monday
+    return core._today_iso() if settled else None
 
 
 def _copy_pack_setup(c, from_sid, to_sid, skip_composition=False):
@@ -638,9 +708,33 @@ def _variant_map(c, rows):
 
 
 def _schedule_ctx(c, sid):
-    """Day plan + variants for the create/edit form and the detail card."""
+    """Day plan + variants + the week choices for the form and the detail card.
+
+    One place, because the weekday grid is rendered on three screens and a week
+    option that existed on one of them but not the others would be worse than
+    none at all.
+    """
+    sub = c.execute("SELECT * FROM subscriptions WHERE id=?", (sid,)).fetchone() if sid else None
+    weeks = []
+    for key, title in (("last", "Last week"), ("this", "This week"), ("next", "Next week")):
+        monday = core.week_of(key)
+        days = core.week_days(monday)
+        weeks.append({
+            "key": key, "title": title, "monday": monday,
+            # "Mon 13 – Sun 19 Oct" — he asked for the week named by its dates,
+            # because "last week" on a Monday morning is ambiguous and a date range
+            # never is.
+            "range": f"{fmt_date(days[0], '%d %b')} – {fmt_date(days[6], '%d %b')}",
+            # What the customer was actually down for during that week, so a
+            # correction is never made blind.
+            "was": core.schedule_summary_on(c, sub, monday) if sub else None,
+        })
     return {"day_plan": core.day_plan_for(c, sid) if sid else {},
             "variants": menu.variants_for_sub(c, sid) if sid else [],
+            "sched_weeks": weeks,
+            "sched_has_history": bool(sid and c.execute(
+                "SELECT 1 FROM deliveries WHERE subscription_id=? "
+                "AND status IN ('Delivered','Skipped') LIMIT 1", (sid,)).fetchone()),
             "weekday_names": core.WEEKDAY_NAMES}
 
 
@@ -2977,11 +3071,20 @@ def subscription_schedule(sid):
     c = conn()
     if not c.execute("SELECT 1 FROM subscriptions WHERE id=?", (sid,)).fetchone():
         c.close(); abort(404)
-    _save_schedule_from_form(c, sid, request.form)
+    added = _save_schedule_from_form(c, sid, request.form)
     sub = c.execute("SELECT * FROM subscriptions WHERE id=?", (sid,)).fetchone()
     summary = core.schedule_summary(c, sub)
     c.close()
-    flash(f"Schedule saved — {summary}.", "ok")
+    week = (request.form.get("effective_week") or "").strip()
+    when = {"last": " from last Monday", "this": " from this Monday",
+            "next": " from next Monday", "pack": " for the whole pack"}.get(week, "")
+    msg = f"Schedule saved{when} — {summary}."
+    if added:
+        # The reason he back-dated it. Say the number, because the point of the
+        # exercise is that these days were missing from the count.
+        msg += (f" {added} order{'' if added == 1 else 's'} from those days are now "
+                f"waiting in Today → Unmarked past orders.")
+    flash(msg, "ok")
     return redirect(url_for("subscription_detail", sid=sid))
 
 

@@ -1239,3 +1239,53 @@ tr.rowlink:hover{background:var(--cream)}
   .lossbar > div:first-child{flex-basis:110px; font-size:.78rem}
   .spendrow{flex-wrap:wrap}
 }
+
+/* ---------- Week navigation: whole weeks above the day arrows ---------- */
+.weeknav{display:flex; align-items:center; gap:10px; margin:-6px 0 10px; flex-wrap:wrap}
+.weeknav .wn-title{display:flex; flex-direction:column; line-height:1.2}
+.weeknav .wn-title b{font-size:.95rem; color:var(--forest); font-weight:800}
+.weeknav .wn-title em{font-style:normal; font-size:.72rem; color:var(--muted)}
+.weeknav .navbtn{width:34px; height:34px; border-radius:9px; border:1px solid var(--line);
+  background:#fff; display:flex; align-items:center; justify-content:center;
+  font-size:1.05rem; color:var(--forest); flex-shrink:0}
+.weeknav .navbtn:hover{background:var(--sage)}
+
+.weekstrip{display:flex; gap:6px; margin-bottom:14px}
+.weekstrip .wd{flex:1 1 0; min-width:0; display:flex; flex-direction:column; align-items:center;
+  gap:1px; padding:7px 2px 6px; border:1.5px solid var(--line); border-radius:var(--r-sm);
+  background:#fff; color:var(--ink); text-align:center}
+.weekstrip .wd b{font-size:.68rem; font-weight:700; color:var(--muted); text-transform:uppercase;
+  letter-spacing:.03em}
+.weekstrip .wd em{font-style:normal; font-size:1rem; font-weight:800; color:var(--forest)}
+.weekstrip .wd.shut{background:var(--cream); opacity:.6}
+.weekstrip .wd.now{border-color:var(--lime)}
+.weekstrip .wd.on{border-color:var(--forest); background:#f2fbf5; box-shadow:var(--shadow)}
+.weekstrip .wd.on b, .weekstrip .wd.on em{color:var(--forest)}
+.weekstrip .wd-n{font-style:normal; font-size:.66rem; font-weight:800; line-height:1;
+  padding:2px 5px; border-radius:999px; margin-top:2px}
+.weekstrip .wd-n.done{background:var(--sage); color:var(--forest)}
+.weekstrip .wd-n.open{background:#eaf4ee; color:var(--pine)}
+/* A past day with orders nobody ticked. The one thing the strip exists to show. */
+.weekstrip .wd-n.late{background:var(--orange); color:#fff}
+.weekstrip .wd-n.none{background:transparent; color:var(--line)}
+@media(max-width:420px){
+  .weekstrip{gap:4px}
+  .weekstrip .wd{padding:6px 1px 5px}
+  .weekstrip .wd em{font-size:.9rem}
+}
+
+/* ---------- "Which week does this apply from?" on the schedule editor ---------- */
+.sched-when{margin-top:14px; border-top:1px dashed var(--line); padding-top:12px}
+.sched-when .sw-head b{display:block; font-size:.86rem; color:var(--forest)}
+.sched-when .sw-head em{display:block; font-style:normal; font-size:.75rem; color:var(--muted);
+  margin:3px 0 9px; line-height:1.4}
+.sched-when .sw-opts{display:flex; flex-wrap:wrap; gap:7px}
+.sw-opt{flex:1 1 160px; cursor:pointer; position:relative}
+.sw-opt input{position:absolute; opacity:0; width:0; height:0}
+.sw-opt .sw-body{display:block; border:1.5px solid var(--line); border-radius:var(--r-sm);
+  padding:8px 10px; background:#fff; height:100%; transition:border-color .15s, background .15s}
+.sw-opt .sw-body b{display:block; font-size:.82rem; color:var(--forest)}
+.sw-opt .sw-body em{display:block; font-style:normal; font-size:.71rem; color:var(--muted);
+  margin-top:2px; line-height:1.35}
+.sw-opt input:checked + .sw-body{border-color:var(--forest); background:#f2fbf5}
+.sw-opt input:focus-visible + .sw-body{outline:2px solid var(--lime); outline-offset:2px}

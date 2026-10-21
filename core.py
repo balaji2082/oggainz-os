@@ -286,6 +286,69 @@ def delete_slot_move(conn, move_id):
 WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
+# ---------------------------------------------------------------------------
+# Weeks
+# ---------------------------------------------------------------------------
+# A kitchen week runs Monday to Sunday. Balaji thinks and talks in weeks — "last
+# week's Wednesday", "set her to Mon/Thu from next week" — so the screens and the
+# schedule editor both need to name a week the same way, from one place.
+def monday_of(day_iso=None):
+    """The Monday that opens the week containing `day_iso` (today if omitted)."""
+    d = (datetime.strptime(str(day_iso)[:10], "%Y-%m-%d").date()
+         if day_iso else date.today())
+    return (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
+
+
+def week_days(monday_iso):
+    """The seven ISO dates of the week starting at `monday_iso`."""
+    m = datetime.strptime(str(monday_iso)[:10], "%Y-%m-%d").date()
+    return [(m + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+
+
+def shift_week(day_iso, weeks):
+    """`day_iso` moved by whole weeks — the previous/next arrows."""
+    d = datetime.strptime(str(day_iso)[:10], "%Y-%m-%d").date()
+    return (d + timedelta(days=7 * weeks)).strftime("%Y-%m-%d")
+
+
+def week_of(which, today_iso=None):
+    """The Monday of 'last' | 'this' | 'next' week, relative to today.
+
+    One translation table for the words the schedule editor offers, so "next
+    week" can never mean one thing on the form and another in the handler.
+    """
+    base = monday_of(today_iso or _today_iso())
+    return {"last": shift_week(base, -1), "this": base,
+            "next": shift_week(base, 1)}.get(which)
+
+
+def week_counts(conn, monday_iso):
+    """Per-day order tallies for one week: {date: {total, done, skipped, pending}}.
+
+    Shown under the day arrows so a week with orders nobody ever ticked is
+    visible at a glance instead of only being found by stepping through the days.
+    An unticked past day is money and meal count both left uncounted.
+    """
+    days = week_days(monday_iso)
+    out = {d: {"total": 0, "done": 0, "skipped": 0, "pending": 0} for d in days}
+    rows = conn.execute(
+        "SELECT date, status, COALESCE(SUM(COALESCE(qty,1)),0) AS n FROM deliveries "
+        "WHERE date BETWEEN ? AND ? GROUP BY date, status", (days[0], days[-1])).fetchall()
+    for r in rows:
+        cell = out.get(r["date"])
+        if cell is None:
+            continue
+        n = int(r["n"] or 0)
+        cell["total"] += n
+        if r["status"] == "Delivered":
+            cell["done"] += n
+        elif r["status"] == "Skipped":
+            cell["skipped"] += n
+        else:
+            cell["pending"] += n
+    return out
+
+
 def schedule_mode(sub):
     """'daily' | 'weekly' | 'ondemand'. Anything unrecognised (or a row from
     before this shipped) means daily — the behaviour every pack has always had."""
@@ -421,22 +484,46 @@ def schedule_summary(conn, sub):
     return ", ".join(WEEKDAY_NAMES[wd] for wd in days)
 
 
-def resync_scheduled_days(conn, sub_id):
-    """After the schedule changes, bring FUTURE planned orders in line with it.
+def schedule_summary_on(conn, sub, day_iso):
+    """The one-line schedule as it stood ON a date — "Mon, Wed, Fri".
+
+    `schedule_summary` answers "what is the plan now". The schedule editor has to
+    answer a different question: what was she down for during the week I am about
+    to correct? Showing both side by side is what stops a back-dated edit being
+    made blind.
+    """
+    mode = schedule_mode(sub)
+    if mode == "daily":
+        return "Every kitchen day"
+    if mode == "ondemand":
+        return "On demand"
+    plan = day_plan_for(conn, sub["id"], day_iso)
+    days = [wd for wd in range(7) if plan.get(wd) is not None and plan[wd]["active"]]
+    return ", ".join(WEEKDAY_NAMES[wd] for wd in days) if days else "No delivery days"
+
+
+def resync_scheduled_days(conn, sub_id, since=None):
+    """After the schedule changes, bring PLANNED orders in line with it.
 
     Removes still-Pending rows on days the subscription no longer delivers, and
-    restamps the slot/box on the ones it keeps. Deliberately limited to today and
-    later, and to Pending rows: a delivered meal is history and is never rewritten
-    by a schedule edit. Hand-added extras are left alone — they were a decision.
+    restamps the slot/box on the ones it keeps. Only ever Pending rows: a
+    delivered or skipped meal is history and is never rewritten by a schedule
+    edit. Hand-added extras are left alone — they were a decision.
+
+    `since` is the first date to touch, and defaults to today, which is the only
+    thing an ordinary schedule edit should reach. A back-dated edit — "she moved
+    to Mon/Thu from last Monday and I never entered it" — passes that Monday, so
+    the days she was wrongly down for stop being owed. Still Pending only, so a
+    week that was already ticked off cannot be disturbed.
     """
     sub = conn.execute("SELECT * FROM subscriptions WHERE id=?", (sub_id,)).fetchone()
     if not sub:
         return 0
-    today_iso = _today_iso()
+    from_iso = since or _today_iso()
     removed = 0
     for r in conn.execute(
             "SELECT id, date FROM deliveries WHERE subscription_id=? AND status='Pending' "
-            "AND date>=? AND COALESCE(is_extra,0)=0", (sub_id, today_iso)).fetchall():
+            "AND date>=? AND COALESCE(is_extra,0)=0", (sub_id, from_iso)).fetchall():
         p = plan_for_day(conn, sub, r["date"])
         if not p["deliver"]:
             conn.execute("DELETE FROM deliveries WHERE id=?", (r["id"],))

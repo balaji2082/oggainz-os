@@ -1,0 +1,38 @@
+{# =========================================================================
+   Which week does this schedule belong to?
+
+   The plan is stored in generations stamped with the date they took effect, so
+   a change can land on a past week without rewriting what was delivered. This
+   is the control that lets Balaji say which one. It only appears once a pack
+   has delivered or skipped something — before that there is no history to
+   choose between and "the whole pack" is the only sensible answer.
+   ========================================================================= #}
+{% if sched_has_history %}
+<div class="sched-when" id="sched_when">
+  <div class="sw-head">
+    <b>Which week does this apply from?</b>
+    <em>Past meals already ticked never change. Picking a past week brings back
+      the orders that week was owed, so you can enter the ones you missed.</em>
+  </div>
+  <div class="sw-opts">
+    <label class="sw-opt">
+      <input type="radio" name="effective_week" value="today" checked>
+      <span class="sw-body"><b>From today</b><em>the usual — this week stays as it was</em></span>
+    </label>
+    {% for w in sched_weeks %}
+    <label class="sw-opt">
+      <input type="radio" name="effective_week" value="{{ w.key }}">
+      <span class="sw-body">
+        <b>{{ w.title }}</b>
+        <em>{{ w.range }}{% if w.was %} · was {{ w.was }}{% endif %}</em>
+      </span>
+    </label>
+    {% endfor %}
+    <label class="sw-opt">
+      <input type="radio" name="effective_week" value="pack">
+      <span class="sw-body"><b>The whole pack</b>
+        <em>as if it had always been these days — use only to fix a wrong setup</em></span>
+    </label>
+  </div>
+</div>
+{% endif %}

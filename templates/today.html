@@ -13,6 +13,8 @@
   {% if d != today %}<a class="btn btn-forest btn-sm" href="{{ url_for('today', view=view) }}">⟲ Today</a>{% endif %}
 </div>
 
+{{ m.week_nav('today', d, view, week, week_range, wk_monday, this_monday, prev_w, next_w) }}
+
 {% if ending or unpaid or chase %}
 <div class="alertbar">
   {% if chase %}

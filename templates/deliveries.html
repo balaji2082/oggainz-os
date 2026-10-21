@@ -14,6 +14,8 @@
   {% if d != today %}<a class="btn btn-forest btn-sm" href="{{ url_for('deliveries', view=view) }}">⟲ Today</a>{% endif %}
 </div>
 
+{{ m.week_nav('deliveries', d, view, week, week_range, wk_monday, this_monday, prev_w, next_w) }}
+
 {{ m.kitchen_control(d, operating, override, 'deliveries') }}
 {{ m.view_toggle('deliveries', d, view) }}
 

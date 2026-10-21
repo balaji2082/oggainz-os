@@ -192,3 +192,49 @@
   <a class="chip {{ 'chip-dinner' if view=='dinner' else 'chip-line' }}" href="{{ url_for(endpoint, d=d, view='dinner') }}">🌙 Dinner</a>
 </div>
 {% endmacro %}
+
+{# ---------------------------------------------------------------------------
+   The week strip: whole weeks at a time, above the day arrows.
+
+   Stepping a day at a time hid a week nobody entered — the only way to find a
+   Wednesday that was never ticked was to walk back seven days. This names the
+   week by its dates (never "last week", which is ambiguous on a Monday) and
+   puts a number on every day: amber means orders still waiting on a day that
+   has already passed, which is a meal missing from a pack count and money
+   missing from the day's total.
+   --------------------------------------------------------------------------- #}
+{% macro week_nav(endpoint, d, view, week, week_range, wk_monday, this_monday, prev_w, next_w) %}
+<div class="weeknav">
+  <a class="navbtn" href="{{ url_for(endpoint, d=prev_w, view=view) }}" title="Previous week">«</a>
+  <div class="wn-title">
+    <b>{{ week_range }}</b>
+    <em>{% if wk_monday == this_monday %}this week{% else %}week of {{ week[0].date|fdate('%d %b') }}{% endif %}</em>
+  </div>
+  <a class="navbtn" href="{{ url_for(endpoint, d=next_w, view=view) }}" title="Next week">»</a>
+  <div class="spacer"></div>
+  {% if wk_monday != this_monday %}
+  <a class="btn btn-ghost btn-sm" href="{{ url_for(endpoint, d=this_monday, view=view) }}">This week</a>
+  {% endif %}
+</div>
+
+<div class="weekstrip">
+  {% for w in week %}
+  <a class="wd {{ 'on' if w.is_sel }} {{ 'shut' if not w.open }} {{ 'now' if w.is_today }}"
+     href="{{ url_for(endpoint, d=w.date, view=view) }}">
+    <b>{{ w.date|fdate('%a') }}</b>
+    <em>{{ w.date|fdate('%d') }}</em>
+    {% if w.counts.total %}
+      {% if w.counts.pending and w.is_past %}
+        {# Orders left unmarked on a day that is already gone — the thing he
+           came here to find. #}
+        <i class="wd-n late">{{ w.counts.pending }}</i>
+      {% elif w.counts.pending %}
+        <i class="wd-n open">{{ w.counts.pending }}</i>
+      {% else %}
+        <i class="wd-n done">{{ w.counts.done }}</i>
+      {% endif %}
+    {% elif w.open %}<i class="wd-n none">–</i>{% endif %}
+  </a>
+  {% endfor %}
+</div>
+{% endmacro %}
